@@ -95,7 +95,7 @@ export const optional = (secret: Secret | undefined, source = "optional value") 
 export const config = (name: string) =>
   credential(
     Effect.gen(function* () {
-      const secret = yield* Config.option(Config.redacted(name))
+      const secret = yield* Config.option(Config.Redacted(name))
       if (Option.isSome(secret) && Redacted.value(secret.value) !== "") return secret.value
       return yield* Effect.fail(new MissingCredentialError(name, `${name} is not set`))
     }),
