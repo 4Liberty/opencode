@@ -23,11 +23,7 @@ export function withInitial<S extends Schema.ConstraintCodec<object, unknown>>(
   initial: NoInfer<S["Type"]>,
 ) {
   const schema = isMigrated(definition) ? definition.current : definition
-  const read = isMigrated(definition)
-    ? SchemaParser.decodeUnknownResult(
-        Schema.make<Schema.ConstraintDecoder<unknown>>(preserveExcess(definition.read.ast)),
-      )
-    : Result.succeed<unknown>
+  const read = isMigrated(definition) ? SchemaParser.decodeUnknownResult(definition.read) : Result.succeed<unknown>
   const encode = Schema.encodeUnknownSync(schema)
   return Schema.Unknown.pipe(
     Schema.decode<Schema.Unknown>({
@@ -40,43 +36,10 @@ export function withInitial<S extends Schema.ConstraintCodec<object, unknown>>(
   )
 }
 
-// Migration decoders must carry fields they do not know yet into the current schema. Effect 4.0
-// no longer exposes the parser-level `preserve` option, so make closed structs open recursively.
-function preserveExcess(ast: SchemaAST.AST): SchemaAST.AST {
-  const encoding = ast.encoding && preserveEncoding(ast.encoding)
-  const recurred = "recur" in ast && typeof ast.recur === "function" ? ast.recur(preserveExcess) : ast
-  const next = withEncoding(recurred, encoding)
-  if (next._tag !== "Objects") return next
-  const indexSignatures =
-    next.propertySignatures.length === 0 || next.indexSignatures.length > 0
-      ? next.indexSignatures
-      : [
-          new SchemaAST.IndexSignature(Schema.String.ast, Schema.Unknown.ast),
-          new SchemaAST.IndexSignature(Schema.Symbol.ast, Schema.Unknown.ast),
-        ]
-  return new SchemaAST.Objects(
-    next.propertySignatures,
-    indexSignatures,
-    next.annotations,
-    next.checks,
-    encoding,
-    next.context,
-    next.encodingChecks,
-  )
-}
-
-function preserveEncoding(encoding: SchemaAST.Encoding): SchemaAST.Encoding {
-  return [
-    new SchemaAST.Link(preserveExcess(encoding[0].to), encoding[0].transformation),
-    ...encoding.slice(1).map((link) => new SchemaAST.Link(preserveExcess(link.to), link.transformation)),
-  ]
-}
-
-function withEncoding(ast: SchemaAST.AST, encoding: SchemaAST.Encoding | undefined): SchemaAST.AST {
-  if (ast.encoding === encoding) return ast
-  const descriptors = Object.getOwnPropertyDescriptors(ast)
-  descriptors.encoding.value = encoding
-  return Object.create(Object.getPrototypeOf(ast), descriptors)
+// A legacy read shape declares only the fields it migrates. Decoding strips unknown keys, so every
+// struct level in a `migrate` read schema must stay open for the current fields it does not name.
+export function legacy<const Fields extends Schema.Struct.Fields>(fields: Fields) {
+  return Schema.StructWithRest(Schema.Struct(fields), [Schema.Record(Schema.String, Schema.Unknown)])
 }
 
 // Object-level codecs own their recovery. Plain structs can recover fields independently.
