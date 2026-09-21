@@ -1,4 +1,4 @@
-import { JsonPointer, Schema } from "effect"
+import { JsonPointer, Schema, SchemaAST } from "effect"
 import type { Tool, JsonSchema, SchemaType } from "./tool.js"
 
 const isEffectSchema = (schema: SchemaType): schema is Schema.Decoder<unknown> & Schema.Top => Schema.isSchema(schema)
@@ -203,7 +203,7 @@ const renderSchema = (
 export const toTypeScript = (schema: Schema.Top, decoded = false, pretty = false): string => {
   try {
     const visible = decoded ? Schema.toType(schema) : schema
-    const document = Schema.toJsonSchemaDocument(visible) as {
+    const document = Schema.toJsonSchemaDocument(visible, { onExcessProperty: "error" }) as {
       readonly schema: JsonSchema
       readonly definitions?: Readonly<Record<string, JsonSchema>>
     }
@@ -230,7 +230,7 @@ export type InputProperty = {
 export const inputProperties = <R>(tool: Tool<R>): Array<InputProperty> => {
   try {
     const document = isEffectSchema(tool.input)
-      ? (Schema.toJsonSchemaDocument(tool.input) as {
+      ? (Schema.toJsonSchemaDocument(tool.input, { onExcessProperty: "error" }) as {
           readonly schema: JsonSchema
           readonly definitions?: Readonly<Record<string, JsonSchema>>
         })
@@ -261,10 +261,16 @@ export const inputProperties = <R>(tool: Tool<R>): Array<InputProperty> => {
 export const inputTypeScript = <R>(tool: Tool<R>, pretty = false): string =>
   isEffectSchema(tool.input) ? toTypeScript(tool.input, false, pretty) : jsonSchemaToTypeScript(tool.input, pretty)
 
-// Empty object schemas render as `{}` in compact form; anything with properties,
-// an index signature, or union members renders differently, so equality is a
-// conservative emptiness test for both Effect and JSON Schema inputs.
-export const isEmptyInput = <R>(tool: Tool<R>): boolean => inputTypeScript(tool) === "{}"
+// Effect 4.0 models an empty Struct as a non-nullish object, so inspect its AST.
+// Raw JSON Schema inputs retain the compact `{}` rendering check.
+export const isEmptyInput = <R>(tool: Tool<R>): boolean => {
+  if (!isEffectSchema(tool.input)) return inputTypeScript(tool) === "{}"
+  return (
+    SchemaAST.isObjects(tool.input.ast) &&
+    tool.input.ast.propertySignatures.length === 0 &&
+    tool.input.ast.indexSignatures.length === 0
+  )
+}
 
 export const outputTypeScript = <R>(tool: Tool<R>, pretty = false): string =>
   tool.output === undefined

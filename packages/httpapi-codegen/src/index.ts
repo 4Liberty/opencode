@@ -1638,9 +1638,9 @@ function checksPortable(checks: SchemaAST.Checks | undefined): boolean {
       ? !check.aborted &&
         check.annotations?.representation !== undefined &&
         serializable(check.annotations.representation) &&
-        typeof check.annotations.arbitrary === "object" &&
-        check.annotations.arbitrary !== null &&
-        "constraint" in check.annotations.arbitrary
+        typeof check.annotations.arbitraryConstraint === "object" &&
+        check.annotations.arbitraryConstraint !== null &&
+        serializable(check.annotations.arbitraryConstraint)
       : checksPortable(check.checks),
   )
 }
