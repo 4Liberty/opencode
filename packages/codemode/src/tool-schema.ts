@@ -12,8 +12,14 @@ const renderKey = (name: string): string => (identifierSegment.test(name) ? name
 const effectNumberSentinel = (schema: JsonSchema) =>
   schema.type === "string" &&
   Array.isArray(schema.enum) &&
-  schema.enum.length === 1 &&
-  (schema.enum[0] === "NaN" || schema.enum[0] === "Infinity" || schema.enum[0] === "-Infinity")
+  (schema.enum.length === 1 ||
+    (schema.enum.length === 3 && ["NaN", "Infinity", "-Infinity"].every((value) => schema.enum?.includes(value)))) &&
+  schema.enum.every((value) => value === "NaN" || value === "Infinity" || value === "-Infinity")
+
+const definitionName = (ref: string): string | undefined => {
+  const tokens = JsonPointer.parseUriFragment(ref)
+  return tokens?.length === 2 && (tokens[0] === "$defs" || tokens[0] === "definitions") ? tokens[1] : undefined
+}
 
 const intersection = (members: ReadonlyArray<string>): string => {
   const concrete = members.filter((member) => member !== "unknown")
@@ -38,8 +44,7 @@ const hasUnresolvedRef = (
   if (visited.has(schema)) return false
   const nextVisited = new Set([...visited, schema])
   if (schema.$ref !== undefined) {
-    const segment = schema.$ref.match(/^#\/(?:\$defs|definitions)\/([^/]+)$/)?.[1]
-    const name = segment === undefined ? undefined : JsonPointer.unescapeToken(segment)
+    const name = definitionName(schema.$ref)
     if (name === undefined || definitions[name] === undefined || seen.has(name)) return true
     if (hasUnresolvedRef(definitions[name], definitions, new Set([...seen, name]), nextVisited)) return true
   }
@@ -130,8 +135,7 @@ const renderSchema = (
       ? ctx
       : { ...ctx, definitions: { ...ctx.definitions, ...(schema.definitions ?? {}), ...(schema.$defs ?? {}) } }
   if (schema.$ref) {
-    const segment = schema.$ref.match(/^#\/(?:\$defs|definitions)\/([^/]+)$/)?.[1]
-    const name = segment === undefined ? undefined : JsonPointer.unescapeToken(segment)
+    const name = definitionName(schema.$ref)
     if (!name || !nested.definitions[name] || seen.has(name)) return "unknown"
     return intersection([
       renderSchema(nested.definitions[name], nested, depth, new Set([...seen, name])),
@@ -241,8 +245,7 @@ export const inputProperties = <R>(tool: Tool<R>): Array<InputProperty> => {
     const definitions = document.definitions ?? {}
     let schema = document.schema
     if (schema.$ref !== undefined) {
-      const segment = schema.$ref.match(/^#\/(?:\$defs|definitions)\/([^/]+)$/)?.[1]
-      const name = segment === undefined ? undefined : JsonPointer.unescapeToken(segment)
+      const name = definitionName(schema.$ref)
       const resolved = name === undefined ? undefined : definitions[name]
       if (resolved === undefined) return []
       schema = resolved

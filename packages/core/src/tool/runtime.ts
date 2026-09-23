@@ -1,7 +1,7 @@
 import type { ToolDefinition } from "@opencode/ai"
 import { Tool } from "@opencode/schema/tool"
 import type { StandardJSONSchemaV1, StandardSchemaV1 } from "@standard-schema/spec"
-import { Cache, Effect, JsonSchema, Schema, SchemaIssue, SchemaRepresentation } from "effect"
+import { Cache, Effect, JsonPointer, JsonSchema, Schema, SchemaIssue, SchemaRepresentation } from "effect"
 import { $ZodType, toJSONSchema } from "zod/v4/core"
 
 const formatEffectIssues = SchemaIssue.makeFormatterStandardSchemaV1()
@@ -155,7 +155,24 @@ const validateStandard = (
 const inputJsonSchema = (schema: Tool.ValueSchema<any>): JsonSchema.JsonSchema => {
   if (schema === undefined || schema === null) return {}
   if (isStandardSchema(schema)) return standardJsonSchema(schema, "input")
-  return Schema.isSchema(schema) ? toJsonSchema(schema) : schema
+  if (!Schema.isSchema(schema)) return schema
+  const json = toJsonSchema(schema)
+  // Empty Effect structs describe non-null values, but tool parameters must be
+  // objects. Normalize after inlining named schemas, retaining their metadata.
+  if (
+    schema.ast._tag === "Objects" &&
+    schema.ast.propertySignatures.length === 0 &&
+    schema.ast.indexSignatures.length === 0 &&
+    schema.ast.encoding === undefined &&
+    schema.ast.checks === undefined &&
+    isRecord(json.not) &&
+    json.not.type === "null" &&
+    Object.keys(json.not).length === 1
+  ) {
+    const { not: _, ...metadata } = json
+    return { ...metadata, type: "object", properties: {}, additionalProperties: false }
+  }
+  return json
 }
 
 const outputJsonSchema = (schema: Tool.ValueSchema<any>): JsonSchema.JsonSchema => {
@@ -220,8 +237,8 @@ const inlineLocalReferences = (
 
   const localDefinitions = definitions ?? (isRecord(value.$defs) ? value.$defs : undefined)
   if (typeof value.$ref === "string" && localDefinitions) {
-    const segment = value.$ref.match(/^#\/\$defs\/([^/]+)$/)?.[1]
-    const name = segment?.replaceAll("~1", "/").replaceAll("~0", "~")
+    const tokens = JsonPointer.parseUriFragment(value.$ref)
+    const name = tokens?.length === 2 && tokens[0] === "$defs" ? tokens[1] : undefined
     if (name && !seen.has(name)) {
       const target = localDefinitions[name]
       if (target) {
