@@ -55,31 +55,13 @@ type Facade = {
 type Settings = { readonly apiKey?: string; readonly baseURL?: string }
 
 // Speech and transcription models are not in the model catalog, so each provider package maps to its facade directly.
-const facades: Record<string, (settings: Settings) => Promise<Facade>> = {
-  "@opencode/ai/providers/openai": async (settings) => {
-    const { configure } = await import("@opencode/ai/providers/openai")
-    return configure(settings)
-  },
-  "@opencode/ai/providers/google": async (settings) => {
-    const { configure } = await import("@opencode/ai/providers/google")
-    return configure(settings)
-  },
-  "@opencode/ai/providers/xai": async (settings) => {
-    const { configure } = await import("@opencode/ai/providers/xai")
-    return configure(settings)
-  },
-  "@opencode/ai/providers/elevenlabs": async (settings) => {
-    const { configure } = await import("@opencode/ai/providers/elevenlabs")
-    return configure(settings)
-  },
-  "@opencode/ai/providers/deepgram": async (settings) => {
-    const { configure } = await import("@opencode/ai/providers/deepgram")
-    return configure(settings)
-  },
-  "@opencode/ai/providers/assemblyai": async (settings) => {
-    const { configure } = await import("@opencode/ai/providers/assemblyai")
-    return configure(settings)
-  },
+const facades: Record<string, () => Promise<{ readonly configure: (settings: Settings) => Facade }>> = {
+  "@opencode/ai/providers/openai": () => import("@opencode/ai/providers/openai"),
+  "@opencode/ai/providers/google": () => import("@opencode/ai/providers/google"),
+  "@opencode/ai/providers/xai": () => import("@opencode/ai/providers/xai"),
+  "@opencode/ai/providers/elevenlabs": () => import("@opencode/ai/providers/elevenlabs"),
+  "@opencode/ai/providers/deepgram": () => import("@opencode/ai/providers/deepgram"),
+  "@opencode/ai/providers/assemblyai": () => import("@opencode/ai/providers/assemblyai"),
 }
 
 // Gemini speech is PCM only; every other supported provider streams MP3.
@@ -120,7 +102,8 @@ export const layer = Layer.effect(
               apiKey: credential?.key ?? stringSetting(provider?.settings?.apiKey),
               baseURL: stringSetting(provider?.settings?.baseURL),
             }
-      return { specifier, facade: yield* Effect.promise(() => load(settings)) }
+      const { configure } = yield* Effect.promise(load)
+      return { specifier, facade: configure(settings) }
     })
 
     const selected = Effect.fn("Voice.selected")(function* <Key extends "transcription" | "speech">(key: Key) {

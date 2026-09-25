@@ -1,4 +1,4 @@
-import { NonNegativeInt, PositiveInt } from "@opencode/schema/schema"
+import { PositiveInt } from "@opencode/schema/schema"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import { ServiceUnavailableError } from "../errors.js"
@@ -14,7 +14,6 @@ const SpeechEvent = Schema.Union([
   Schema.Struct({ type: Schema.Literal("format"), format: SpeechFormat }),
   Schema.Struct({
     type: Schema.Literal("audio"),
-    index: NonNegativeInt,
     data: Schema.String.annotate({ description: "Base64-encoded audio bytes." }),
   }),
   Schema.Struct({ type: Schema.Literal("done") }),

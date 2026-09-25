@@ -17,7 +17,7 @@ export const agent = Agent.ID.make("companion")
 
 const names = ["main_status", "main_read", "main_send", "main_cancel", "main_interrupt"]
 
-// User config rules apply after the companion's own and may allow more, such as `edit` or `git *`.
+// User config rules apply after the companion's own, but never beyond these actions.
 const actions = new Set(["read", "grep", "glob", "webfetch", "websearch", "shell", "external_directory", ...names])
 
 // One read-only git command with no shell operators. The shell parser also drops redirects that
@@ -72,7 +72,7 @@ export const Plugin = {
 
     const status = Effect.fn("CompanionTools.status")(function* (main: SessionSchema.Info) {
       const [active, inbox, permissions] = yield* Effect.all(
-        [sessions.active, sessions.inbox(main.id).pipe(Effect.orElseSucceed(() => [])), permission.list()],
+        [sessions.active, sessions.inbox(main.id).pipe(Effect.orElseSucceed(() => [])), permission.forSession(main.id)],
         { concurrency: "unbounded" },
       )
       const pending = inbox.flatMap((item) =>
@@ -80,9 +80,9 @@ export const Plugin = {
           ? [`- ${item.id} [${item.delivery}] ${clip(item.payload.text, 200)}`]
           : [],
       )
-      const asked = permissions
-        .filter((request) => request.sessionID === main.id)
-        .map((request) => `- ${request.action}: ${clip(request.message ?? request.resources.join(", "), 200)}`)
+      const asked = permissions.map(
+        (request) => `- ${request.action}: ${clip(request.message ?? request.resources.join(", "), 200)}`,
+      )
       return [
         `Main session: ${main.title ?? "Untitled"} (${main.id})`,
         `Status: ${active.has(main.id) ? "running" : "idle"}${main.outcome ? ` (last run ${main.outcome})` : ""}`,

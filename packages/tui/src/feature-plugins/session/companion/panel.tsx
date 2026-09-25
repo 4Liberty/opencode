@@ -235,5 +235,5 @@ function toolLabel(tool: SessionMessageAssistantTool) {
   if (tool.name === "main_read") return `· read the main session${pending}`
   if (tool.name === "main_interrupt") return `■ interrupted the main session${pending}`
   if (tool.name === "main_cancel") return `× cancelled a queued prompt${pending}`
-  return `· ${tool.name} ${text("path") ?? text("pattern") ?? text("filePath") ?? text("url") ?? ""}${pending}`.trimEnd()
+  return `· ${tool.name} ${text("command") ?? text("pattern") ?? text("path") ?? text("url") ?? text("query") ?? ""}${pending}`.trimEnd()
 }

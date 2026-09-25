@@ -41,7 +41,7 @@ The companion may run these shell commands:
 
 Git commands that contain `>` or `--output` are denied, because both write files.
 
-Configured permission rules apply after the companion's own rules, so they can allow more, for example `git *` or `edit`. Two hooks cap the companion regardless of configuration:
+Configured permission rules apply after the companion's own rules, so they can allow more within the capped actions, for example an external directory or `.env` reads. Rules such as `git *` or `edit` have no effect, because two hooks cap the companion regardless of configuration:
 
 - A tool hook runs a companion shell command only when it is exactly one of the git commands above and contains no `;`, `&`, `|`, `<`, `>`, `$`, backtick, newline, or `--output`. This also covers redirects after `&&` or `||`, which the shell parser leaves out of permission resources.
 - A permission hook denies every action except `read`, `grep`, `glob`, `webfetch`, `websearch`, `shell`, `external_directory`, and the `main_*` tools. It also turns every `ask` result into `deny`: the companion never asks for permission, because clients do not show permission prompts for companions.
@@ -58,7 +58,7 @@ The `main_*` tools act only on the calling companion's parent. They never accept
 
 Steers are sent without confirmation. They appear in the main timeline like any prompt, so the user can see what the companion sent. The TUI marks user messages whose `metadata.source` is `"companion"` with a muted `via companion` label, so they do not look like the user typed them.
 
-Before each companion request whose tail is a user message, a context hook inserts a short, unpersisted digest of the main session: status, title, the last user prompt, recent assistant text, and running tools. Most questions then need no tool call, which keeps voice replies fast.
+Before each companion request whose tail is a user message, a context hook inserts a short, unpersisted digest of the main session before the newest prompt: the `main_status` report and the six most recent main-session messages in `main_read` form. Most questions then need no tool call, which keeps voice replies fast.
 
 ## Voice
 
@@ -93,6 +93,8 @@ The voice loop is a cascade:
 3. The transcript is sent to the companion as a prompt.
 4. As companion text streams in, the client splits it into sentences outside code blocks and speaks them in order.
 5. Pressing talk while the companion is thinking or speaking stops playback, interrupts the companion, and starts listening again.
+
+The stop key (`companion.stop`) stops playback, capture, and the companion's reply. Stopping, or sending a typed message, also discards an utterance that is still being transcribed.
 
 By default the microphone is closed while the companion speaks, so speaker output does not feed back into the transcript.
 

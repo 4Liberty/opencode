@@ -1535,7 +1535,7 @@ export type VoiceSpeechOutput =
         | { readonly type: "mp3" }
         | { readonly type: "pcm"; readonly sampleRate: number; readonly channels: number }
     }
-  | { readonly type: "audio"; readonly index: number; readonly data: string }
+  | { readonly type: "audio"; readonly data: string }
   | { readonly type: "done" }
   | { readonly type: "error"; readonly message: string }
 export type VoiceSpeechOperation<E = never> = (input: VoiceSpeechInput) => Stream.Stream<VoiceSpeechOutput, E>

@@ -21,17 +21,21 @@ export default Plugin.define({
     const [talking, setTalking] = createSignal<string>()
     const [bargeIn, setBargeIn] = createSignal(false)
 
-    const companionOf = (sessionID: string) => {
+    // One lookup per main session, so the panel and the talk key cannot race to create two companions.
+    const lookup = (sessionID: string) => {
       const cached = companions.get(sessionID)
       if (cached) return cached
-      const request = context.client.session.companion({ sessionID }).then(async (info) => {
-        await Promise.all([context.data.session.sync(info.id), context.data.session.message.sync(info.id)])
-        return info.id
-      })
+      const request = context.client.session.companion({ sessionID }).then((info) => info.id)
       request.catch(() => companions.delete(sessionID))
       companions.set(sessionID, request)
       return request
     }
+    // Session retention evicts the companion's messages with its main session, so every use syncs again.
+    const companionOf = (sessionID: string) =>
+      lookup(sessionID).then(async (companionID) => {
+        await Promise.all([context.data.session.sync(companionID), context.data.session.message.sync(companionID)])
+        return companionID
+      })
 
     const send = (sessionID: string, text: string, voice: boolean) => {
       const known = new Set(
@@ -124,10 +128,9 @@ export default Plugin.define({
               error={companion.error ? errorMessage(companion.error) : undefined}
               voice={voice}
               onSubmit={(text) => {
-                const companionID = companion()
-                if (!companionID) return
                 voice.stop()
-                send(companionID, text, false)
+                // The companion may still be loading when the first message is typed.
+                void companionOf(input.sessionID).then((companionID) => send(companionID, text, false), toastError)
               }}
               onStop={() => void stop(companion())}
             />

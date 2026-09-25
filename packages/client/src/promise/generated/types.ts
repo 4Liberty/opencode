@@ -1477,7 +1477,7 @@ export type ModelCost = {
 
 export type VoiceSpeechEvent =
   | { type: "format"; format: VoiceSpeechFormat }
-  | { type: "audio"; index: number; data: string }
+  | { type: "audio"; data: string }
   | { type: "done" }
   | { type: "error"; message: string }
 

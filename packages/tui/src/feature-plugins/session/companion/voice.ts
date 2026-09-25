@@ -23,7 +23,6 @@ export function createVoice(input: {
 }) {
   const [state, setState] = createStore({ status: "idle" as VoiceStatus, level: 0 })
   let recording: Recording | undefined
-  let transcribing = false
   let speech = new AbortController()
   let playback = Promise.resolve()
   let queued = 0
@@ -115,14 +114,15 @@ export function createVoice(input: {
   }
 
   const transcribe = async () => {
-    const current = recording
+    const active = recording
     recording = undefined
-    if (!current) return
-    transcribing = true
+    if (!active) return
+    const current = turn
     setState({ status: "transcribing", level: 0 })
-    const audio = await current.stop()
+    const audio = await active.stop()
     const text = audio ? await transcript(audio) : ""
-    transcribing = false
+    // Stopping while the utterance transcribes discards it.
+    if (current !== turn) return
     setState("status", "idle")
     if (text) input.onTranscript(text, false)
   }
@@ -138,7 +138,7 @@ export function createVoice(input: {
     played = []
     unplayed = []
     held = undefined
-    if (!transcribing) setState({ status: "idle", level: 0 })
+    setState({ status: "idle", level: 0 })
   }
 
   const speak = (text: string) => {
@@ -230,7 +230,7 @@ export function speakable(text: string) {
  * natural. When `final`, the remainder is flushed too.
  */
 export function sentences(text: string, from: number, final: boolean) {
-  const boundaries = Array.from(text.slice(from).matchAll(/[.!?…:;]+["')\]]*(?=\s)|\n/g), (match) => {
+  const boundaries = Array.from(text.slice(from).matchAll(/[.!?…:;]+["')\]]*(?=\s)/g), (match) => {
     return from + (match.index ?? 0) + match[0].length
   })
   const cuts = boundaries.reduce<number[]>((result, boundary) => {

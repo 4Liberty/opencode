@@ -34,11 +34,8 @@ export const VoiceHandler = HttpApiBuilder.group(Api, "server.voice", (handlers)
           const voice = yield* Voice.Service
           const audio = yield* voice.speak({ text: request.payload.text }).pipe(Effect.mapError(unavailable))
           return audio.pipe(
-            Stream.zipWithIndex,
-            Stream.map(([chunk, index]) =>
-              chunk.type === "format"
-                ? chunk
-                : { type: "audio" as const, index, data: Encoding.encodeBase64(chunk.chunk) },
+            Stream.map((chunk) =>
+              chunk.type === "format" ? chunk : { type: "audio" as const, data: Encoding.encodeBase64(chunk.chunk) },
             ),
             Stream.concat(Stream.succeed({ type: "done" as const })),
             // Provider failures arrive after the response started, so they travel as a terminal event.

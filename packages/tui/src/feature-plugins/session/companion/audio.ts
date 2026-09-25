@@ -9,8 +9,6 @@ const TAP_FRAMES = 16384
 const TAP_BLOCK = 1024
 
 export type Recording = {
-  /** Root-mean-square level of the latest captured chunk, from 0 to 1. */
-  readonly level: () => number
   /** Stops capture and returns the utterance as 16 kHz mono WAV, or undefined when nothing was captured. */
   readonly stop: () => Promise<Uint8Array | undefined>
   readonly cancel: () => void
@@ -21,19 +19,16 @@ export async function record(onLevel: (level: number) => void): Promise<Recordin
   if (!audio) throw new Error("Audio is unavailable in this terminal")
   const capture = await audio.openCapture({ channels: 1 })
   const chunks: Float32Array[] = []
-  let level = 0
   const reader = capture.readable.getReader()
   const pump = (async () => {
     while (true) {
       const next = await reader.read()
       if (next.done) return
       chunks.push(next.value)
-      level = rms(next.value)
-      onLevel(level)
+      onLevel(rms(next.value))
     }
   })().catch(() => undefined)
   return {
-    level: () => level,
     async stop() {
       await finish(capture, pump)
       const samples = concat(chunks)
@@ -106,10 +101,11 @@ export async function play(format: VoiceSpeechFormat, body: AsyncIterable<Uint8A
           signal,
         })
   ).catch((error) => Promise.reject(cause(error)))
-  const failure = new Promise<never>((_, reject) => stream.on("error", (error) => reject(cause(error))))
-  const abort = () => stream.dispose()
-  signal.addEventListener("abort", abort, { once: true })
-  await Promise.race([stream.closed, failure]).finally(() => signal.removeEventListener("abort", abort))
+  // Aborting the signal disposes the stream, which closes it.
+  await Promise.race([
+    stream.closed,
+    new Promise<never>((_, reject) => stream.on("error", (error) => reject(cause(error)))),
+  ])
 }
 
 // OpenTUI wraps source failures; the provider's message is more useful than "source failed".
