@@ -789,7 +789,7 @@ await ai.write(video.video, "./kite.mp4")
 
 Speech (text-to-speech) is one request whose response is parsed incrementally, so every route supports both
 `Speech.generate` (the whole file) and `Speech.stream` (audio chunks as they arrive). Models come from `.speech(...)`
-selectors on the `OpenAI`, `Google` (Gemini TTS), `ElevenLabs`, `Cartesia`, and `Deepgram` facades. Common fields
+selectors on the `OpenAI`, `Google` (Gemini TTS), `ElevenLabs`, `Cartesia`, `Deepgram`, and `XAI` facades. Common fields
 (`voice`, `format`, `speed`, `language`, `instructions`, `timestamps`) lower natively or fail with a typed `AIError`
 before any network call; provider-native controls live under `providerOptions`, inferred from the selected model.
 
@@ -854,6 +854,10 @@ Provider notes:
 - **Deepgram** Aura's voice is the model id (`aura-2-thalia-en`), so `voice` and `language` fail typed. `format`
   and `providerOptions` lower to query parameters (`encoding`, `container`, `sample_rate`, `bit_rate`); `pcm` is
   `linear16` without a container. Auth is `Authorization: Token <DEEPGRAM_API_KEY>`.
+- **xAI** (`POST /v1/tts`) has no model field, so the `.speech(...)` id (for example `"grok-tts"`) only names the
+  model. `voice` is the `voice_id` (default `eve`), `language` defaults to `auto`, and `format` is the codec (`mp3`,
+  `wav`, `pcm`, `mulaw`, `alaw`); `providerOptions.sampleRate` and `bitRate` complete `output_format`. Both
+  `generate` and `stream` read the raw audio body. `instructions` and `timestamps` are not supported.
 
 The promise client mirrors the Effect API; `ai.speech.stream` is an `AsyncIterable`.
 
@@ -873,8 +877,8 @@ for await (const event of ai.speech.stream({ model, text: "Hello from OpenCode."
 Transcription (speech-to-text) is the one modality whose providers use every route kind: OpenAI and Gemini stream,
 Deepgram answers inline, and AssemblyAI is queued. `Transcription.generate` and `Transcription.stream` work on all of
 them; `Transcription.start` / `resume` return a `Generation` on queued routes and fail with `UnsupportedOperation`
-elsewhere. Models come from `.transcription(...)` selectors on the `OpenAI`, `Google`, `Deepgram`, and `AssemblyAI`
-facades. Common fields (`language`, `prompt`, `timestamps: "none" | "segment" | "word"`, `diarize`, `speakers`) lower
+elsewhere. Models come from `.transcription(...)` selectors on the `OpenAI`, `Google`, `Deepgram`, `AssemblyAI`, and
+`XAI` facades. Common fields (`language`, `prompt`, `timestamps: "none" | "segment" | "word"`, `diarize`, `speakers`) lower
 natively or fail with a typed `AIError` before any network call; a route may return more than asked.
 
 ```ts
@@ -922,6 +926,9 @@ Provider notes:
 - **Gemini** needs a transcribe model (`gemini-3.5-transcribe`); `prompt` and `speakers` fail typed.
 - **Deepgram** detects the language unless `language` is set; vocabulary goes in `providerOptions.keyterm`.
 - **AssemblyAI** uploads inline audio before submitting and is the only route that accepts `speakers`.
+- **xAI** (`grok-voice-transcribe-2.0`) answers inline and always returns words; `diarize` or `timestamps: "segment"`
+  groups them into speaker-turn segments. Vocabulary goes in `providerOptions.keyterm`, and headerless PCM uploads
+  send `audio_format` and `sample_rate` from `audio.info`. `prompt` and `speakers` fail typed.
 
 The promise client mirrors the Effect API:
 

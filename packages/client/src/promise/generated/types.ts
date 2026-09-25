@@ -30,6 +30,8 @@ export type PluginFeatures = { server?: true; tui?: true; rpc?: true }
 
 export type PluginState = { status: "active" } | { status: "failed"; error: string; ref?: string }
 
+export type SessionKind = "companion"
+
 export type SessionForkBoundary = { type: "before"; messageID: string } | { type: "through"; messageID: string }
 
 export type MoneyUSD = number
@@ -230,6 +232,10 @@ export type ModelCapabilities = { tools: boolean; input: Array<string>; output: 
 export type MoneyUSDPerMillionTokens = number
 
 export type GenerateTextResponse = { data: { text: string } }
+
+export type VoiceTranscribeResponse = { data: { text: string } }
+
+export type VoiceSpeechFormat = { type: "mp3" } | { type: "pcm"; sampleRate: number; channels: number }
 
 export type IntegrationCommandMethod = { id: string; type: "command"; label: string; command: Array<string> }
 
@@ -1469,6 +1475,12 @@ export type ModelCost = {
   cache: { read: MoneyUSDPerMillionTokens; write: MoneyUSDPerMillionTokens }
 }
 
+export type VoiceSpeechEvent =
+  | { type: "format"; format: VoiceSpeechFormat }
+  | { type: "audio"; index: number; data: string }
+  | { type: "done" }
+  | { type: "error"; message: string }
+
 export type ConnectionInfo = ConnectionCredentialInfo | ConnectionEnvInfo
 
 export type McpServer = {
@@ -1957,6 +1969,7 @@ export type SessionPermissions = {
 export type SessionInfo = {
   id: string
   parentID?: string
+  kind?: SessionKind
   fork?: { sessionID: string; boundary: SessionForkBoundary }
   projectID: string
   agent?: string
@@ -1986,6 +1999,7 @@ export type SessionCreated = {
     location: LocationRef
     subpath?: string
     parentID?: string
+    kind?: SessionKind
     slug: string
     title?: string
     agent?: string
@@ -2051,6 +2065,16 @@ export type ConfigEntry =
             }
         media?: {
           image?: { auto_resize?: boolean; max_width?: number; max_height?: number; max_base64_bytes?: number }
+        }
+        voice?: {
+          transcription?: { model: string | { providerID: string; model: string; variant?: string }; language?: string }
+          speech?: {
+            model: string | { providerID: string; model: string; variant?: string }
+            voice?: string
+            language?: string
+            speed?: number
+            instructions?: string
+          }
         }
         tool_output?: { max_lines?: number; max_bytes?: number }
         mcp?: {
@@ -2975,6 +2999,7 @@ export type SessionImportInput = {
     readonly info: {
       readonly id: string
       readonly parentID?: string
+      readonly kind?: "companion"
       readonly fork?: {
         readonly sessionID: string
         readonly boundary:
@@ -3292,6 +3317,7 @@ export type SessionImportInput = {
     readonly info: {
       readonly id: string
       readonly parentID?: string
+      readonly kind?: "companion"
       readonly fork?: {
         readonly sessionID: string
         readonly boundary:
@@ -3609,6 +3635,7 @@ export type SessionImportInput = {
     readonly info: {
       readonly id: string
       readonly parentID?: string
+      readonly kind?: "companion"
       readonly fork?: {
         readonly sessionID: string
         readonly boundary:
@@ -3949,6 +3976,10 @@ export type SessionForkInput = {
 }
 
 export type SessionForkOutput = { data: SessionInfo }["data"]
+
+export type SessionCompanionInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionCompanionOutput = { data: SessionInfo }["data"]
 
 export type SessionSwitchAgentInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]
@@ -5482,6 +5513,17 @@ export type GenerateTextInput = {
 }
 
 export type GenerateTextOutput = GenerateTextResponse["data"]
+
+export type VoiceTranscribeInput = {
+  readonly mediaType: { readonly mediaType: string }["mediaType"]
+  readonly payload: globalThis.Uint8Array
+}
+
+export type VoiceTranscribeOutput = VoiceTranscribeResponse["data"]
+
+export type VoiceSpeechInput = { readonly text: { readonly text: string }["text"] }
+
+export type VoiceSpeechOutput = VoiceSpeechEvent
 
 export type ProviderListInput = {
   readonly location?: { readonly location?: { readonly directory?: string | undefined } | undefined }["location"]

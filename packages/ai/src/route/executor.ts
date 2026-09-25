@@ -88,15 +88,19 @@ const decodeProviderBody = Schema.decodeUnknownOption(
   Schema.fromJsonString(
     Schema.Struct({
       message: Schema.optionalKey(Schema.String),
-      error: Schema.optionalKey(Schema.Struct({ message: Schema.optionalKey(Schema.String) })),
+      // xAI sends `{ code, error }` with the readable reason as a plain string.
+      error: Schema.optionalKey(
+        Schema.Union([Schema.String, Schema.Struct({ message: Schema.optionalKey(Schema.String) })]),
+      ),
     }),
   ),
 )
 
 const providerMessage = (status: number, body: string | void) => {
   const decoded = body === undefined ? undefined : Option.getOrUndefined(decodeProviderBody(body))
+  const error = typeof decoded?.error === "string" ? decoded.error : decoded?.error?.message
   return (
-    [decoded?.error?.message, decoded?.message].find((message) => message?.trim()) ??
+    [error, decoded?.message].find((message) => message?.trim()) ??
     `Provider request failed with HTTP ${status}`
   )
 }

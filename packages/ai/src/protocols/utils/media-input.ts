@@ -71,8 +71,8 @@ export const imageOutput = (
 }
 
 /**
- * Append multipart text fields: strings as-is, other values as JSON, or arrays as repeated `key[]` parts with
- * `repeatArrays`. `overlay` keys in `reserved` are dropped so `http.body` cannot replace route-owned fields.
+ * Append multipart text fields: strings as-is, other values as JSON, or arrays as repeated parts named `key[]` or
+ * `key` with `repeatArrays`. `overlay` keys in `reserved` are dropped so `http.body` cannot replace route-owned fields.
  */
 export const appendFields = (
   form: FormData,
@@ -80,13 +80,13 @@ export const appendFields = (
   options: {
     readonly overlay?: Record<string, unknown>
     readonly reserved: ReadonlySet<string>
-    readonly repeatArrays?: true
+    readonly repeatArrays?: "key[]" | "key"
   },
 ) => {
   const overlay = Object.entries(options.overlay ?? {}).filter(([key]) => !options.reserved.has(key))
   Object.entries(mergeJsonRecords(fields, Object.fromEntries(overlay)) ?? {}).forEach(([key, value]) => {
-    if (Array.isArray(value) && options.repeatArrays)
-      return value.forEach((item) => form.append(`${key}[]`, String(item)))
+    if (Array.isArray(value) && options.repeatArrays !== undefined)
+      return value.forEach((item) => form.append(options.repeatArrays === "key[]" ? `${key}[]` : key, String(item)))
     form.append(key, typeof value === "string" ? value : encodeJson(value))
   })
 }

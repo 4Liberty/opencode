@@ -323,6 +323,20 @@ export const makeSessionGroup = <
         ),
     )
     .add(
+      HttpApiEndpoint.post("session.companion", "/api/experimental/session/:sessionID/companion", {
+        params: { sessionID: Session.ID },
+        success: Schema.Struct({ data: PublicSessionInfo }),
+        error: SessionNotFoundError,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "experimental.session.companion",
+          summary: "Get session companion",
+          description:
+            "Return the session's companion: a child session that talks with the user about the main session and can steer it. Creates the companion on first use.",
+        }),
+      ),
+    )
+    .add(
       HttpApiEndpoint.post("session.switchAgent", "/api/session/:sessionID/agent", {
         params: { sessionID: Session.ID },
         payload: Schema.Struct({ agent: Agent.ID }),
