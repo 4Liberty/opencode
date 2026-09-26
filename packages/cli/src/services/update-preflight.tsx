@@ -107,8 +107,9 @@ async function open(from?: string): Promise<Session> {
       />
     ),
     renderer,
-  ).catch((error) => {
+  ).catch(async (error) => {
     if (!renderer.isDestroyed) renderer.destroy()
+    await renderer.closed
     throw error
   })
   let shownAt = performance.now()
@@ -141,10 +142,11 @@ async function open(from?: string): Promise<Session> {
   const close = () =>
     (closing ??= (async () => {
       setAnimating(false)
-      if (renderer.isDestroyed) return
+      if (renderer.isDestroyed) return renderer.closed
       renderer.pause()
       await Promise.race([renderer.idle(), setTimeout(500)])
       renderer.destroy()
+      await renderer.closed
     })())
   let loading: Promise<void> | undefined
   const load = () =>

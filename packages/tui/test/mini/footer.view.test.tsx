@@ -1,5 +1,5 @@
 /** @jsxImportSource @opentui/solid */
-import { expect, test } from "bun:test"
+import { afterAll, expect, test } from "bun:test"
 import {
   BoxRenderable,
   ImageRenderable,
@@ -55,6 +55,11 @@ import { tmpdir } from "../fixture/fixture"
 import { diffImageFixture } from "../fixture/diff-image"
 
 const tuiConfig = createTuiResolvedConfig()
+const themeRenderer = await createTestRenderer({})
+afterAll(async () => {
+  themeRenderer.renderer.destroy()
+  await themeRenderer.renderer.closed
+})
 
 async function nativeLightTheme() {
   await using tmp = await tmpdir()
@@ -64,6 +69,7 @@ async function nativeLightTheme() {
   try {
     return await resolveRunTheme(
       {
+        nativeScene: themeRenderer.renderer.nativeScene,
         themeMode: "light",
         getPalette: async (): ReturnType<CliRenderer["getPalette"]> => {
           throw new Error("Palette unavailable")
@@ -231,7 +237,7 @@ async function renderFooter(
         <Harness />
       </box>
     ),
-    { width: input.width ?? 100, height: input.height ?? 8, kittyKeyboard: true },
+    { width: input.width ?? 100, height: input.height ?? 8, kittyKeyboard: true, exitOnCtrlC: false },
   )
 
   return {

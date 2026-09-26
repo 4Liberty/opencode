@@ -7,7 +7,7 @@ import { RetryProvider, RetryProviderRenderable } from "../../src/component/retr
 
 async function fixture() {
   const clock = new ManualClock()
-  const app = await createTestRenderer({ width: 60, height: 2, useThread: false, clock })
+  const app = await createTestRenderer({ width: 60, height: 2, clock })
   app.renderer.pause()
   const text = new TextRenderable(app.renderer, { fg: "#eeeeee", bg: "#111111", attributes: TextAttributes.BOLD })
   const provider = new RetryProviderRenderable(app.renderer, {
@@ -219,7 +219,7 @@ test("Solid unmount releases a running transition and its frame listener", async
         </text>
       </Show>
     ),
-    { width: 60, height: 2, useThread: false, clock },
+    { width: 60, height: 2, clock },
   )
   try {
     app.renderer.pause()
@@ -253,7 +253,7 @@ test("the Solid inline span inherits colors and wraps like ordinary text after a
         </text>
       </box>
     ),
-    { width: 24, height: 6, useThread: false, clock },
+    { width: 24, height: 6, clock },
   )
   try {
     app.renderer.pause()

@@ -231,6 +231,7 @@ export function Session(props: {
     return messages().findLast((x) => x.type === "assistant")
   })
 
+  const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
   const thinkingMode = createMemo<ThinkingMode>(() => config.session?.thinking ?? "hide")
   const showScrollbar = createMemo(() => config.session?.scrollbar ?? false)
@@ -389,8 +390,8 @@ export function Session(props: {
 
   /** Runs after layout has settled (two frames), unless the transcript was torn down. */
   const afterLayout = (continuation: () => void) => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
+    renderer.requestAnimationFrame(() => {
+      renderer.requestAnimationFrame(() => {
         if (!scroll || scroll.isDestroyed) return
         continuation()
       })
@@ -609,7 +610,6 @@ export function Session(props: {
     current.submit()
   })
   const dialog = useDialog()
-  const renderer = useRenderer()
   const runPendingAction = createSingleFlight<string>()
   const mutatePending = async (action: PendingAction, inboxID: string, failureLabel?: string) => {
     const result = await runPendingAction(inboxID, async () => {

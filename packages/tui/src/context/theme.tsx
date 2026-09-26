@@ -326,7 +326,7 @@ const themeContext = createSimpleContext({
 
     createEffect(() => renderer.setBackgroundColor(tokens().background.base))
 
-    const currentSyntax = createSyntaxStyleMemo(() => generateSyntax(tokens()))
+    const currentSyntax = createSyntaxStyleMemo(() => generateSyntax(tokens(), renderer.nativeScene))
     const service: Themes = {
       current,
       currentTokens: tokens,

@@ -14,12 +14,15 @@ export class MaskedTextRenderable extends TextRenderable {
     shade: (width: number) => (column: number) => number,
   ) {
     if (!this.scratch)
-      this.scratch = OptimizedBuffer.create(this.width, this.height, this._ctx.widthMethod, { respectAlpha: true })
+      this.scratch = OptimizedBuffer.create(this.width, this.height, this._ctx.widthMethod, {
+        owner: this._ctx.nativeScene,
+        respectAlpha: true,
+      })
     if (this.scratch.width !== this.width || this.scratch.height !== this.height)
       this.scratch.resize(this.width, this.height)
 
     this.scratch.clear(TRANSPARENT)
-    this.scratch.drawTextBuffer(this.textBufferView, 0, 0)
+    this.drawToBuffer(this.scratch, 0, 0)
     const characters = this.scratch.buffers.char
     let end = 0
     for (let row = 0; row < this.height; row++) {
@@ -44,8 +47,6 @@ export class MaskedTextRenderable extends TextRenderable {
     }
     this.scratch.colorMatrix(this.matrix, this.mask, 1, TargetChannel.FG)
     buffer.drawFrameBuffer(this.screenX, this.screenY, this.scratch)
-    this.markClean()
-    this._ctx.addToHitGrid(this.screenX, this.screenY, this.width, this.height, this.num)
   }
 
   override destroy() {
