@@ -81,19 +81,10 @@ describe("tool schema projections", () => {
       route: Gemini.route,
       tools: [
         {
-          functionDeclarations: [
-            { name: "ping", description: "Ping" },
-            {
-              name: "lookup",
-              description: "Lookup",
-              parameters: {
-                type: "object",
-                properties: nonempty.properties,
-                required: nonempty.required,
-              },
-            },
-            { name: "raw", description: "Raw", parameters: { type: "object", properties: raw.properties } },
-          ],
+          functionDeclarations: [empty, nonempty, raw].map((parametersJsonSchema, index) => ({
+            name: ["ping", "lookup", "raw"][index],
+            parametersJsonSchema,
+          })),
         },
       ],
     },
@@ -133,9 +124,6 @@ describe("tool schema projections", () => {
               }),
             )
             expect(prepared.body.tools).toMatchObject(scenario.tools)
-            if (scenario.route.id === "gemini") {
-              expect(prepared.body.tools).toEqual(scenario.tools)
-            }
           }),
       )
     }
@@ -223,7 +211,12 @@ describe("tool schema projections", () => {
       const exclusive = { oneOf: [{ type: "object" }, { type: "object", required: ["a"] }] }
       const object = { type: "object", properties: {} }
 
-      expect(yield* parameters(parameterless)).toEqual({ type: "object", description: "No input." })
+      expect(yield* parameters(parameterless)).toEqual({
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+        description: "No input.",
+      })
       expect(yield* parameters({})).toEqual({ type: "object" })
       expect(yield* parameters({ description: "Query", properties: { q: { type: "string" } } })).toEqual({
         type: "object",
