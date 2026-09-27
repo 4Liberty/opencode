@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
 import { HttpClientRequest } from "effect/unstable/http"
-import { LanguageModel, LLM, Message, ToolCallPart } from "../../src/index.js"
+import { LanguageModel, LLM, Media, Message, ToolCallPart } from "../../src/index.js"
 import { GoogleVertex, GoogleVertexChat, GoogleVertexMessages, GoogleVertexResponses } from "../../src/providers.js"
 import { LLMClient } from "../../src/route.js"
 import { compileRequest } from "../../src/route/client.js"
@@ -71,6 +71,30 @@ describe("Google Vertex providers", () => {
 
       expect(prepared.body).toMatchObject({
         labels: { component: "opencode", environment: "test" },
+      })
+    }),
+  )
+
+  it.effect("sends url media to Vertex Gemini as fileData", () =>
+    Effect.gen(function* () {
+      const prepared = yield* compileRequest(
+        LLM.request({
+          model: GoogleVertex.configure({ accessToken: "vertex-token", project: "vertex-project" }).model(
+            "gemini-3.5-flash",
+          ),
+          messages: [
+            Message.user({
+              type: "media",
+              media: Media.url("https://example.test/clip.mp3", { mediaType: "audio/mpeg" }),
+            }),
+          ],
+        }),
+      )
+
+      expect(prepared.body).toMatchObject({
+        contents: [
+          { role: "user", parts: [{ fileData: { mimeType: "audio/mpeg", fileUri: "https://example.test/clip.mp3" } }] },
+        ],
       })
     }),
   )

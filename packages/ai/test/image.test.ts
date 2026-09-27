@@ -355,6 +355,7 @@ describe("Image", () => {
         Media.bytes(Uint8Array.from([1, 2, 3]), "image/png"),
         Media.fromDataUrl("data:image/jpeg;base64,BAUG"),
         Media.ref("google", "https://generativelanguage.googleapis.com/v1beta/files/123", "image/webp"),
+        Media.url("https://example.test/photo.png", { mediaType: "image/png" }),
       ],
     }).pipe(
       Effect.provide(
@@ -371,6 +372,7 @@ describe("Image", () => {
                     fileUri: "https://generativelanguage.googleapis.com/v1beta/files/123",
                   },
                 },
+                { fileData: { mimeType: "image/png", fileUri: "https://example.test/photo.png" } },
               ])
               return Effect.succeed(
                 input.respond(

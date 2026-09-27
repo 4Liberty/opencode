@@ -673,6 +673,54 @@ describe("Gemini route", () => {
     }),
   )
 
+  it.effect("sends url media as fileData for Gemini to fetch", () =>
+    Effect.gen(function* () {
+      const prepared = yield* compileRequest(
+        LLM.request({
+          model,
+          messages: [
+            Message.user([
+              { type: "text", text: "Summarize" },
+              {
+                type: "media",
+                media: Media.url("https://example.test/report.pdf", { mediaType: "application/pdf" }),
+              },
+            ]),
+          ],
+        }),
+      )
+      expect(prepared.body.contents).toEqual([
+        {
+          role: "user",
+          parts: [
+            { text: "Summarize" },
+            { fileData: { mimeType: "application/pdf", fileUri: "https://example.test/report.pdf" } },
+          ],
+        },
+      ])
+    }),
+  )
+
+  it.effect("rejects url media Gemini cannot fetch before sending", () =>
+    Effect.gen(function* () {
+      const errors = yield* Effect.forEach(
+        [
+          Media.url("https://example.test/unknown"),
+          Media.url("https://example.test/video.mp4", { mediaType: "video/mp4", headers: { "x-goog-api-key": "k" } }),
+        ],
+        (media) =>
+          compileRequest(LLM.request({ model, messages: [Message.user({ type: "media", media })] })).pipe(Effect.flip),
+      )
+      expect(errors.map((error) => [error.reason._tag, error.message])).toEqual([
+        [
+          "InvalidRequest",
+          "Gemini needs the media type of a url source; pass mediaType to Media.url or materialize it first",
+        ],
+        ["InvalidRequest", "Gemini requires inline media (bytes or base64); url sources must be materialized first"],
+      ])
+    }),
+  )
+
   it.effect("keeps tools and sends function calling mode NONE", () =>
     Effect.gen(function* () {
       const prepared = yield* compileRequest(

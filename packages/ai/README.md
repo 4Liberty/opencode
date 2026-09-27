@@ -478,7 +478,7 @@ call rather than being dropped, so check this table before swapping only the `mo
 | Provider              | `n` | `size`    | `aspectRatio` | `seed` | `format` | `images`                         | `mask`              |
 | --------------------- | --- | --------- | ------------- | ------ | -------- | -------------------------------- | ------------------- |
 | OpenAI                | ✓¹  | ✓         | ✗             | ✗      | ✓        | ✓                                | ✓                   |
-| Google (Gemini)       | 1   | ✗         | ✓             | ✓      | ✗        | ✓ (no public URLs)               | ✗                   |
+| Google (Gemini)       | 1   | ✗         | ✓             | ✓      | ✗        | ✓ (URLs need a media type)       | ✗                   |
 | xAI                   | ✓   | ✗         | ✓             | ✗      | ✗        | ✓                                | ✗                   |
 | Z.ai                  | ✗   | ✓         | ✗             | ✗      | ✗        | ✗                                | ✗                   |
 | Meta                  | ✓   | ✓ (hint)  | ✗             | ✗      | ✓        | ✓                                | ✗                   |
@@ -535,8 +535,9 @@ const inpainted = Image.generate({
 
 On multipart requests, `http.body` can override option fields but not structural `model`, `prompt`, `image[]`,
 or `mask` fields, and the transport owns the multipart `Content-Type` boundary. For JSON requests, `http.body`
-remains the final raw-native overlay. Gemini does not fetch public HTTP URLs, and hosted Z.ai image generation does
-not accept image inputs. These cases fail with a typed `AIError` before network I/O.
+remains the final raw-native overlay. Gemini fetches public or pre-signed `Media.url` inputs itself but needs their
+`mediaType`, and hosted Z.ai image generation does not accept image inputs. These cases fail with a typed `AIError`
+before network I/O.
 
 Provider-native image options belong to each request. Raw `http.body` fields have final precedence over them:
 

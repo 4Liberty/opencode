@@ -132,7 +132,9 @@ export const path = (model: string, mode: MediaProtocol.Mode) =>
 export const frames = (bytes: Stream.Stream<Uint8Array, AIError>, mode: MediaProtocol.Mode) =>
   mode === "stream" ? Framing.sse.frame(bytes) : Framing.document.frame(bytes)
 
-// Gemini does not fetch public URLs; inline payloads and Gemini Files references are the accepted inputs.
+// Gemini fetches public or pre-signed http(s) URLs itself as `fileData`, alongside Gemini Files references. A URL has
+// no bytes to sniff, so its media type must be declared. URLs that need transient download headers (Veo outputs)
+// cannot be fetched by Gemini and fall through to the inline requirement so callers materialize them first.
 export const mediaPart = (
   route: string,
   asset: Media.Asset,
@@ -143,6 +145,16 @@ export const mediaPart = (
 > => {
   const fileUri = MediaInput.refID(asset, PROVIDER)
   if (fileUri !== undefined) return Effect.succeed({ fileData: { mimeType: asset.mediaType, fileUri } })
+  const url = ProviderShared.mediaUrl(asset)
+  if (url !== undefined && asset.headers === undefined) {
+    if (asset.mediaType === "application/octet-stream")
+      return Effect.fail(
+        ProviderShared.invalidRequest(
+          `${route} needs the media type of a url source; pass mediaType to Media.url or materialize it first`,
+        ),
+      )
+    return Effect.succeed({ fileData: { mimeType: asset.mediaType, fileUri: url } })
+  }
   return ProviderShared.requireInlineMedia(route, asset).pipe(
     Effect.map((media) => ({ inlineData: { mimeType: media.mime, data: media.base64 } })),
   )

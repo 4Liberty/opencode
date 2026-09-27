@@ -48,6 +48,7 @@ describe("Transcription", () => {
             model: Google.configure({ apiKey: "test" }).transcription("gemini-3.6-flash"),
             audio,
           }),
+          Transcription.generate({ model: google, audio: Media.url("https://a.test/x") }),
         ].map((effect) => Effect.flip(effect)),
       )
       expect(errors.map((error) => [error.reason._tag, "operation" in error.reason && error.reason.operation])).toEqual(
@@ -63,6 +64,7 @@ describe("Transcription", () => {
           ["InvalidRequest", false],
           ["InvalidRequest", false],
           ["UnsupportedOperation", "transcription.model"],
+          ["InvalidRequest", false],
         ],
       )
     }).pipe(Effect.provide(layer(() => Effect.die("an unsupported request reached the network")))),
@@ -268,6 +270,32 @@ describe("Transcription", () => {
             }),
           ),
         ),
+      ),
+    ),
+  )
+
+  it.effect("sends url audio to Gemini as fileData for Gemini to fetch", () =>
+    Effect.gen(function* () {
+      const result = yield* Transcription.generate({
+        model: google,
+        audio: Media.url("https://a.test/call.mp3", { mediaType: "audio/mpeg" }),
+      })
+      expect(result.text).toBe("Hello")
+    }).pipe(
+      Effect.provide(
+        layer((input) => {
+          expect(JSON.parse(input.text).contents).toEqual([
+            { role: "user", parts: [{ fileData: { mimeType: "audio/mpeg", fileUri: "https://a.test/call.mp3" } }] },
+          ])
+          return Effect.succeed(
+            input.respond(
+              JSON.stringify({
+                candidates: [{ content: { parts: [{ audioTranscription: { text: "Hello" } }] }, finishReason: "STOP" }],
+              }),
+              { headers: { "content-type": "application/json" } },
+            ),
+          )
+        }),
       ),
     ),
   )
