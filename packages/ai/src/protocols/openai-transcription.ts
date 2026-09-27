@@ -160,32 +160,25 @@ const RESERVED_FORM_FIELDS = new Set([
   "stream",
 ])
 
-/** Validate before downloading, then pull `url` audio into bytes because the API only accepts a multipart upload. */
-const prepare = Effect.fn("OpenAITranscription.prepare")(function* (
-  request: MediaProtocol.Addressed<Request>,
-  context: MediaProtocol.PrepareContext,
-) {
-  yield* validate(request, capabilities(request.model.id))
-  if (request.audio.source.type !== "url") return request
-  return { ...request, audio: yield* context.materialize(request.audio) }
-})
-
 const fromRequest = Effect.fn("OpenAITranscription.fromRequest")(function* (request: MediaProtocol.Addressed<Request>) {
   const model = capabilities(request.model.id)
+  yield* validate(request, model)
+  // The API only takes a multipart upload, so `url` audio is downloaded (without the route's auth) after validation.
+  const upload = request.audio.source.type === "url" ? yield* request.audio.materialize() : request.audio
   // The API detects the audio format from the upload's filename extension.
-  const extension = mediaTypeExtension(request.audio.mediaType)
+  const extension = mediaTypeExtension(upload.mediaType)
   if (extension === undefined)
     return yield* ProviderShared.invalidRequest(
-      `${route.name} cannot name a ${request.audio.mediaType} upload; send mp3, mp4, m4a, wav, webm, ogg, or flac audio`,
+      `${route.name} cannot name a ${upload.mediaType} upload; send mp3, mp4, m4a, wav, webm, ogg, or flac audio`,
     )
-  const audio = yield* MediaInput.inlineBytes(route.id, request.audio)
+  const audio = yield* MediaInput.inlineBytes(route.id, upload)
   const responseFormat = model.diarize
     ? "diarized_json"
     : request.timestamps === undefined || request.timestamps === "none"
       ? undefined
       : "verbose_json"
   const form = new FormData()
-  form.append("file", MediaInput.blob(audio, request.audio.mediaType), `audio.${extension}`)
+  form.append("file", MediaInput.blob(audio, upload.mediaType), `audio.${extension}`)
   MediaInput.appendFields(
     form,
     {
@@ -276,7 +269,6 @@ const finish = (state: State) => {
 
 export const protocol = MediaProtocol.stream<Request, TranscriptionEvent, Frame, State>(route, {
   unsupported: ["speakers"],
-  prepare,
   body: { from: fromRequest },
   frames: (bytes, context) =>
     streamsEvents(context.request)

@@ -104,6 +104,20 @@ describe("Transcription", () => {
     }),
   )
 
+  it.effect("rejects an invalid OpenAI request before downloading its url audio", () =>
+    Effect.gen(function* () {
+      const calls: Array<Call> = []
+      const error = yield* Transcription.generate({
+        model: openai.transcription("gpt-4o-transcribe-diarize"),
+        audio: Media.url("https://cdn.test/recording.wav"),
+        prompt: "Names: Ada",
+      }).pipe(Effect.flip, Effect.provide(layer((input) => observe(calls, input).pipe(Effect.as(json(input, {}))))))
+
+      expect(error.reason._tag).toBe("UnsupportedOperation")
+      expect(calls).toEqual([])
+    }),
+  )
+
   it.effect("ignores unknown OpenAI stream events and fails on an error event with the frame", () =>
     Effect.gen(function* () {
       const sse = (...frames: ReadonlyArray<string>) => frames.map((frame) => `data: ${frame}\n\n`).join("")
