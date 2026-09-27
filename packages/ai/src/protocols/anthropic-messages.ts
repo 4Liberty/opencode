@@ -19,6 +19,7 @@ import {
   type FinishReasonDetails,
   type FinishReason,
   type MediaPart,
+  type ProviderID,
   type ProviderMetadata,
   type ProviderOptions,
   type ToolCallPart,
@@ -30,6 +31,7 @@ import { classifyProviderFailure } from "../provider-error.js"
 import { effortUpdate, resolveEffortUpdates } from "../effort-updates.js"
 import * as Cache from "./utils/cache.js"
 import { Lifecycle } from "./utils/lifecycle.js"
+import { MediaInput } from "./utils/media-input.js"
 import { ToolStream } from "./utils/tool-stream.js"
 
 const ADAPTER = "anthropic-messages"
@@ -655,11 +657,12 @@ const isHttpUrl = (value: string) => /^https?:\/\//i.test(value.trim())
 
 const lowerMedia = Effect.fn("AnthropicMessages.lowerMedia")(function* (
   part: MediaPart,
+  provider: ProviderID,
   breakpoints?: Cache.Breakpoints,
 ) {
   const mime = part.media.mediaType.toLowerCase()
   const cacheControlValue = breakpoints ? cacheControl(breakpoints, part.cache) : undefined
-  const fileId = fileIdFromMetadata(part.metadata)
+  const fileId = MediaInput.refID(part.media, provider) ?? fileIdFromMetadata(part.metadata)
 
   // SDK file sources: FileImageSource:2350 / FileDocumentSource:2344 {type:"file", file_id}
   if (fileId) {
@@ -767,18 +770,18 @@ const lowerMedia = Effect.fn("AnthropicMessages.lowerMedia")(function* (
 
 // Tool results may carry structured text, images, and documents. Keep media as provider-native
 // content instead of JSON-stringifying base64 into a prompt string.
-const lowerToolResultContentItem = Effect.fnUntraced(function* (item: Tool.Content) {
+const lowerToolResultContentItem = Effect.fnUntraced(function* (item: Tool.Content, provider: ProviderID) {
   if (item.type === "text") return { type: "text" as const, text: item.text } satisfies AnthropicTextBlock
-  return yield* lowerMedia(ProviderShared.toolFileMedia(item))
+  return yield* lowerMedia(ProviderShared.toolFileMedia(item), provider)
 })
 
-const lowerToolResultContent = Effect.fnUntraced(function* (part: ToolResultPart) {
+const lowerToolResultContent = Effect.fnUntraced(function* (part: ToolResultPart, provider: ProviderID) {
   // Text / json / error results stay as a string for backward compatibility
   // with existing cassettes and provider expectations.
   if (part.result.type !== "content") return ProviderShared.toolResultText(part)
   // Preserve the narrowed array element type when compiled through a consumer package.
   const content: ReadonlyArray<Tool.Content> = part.result.value
-  return yield* Effect.forEach(content, lowerToolResultContentItem)
+  return yield* Effect.forEach(content, (item) => lowerToolResultContentItem(item, provider))
 })
 
 const requireThinkingSignature = (request: LLMRequest) => {
@@ -900,7 +903,7 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
           continue
         }
         if (part.type === "media") {
-          content.push(yield* lowerMedia(part, breakpoints))
+          content.push(yield* lowerMedia(part, request.model.provider, breakpoints))
           continue
         }
         return yield* ProviderShared.unsupportedContent("Anthropic Messages", "user", ["text", "media"])
@@ -974,7 +977,7 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
       content.push({
         type: "tool_result",
         tool_use_id: scrubToolCallID(part.id),
-        content: yield* lowerToolResultContent(part),
+        content: yield* lowerToolResultContent(part, request.model.provider),
         is_error: part.result.type === "error" ? true : undefined,
         cache_control: cacheControl(breakpoints, part.cache),
       })
