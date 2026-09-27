@@ -47,8 +47,20 @@ export const binary = (value: Uint8Array, contentType: string, query?: Query): B
 
 export type Send = (path: string, body: Body) => Effect.Effect<HttpClientResponse.HttpClientResponse, AIError>
 
-/** Runs after unsupported-field rejection and before `body.from`, for providers that need an upload first. */
-export type Prepare<Request> = (request: Request, send: Send) => Effect.Effect<Request, AIError>
+/** Downloads a `url` asset into owned bytes through the route's executor, without the route's auth. */
+export type Materialize = (asset: Media.Asset) => Effect.Effect<Media.Asset, AIError>
+
+export interface PrepareContext {
+  /** POST to a path under the route base URL with the route's auth. */
+  readonly send: Send
+  readonly materialize: Materialize
+}
+
+/**
+ * Runs after unsupported-field rejection and before `body.from`, for providers that need an upload (AssemblyAI) or
+ * a download (OpenAI transcription of a `url` asset) first.
+ */
+export type Prepare<Request> = (request: Request, context: PrepareContext) => Effect.Effect<Request, AIError>
 
 // ---------------------------------------------------------------------------
 // Protocol kinds
@@ -94,7 +106,7 @@ export interface Started<Token> {
 export interface PollContext<Token> {
   readonly token: Token
   readonly auth: Record<string, string>
-  readonly materialize: (asset: Media.Asset) => Effect.Effect<Media.Asset, AIError>
+  readonly materialize: Materialize
 }
 
 /**
@@ -168,6 +180,7 @@ export interface Streamed<Request, Event, Frame, State> {
   readonly provider: ProviderID
   /** Common request fields this protocol cannot lower; the route rejects them before `body.from` runs. */
   readonly unsupported?: ReadonlyArray<keyof Request & string>
+  readonly prepare?: Prepare<Addressed<Request>>
   readonly body: { readonly from: (request: Addressed<Request>) => Effect.Effect<Body, AIError> }
   readonly frames: (
     bytes: Stream.Stream<Uint8Array, AIError>,

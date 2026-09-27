@@ -6,7 +6,6 @@ import { RequestExecutorService, type Interface } from "./executor-service.js"
 import { RequestExecutor } from "./executor.js"
 import { MediaProtocol } from "./media-protocol.js"
 import { Generation, isTerminal } from "../generation.js"
-import type { Media } from "../media.js"
 import {
   AIError,
   AIErrorReason,
@@ -152,8 +151,7 @@ export const queued = <Request extends MediaRequest, Response, Token>(
   const encodeToken = Schema.encodeSync(protocol.token)
 
   const generationRoute = (token: Token, http: HttpOptions | undefined, execute: Execute) => {
-    const materialize = (asset: Media.Asset) =>
-      asset.materialize().pipe(Effect.provideService(RequestExecutorService, { execute }))
+    const materialize = materializer(execute)
     const poll = <A>(operation: {
       readonly path: (token: Token) => string
       readonly decode: (
@@ -225,7 +223,7 @@ export const stream = <Request extends MediaRequest, Event, Response, Frame, Sta
       Effect.gen(function* () {
         const submitted = yield* transport.submit(
           { ...request, mode },
-          { unsupported: protocol.unsupported, from: protocol.body.from },
+          { unsupported: protocol.unsupported, prepare: protocol.prepare, from: protocol.body.from },
           execute,
         )
         const http = RequestExecutor.responseHttp(submitted.response)
@@ -329,11 +327,13 @@ const makeTransport = <Request extends MediaRequest>(
       const prepared =
         protocol.prepare === undefined
           ? request
-          : yield* protocol.prepare(request, (path, body) =>
-              send({ method: "POST", url: baseURL(path), headers, request, body }, execute).pipe(
-                Effect.map((sent) => sent.response),
-              ),
-            )
+          : yield* protocol.prepare(request, {
+              send: (path, body) =>
+                send({ method: "POST", url: baseURL(path), headers, request, body }, execute).pipe(
+                  Effect.map((sent) => sent.response),
+                ),
+              materialize: materializer(execute),
+            })
       // Sanitize after merging so model-level overlays are covered; the model value is restored, not sanitized.
       const resolved: Request = { ...sanitizeSurrogates({ ...prepared, http }), model: request.model }
       const body = yield* protocol.from(resolved)
@@ -356,6 +356,11 @@ const makeTransport = <Request extends MediaRequest>(
     },
   }
 }
+
+const materializer =
+  (execute: Execute): MediaProtocol.Materialize =>
+  (asset) =>
+    asset.materialize().pipe(Effect.provideService(RequestExecutorService, { execute }))
 
 const withQuery = (url: URL, query: MediaProtocol.Query | undefined) => {
   for (const [key, value] of Object.entries(query ?? {})) {

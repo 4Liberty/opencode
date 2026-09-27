@@ -91,12 +91,15 @@ const STATUS = {
 const decodeUpload = route.decodeJson(Upload)
 
 /** `/v2/transcript` only takes a URL, so inline audio is uploaded to `/v2/upload` first. */
-const prepare = Effect.fn("AssemblyAITranscription.prepare")(function* (request: Request, send: MediaProtocol.Send) {
+const prepare = Effect.fn("AssemblyAITranscription.prepare")(function* (
+  request: Request,
+  context: MediaProtocol.PrepareContext,
+) {
   if (request.audio.source.type !== "bytes" && request.audio.source.type !== "base64") return request
   const audio = yield* MediaInput.inlineBytes(route.id, request.audio)
-  const uploaded = yield* send(UPLOAD_PATH, MediaProtocol.binary(audio, "application/octet-stream")).pipe(
-    Effect.flatMap(decodeUpload),
-  )
+  const uploaded = yield* context
+    .send(UPLOAD_PATH, MediaProtocol.binary(audio, "application/octet-stream"))
+    .pipe(Effect.flatMap(decodeUpload))
   return { ...request, audio: Media.url(uploaded.value.upload_url, { mediaType: request.audio.mediaType }) }
 })
 

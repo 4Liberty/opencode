@@ -160,9 +160,18 @@ const RESERVED_FORM_FIELDS = new Set([
   "stream",
 ])
 
+/** Validate before downloading, then pull `url` audio into bytes because the API only accepts a multipart upload. */
+const prepare = Effect.fn("OpenAITranscription.prepare")(function* (
+  request: MediaProtocol.Addressed<Request>,
+  context: MediaProtocol.PrepareContext,
+) {
+  yield* validate(request, capabilities(request.model.id))
+  if (request.audio.source.type !== "url") return request
+  return { ...request, audio: yield* context.materialize(request.audio) }
+})
+
 const fromRequest = Effect.fn("OpenAITranscription.fromRequest")(function* (request: MediaProtocol.Addressed<Request>) {
   const model = capabilities(request.model.id)
-  yield* validate(request, model)
   // The API detects the audio format from the upload's filename extension.
   const extension = mediaTypeExtension(request.audio.mediaType)
   if (extension === undefined)
@@ -267,6 +276,7 @@ const finish = (state: State) => {
 
 export const protocol = MediaProtocol.stream<Request, TranscriptionEvent, Frame, State>(route, {
   unsupported: ["speakers"],
+  prepare,
   body: { from: fromRequest },
   frames: (bytes, context) =>
     streamsEvents(context.request)
