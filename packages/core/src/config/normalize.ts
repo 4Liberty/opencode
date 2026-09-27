@@ -130,7 +130,8 @@ export function normalize(input: unknown): Result {
 
   const legacyAgents = mapValues(
     decodeMap(input.agent, ConfigAgentV1.Info, ["agent"], diagnostics, decodeValue),
-    (value) => canonical(ConfigAgent.Info, ConfigMigrateV1.migrateAgent(value)),
+    (value, name) =>
+      canonical(ConfigAgent.Info, ConfigMigrateV1.migrateAgent(value, legacyPermission(input.agent, name))),
   )
   const legacySmallModel = own(input, "small_model")
     ? decodeValue(Schema.String, input.small_model, ["small_model"], diagnostics)
@@ -149,8 +150,13 @@ export function normalize(input: unknown): Result {
       model: migratedSmallModel,
       ...legacyAgents.title,
     }
-  const modeAgents = mapValues(decodeMap(input.mode, ConfigAgentV1.Info, ["mode"], diagnostics, decodeValue), (value) =>
-    canonical(ConfigAgent.Info, ConfigMigrateV1.migrateAgent({ ...value, mode: "primary" })),
+  const modeAgents = mapValues(
+    decodeMap(input.mode, ConfigAgentV1.Info, ["mode"], diagnostics, decodeValue),
+    (value, name) =>
+      canonical(
+        ConfigAgent.Info,
+        ConfigMigrateV1.migrateAgent({ ...value, mode: "primary" }, legacyPermission(input.mode, name)),
+      ),
   )
   const migratedAgents = mergeMaps(legacyAgents, modeAgents, ["agents"], diagnostics)
   const nativeAgents = decodeMap(input.agents, ConfigAgent.Info, ["agents"], diagnostics, decodeEncoded)
@@ -742,10 +748,10 @@ function mergeMaps(
   return result
 }
 
-function mapValues<A>(input: Readonly<Record<string, A>>, map: (value: A) => unknown) {
+function mapValues<A>(input: Readonly<Record<string, A>>, map: (value: A, key: string) => unknown) {
   return Object.fromEntries(
     Object.entries(input).flatMap(([key, value]) => {
-      const mapped = map(value)
+      const mapped = map(value, key)
       return mapped === undefined ? [] : [[key, mapped]]
     }),
   )
@@ -793,6 +799,10 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   if (!isRecord(value)) return false
   const prototype = Object.getPrototypeOf(value)
   return prototype === Object.prototype || prototype === null
+}
+
+function legacyPermission(agents: unknown, name: string) {
+  return isRecord(agents) && isRecord(agents[name]) ? agents[name].permission : undefined
 }
 
 function own(value: Record<string, unknown>, key: string) {

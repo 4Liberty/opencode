@@ -113,6 +113,12 @@ function permissions(info?: ConfigPermissionV1.Info, tools?: Readonly<Record<str
   return rules.length ? rules : undefined
 }
 
+// Effect emits declared keys in schema order. Permission rules are last-match-wins, so restore the author's key order.
+function inInputOrder(info: ConfigPermissionV1.Info | undefined, input: unknown): ConfigPermissionV1.Info | undefined {
+  if (info === undefined || typeof input !== "object" || input === null) return info
+  return Object.fromEntries(Object.keys(input).flatMap((key) => (Object.hasOwn(info, key) ? [[key, info[key]]] : [])))
+}
+
 // Map v1 permission/tool keys onto their renamed v2 tool actions so migrated rules keep matching.
 export function normalizeAction(action: string) {
   if (action === "write" || action === "patch") return "edit"
@@ -138,7 +144,7 @@ function agents(info: typeof ConfigV1.Info.Type) {
   }
 }
 
-export function migrateAgent(info: ConfigAgentV1.Info) {
+export function migrateAgent(info: ConfigAgentV1.Info, permission?: unknown) {
   const body = {
     ...info.options,
     ...(info.temperature === undefined ? {} : { temperature: info.temperature }),
@@ -156,7 +162,7 @@ export function migrateAgent(info: ConfigAgentV1.Info) {
         color: info.color === undefined ? undefined : info.color.startsWith("#") ? info.color : "#aaaaaa",
         steps: info.steps,
         disabled: info.disable,
-        permissions: permissions(info.permission),
+        permissions: permissions(inInputOrder(info.permission, permission)),
       }),
     ),
   )

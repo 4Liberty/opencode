@@ -240,6 +240,30 @@ describe("ConfigNormalize", () => {
     ])
   })
 
+  test.each(["agent", "mode"])("preserves legacy %s permission source order", (key) => {
+    const permission = { "*": "allow", bash: "ask", custom: "deny", edit: "deny" }
+    expect(normalized({ [key]: { build: { permission } } }).encoded.agents).toMatchObject({
+      build: {
+        permissions: [
+          { action: "*", resource: "*", effect: "allow" },
+          { action: "shell", resource: "*", effect: "ask" },
+          { action: "custom", resource: "*", effect: "deny" },
+          { action: "edit", resource: "*", effect: "deny" },
+        ],
+      },
+    })
+    expect(
+      normalized({ [key]: { review: { permission: { "*": "deny", read: "allow" } } } }).encoded.agents,
+    ).toMatchObject({
+      review: {
+        permissions: [
+          { action: "*", resource: "*", effect: "deny" },
+          { action: "read", resource: "*", effect: "allow" },
+        ],
+      },
+    })
+  })
+
   test("redacts permission resource keys from invalid diagnostics", () => {
     const result = normalized({
       permission: { bash: { "curl -H Authorization:Bearer TOPSECRET *": "bogus" } },
