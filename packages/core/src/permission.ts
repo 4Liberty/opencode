@@ -156,8 +156,7 @@ const layer = Layer.effect(
     })
 
     const configured = Effect.fnUntraced(function* (sessionID: SessionSchema.ID, agentID?: Agent.ID) {
-      const session = yield* sessions.get(sessionID)
-      if (!session) return yield* new SessionErrors.NotFoundError({ sessionID })
+      const session = yield* sessions.require(sessionID)
       const agent = yield* agents.resolve(agentID ?? session.agent)
       return merge(agent?.permissions ?? missingAgentPermissions, session.permissions ?? [])
     })

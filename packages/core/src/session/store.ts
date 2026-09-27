@@ -8,7 +8,7 @@ import { AbsolutePath, PositiveInt, RelativePath } from "@opencode/schema/schema
 import { Database } from "../database/database.js"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { SessionHistory } from "./history.js"
-import { MessageDecodeError } from "./error.js"
+import { MessageDecodeError, NotFoundError } from "./error.js"
 import { SessionMessage } from "./message.js"
 import { Session } from "@opencode/schema/session"
 import { SessionMessageTable, SessionTable } from "./sql.js"
@@ -52,6 +52,7 @@ export type MessagesInput = {
 
 export interface Interface {
   readonly get: (sessionID: Session.ID) => Effect.Effect<Session.Info | undefined>
+  readonly require: (sessionID: Session.ID) => Effect.Effect<Session.Info, NotFoundError>
   readonly list: (input?: ListInput) => Effect.Effect<Session.Info[]>
   readonly messages: (input: MessagesInput) => Effect.Effect<SessionMessage.Info[], MessageDecodeError>
   readonly context: (sessionID: Session.ID) => Effect.Effect<SessionMessage.Info[], MessageDecodeError>
@@ -91,10 +92,17 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const { db } = yield* Database.Service
 
+    const get = Effect.fnUntraced(function* (sessionID: Session.ID) {
+      const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie)
+      return row ? fromRow(row) : undefined
+    })
+
     return Service.of({
-      get: Effect.fnUntraced(function* (sessionID) {
-        const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie)
-        return row ? fromRow(row) : undefined
+      get,
+      require: Effect.fn("SessionStore.require")(function* (sessionID) {
+        const session = yield* get(sessionID)
+        if (!session) return yield* new NotFoundError({ sessionID })
+        return session
       }),
       list: Effect.fn("SessionStore.list")(function* (input = {}) {
         const direction = input.anchor?.direction ?? "next"

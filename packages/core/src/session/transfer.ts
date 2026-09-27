@@ -19,6 +19,7 @@ import { Session } from "../session.js"
 import { Slug } from "../util/slug.js"
 import { SessionEvent } from "./event.js"
 import { SessionMessage } from "./message.js"
+import { SessionMessageRow } from "./message-row.js"
 import { SessionProjector } from "./projector.js"
 import { SessionMessageTable, SessionTable } from "./sql.js"
 
@@ -51,7 +52,6 @@ const layer = Layer.effect(
     const { db } = yield* Database.Service
     const projects = yield* Project.Service
     const sessions = yield* Session.Service
-    const encodeMessage = Schema.encodeSync(SessionMessage.Info)
 
     return Service.of({
       export: Effect.fn("SessionTransfer.export")(function* (input) {
@@ -75,15 +75,14 @@ const layer = Layer.effect(
         yield* upsertProject(db, project).pipe(Effect.orDie)
         const importedAt = yield* Clock.currentTimeMillis
         const messages = input.data.messages.filter(isSettled).map((message, index) => {
-          const encoded = encodeMessage(message)
-          const { id: _, type, ...data } = encoded
+          const row = SessionMessageRow.encode(message)
           return {
-            id: message.id,
+            id: row.id,
             session_id: sessionID,
-            type,
+            type: row.type,
             seq: index + 1,
             time_created: DateTime.toEpochMillis(message.time.created),
-            data,
+            data: row.data,
           }
         })
         yield* bus

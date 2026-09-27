@@ -1,8 +1,9 @@
 import { and, asc, desc, eq, gte, or, sql } from "drizzle-orm"
-import { Effect, Schema } from "effect"
+import { Effect } from "effect"
 import { Database } from "../database/database.js"
 import { MessageDecodeError } from "./error.js"
 import { SessionMessage } from "./message.js"
+import { SessionMessageRow } from "./message-row.js"
 import { SessionSchema } from "./schema.js"
 import { Instructions } from "../instructions/index.js"
 import { InstructionState } from "./instruction-state.js"
@@ -11,7 +12,6 @@ import { SessionMessageTable } from "./sql.js"
 
 type DatabaseService = Database.Interface["db"]
 
-const decode = Schema.decodeUnknownEffect(SessionMessage.Info)
 
 /**
  * Which completed compactions bound a history read. Local summaries always do. Native
@@ -60,7 +60,7 @@ export const latestCompaction = Effect.fnUntraced(function* (
 })
 
 export const decodeMessageRow = (row: typeof SessionMessageTable.$inferSelect) =>
-  decode({ ...row.data, id: row.id, type: row.type }).pipe(
+  SessionMessageRow.decodeEffect(row).pipe(
     Effect.tap((message) =>
       SessionProviderContext.isCheckpoint(message)
         ? SessionProviderContext.validate(message.providerContext)

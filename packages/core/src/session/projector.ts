@@ -10,6 +10,7 @@ import { Agent } from "@opencode/schema/agent"
 import { Model } from "@opencode/schema/model"
 import { SessionEvent } from "./event.js"
 import { SessionMessage } from "./message.js"
+import { SessionMessageRow } from "./message-row.js"
 import { SessionMessageUpdater } from "./message-updater.js"
 import { SessionInbox } from "./inbox.js"
 import { Workspace } from "@opencode/schema/workspace"
@@ -30,9 +31,6 @@ type MessageEvent = Exclude<
   SessionEvent.DurableEvent,
   typeof SessionEvent.Forked.Type | typeof SessionEvent.Deleted.Type
 >
-
-const decodeMessage = Schema.decodeUnknownSync(SessionMessage.Info)
-const encodeMessage = Schema.encodeSync(SessionMessage.Info)
 
 export class SessionAlreadyProjected extends Error {}
 
@@ -227,17 +225,14 @@ const projectFork = Effect.fn("SessionProjector.projectFork")(function* (
 
 function run(db: DatabaseService, event: MessageEvent) {
   return Effect.gen(function* () {
-    const decodeRow = (row: typeof SessionMessageTable.$inferSelect) =>
-      decodeMessage({ ...row.data, id: row.id, type: row.type })
     const updateMessage = (message: SessionMessage.Info) => {
-      const encoded = encodeMessage(message)
-      const { id, type, ...data } = encoded
+      const row = SessionMessageRow.encode(message)
       return db
         .update(SessionMessageTable)
-        .set({ type, time_created: DateTime.toEpochMillis(message.time.created), data })
+        .set({ type: row.type, time_created: DateTime.toEpochMillis(message.time.created), data: row.data })
         .where(
           and(
-            eq(SessionMessageTable.id, SessionMessage.ID.make(id)),
+            eq(SessionMessageTable.id, row.id),
             eq(SessionMessageTable.session_id, event.data.sessionID),
           ),
         )
@@ -309,7 +304,7 @@ function run(db: DatabaseService, event: MessageEvent) {
             .get()
             .pipe(Effect.orDie)
           if (!row) return
-          const message = decodeRow(row)
+          const message = SessionMessageRow.decode(row)
           return message.type === "assistant" && !message.time.completed ? message : undefined
         })
       },
@@ -328,7 +323,7 @@ function run(db: DatabaseService, event: MessageEvent) {
             .get()
             .pipe(Effect.orDie)
           if (!row) return
-          const message = decodeRow(row)
+          const message = SessionMessageRow.decode(row)
           return message.type === "assistant" ? message : undefined
         })
       },
@@ -349,7 +344,7 @@ function run(db: DatabaseService, event: MessageEvent) {
             .get()
             .pipe(Effect.orDie)
           if (!row) return
-          const message = decodeRow(row)
+          const message = SessionMessageRow.decode(row)
           return message.type === "shell" ? message : undefined
         })
       },
@@ -370,7 +365,7 @@ function run(db: DatabaseService, event: MessageEvent) {
             .get()
             .pipe(Effect.orDie)
           if (!row) return
-          const message = decodeRow(row)
+          const message = SessionMessageRow.decode(row)
           return message.type === "compaction" ? message : undefined
         })
       },
@@ -384,17 +379,16 @@ function run(db: DatabaseService, event: MessageEvent) {
 }
 
 function insertMessage(db: DatabaseService, event: SessionEvent.DurableEvent, message: SessionMessage.Info) {
-  const encoded = encodeMessage(message)
-  const { id, type, ...data } = encoded
+  const row = SessionMessageRow.encode(message)
   return db
     .insert(SessionMessageTable)
     .values({
-      id: SessionMessage.ID.make(id),
+      id: row.id,
       session_id: event.data.sessionID,
-      type,
+      type: row.type,
       seq: event.durable.seq,
       time_created: DateTime.toEpochMillis(message.time.created),
-      data,
+      data: row.data,
     })
     .run()
     .pipe(Effect.orDie)

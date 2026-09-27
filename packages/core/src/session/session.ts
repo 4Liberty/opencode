@@ -16,7 +16,6 @@ import {
   CompactionConflictError,
   InboxConflictError,
   MessageNotFoundError,
-  NotFoundError,
   PromptConflictError,
   SyntheticConflictError,
 } from "./error.js"
@@ -50,11 +49,7 @@ export const make = Effect.fn("Session.make")(function* () {
   const fs = yield* FSUtil.Service
   const scope = yield* Scope.Scope
 
-  const get = Effect.fn("Session.get")(function* (sessionID: SessionSchema.ID) {
-    const session = yield* store.get(sessionID)
-    if (!session) return yield* new NotFoundError({ sessionID })
-    return session
-  })
+  const get = store.require
   const message = Effect.fn("Session.message")(function* (sessionID: SessionSchema.ID, messageID: SessionMessage.ID) {
     const stored = yield* store.message(messageID)
     return stored?.sessionID === sessionID ? stored.message : undefined

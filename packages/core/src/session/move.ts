@@ -65,11 +65,7 @@ const layer = Layer.effect(
     const database = yield* Database.Service
     const bus = yield* Bus.Service
 
-    const get = Effect.fn("SessionMove.get")(function* (sessionID: Session.ID) {
-      const session = yield* store.get(sessionID)
-      if (!session) return yield* new NotFoundError({ sessionID })
-      return session
-    })
+    const get = store.require
 
     const resolveDestination = Effect.fn("SessionMove.resolveDestination")(function* (
       session: Session.Info,
