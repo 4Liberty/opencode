@@ -18,12 +18,22 @@ The constraint is the combination of **one cross-platform npm package, one stati
 
 The package also ships a text placeholder at the target path until postinstall replaces it. A skipped postinstall is a *separate functional install problem*; removing the misleading Unix suffix alone would not resolve that failure mode.
 
+## Other npm CLIs
+
+These are different choices, checked against their published npm packages on 2026-09-28:
+
+- [Pi (`@earendil-works/pi-coding-agent@0.87.1`)](https://registry.npmjs.org/%40earendil-works%2Fpi-coding-agent/0.87.1) maps `pi` to a JavaScript entrypoint, `dist/bundle/cli.js`, run with Node. It is not trying to expose one direct native binary through npm.
+- [Codex (`@openai/codex@0.158.0`)](https://registry.npmjs.org/%40openai%2Fcodex/0.158.0) maps `codex` to `bin/codex.js`. That Node launcher selects `codex` on Unix or `codex.exe` on Windows from a platform package, spawns it, and handles signals and exit status. This avoids a `.exe`-named Unix process at the cost of a launcher process.
+- [Claude Code (`@anthropic-ai/claude-code@2.1.283`)](https://registry.npmjs.org/%40anthropic-ai%2Fclaude-code/2.1.283) makes the same direct-execution choice as OpenCode: its npm `bin` is `bin/claude.exe` on all platforms, with postinstall replacing the placeholder with the native binary. Unix users can see `.exe` in the pathname there too.
+- [esbuild (`esbuild@0.28.2`)](https://registry.npmjs.org/esbuild/0.28.2) uses an extensionless JavaScript `bin/esbuild` that locates the native binary. Its postinstall *sometimes* replaces that entrypoint with a Unix native binary for direct execution; Windows keeps the launcher. This avoids the Unix suffix and often the extra Unix process, but adds platform- and package-manager-dependent behavior and still needs a Windows launcher.
+
 ## Options
 
 1. **Keep the direct native target (recommended for now).** No new process, signal forwarding, runtime dependency at launch, or install-path migration. Cost: Unix process lists can say `opencode.exe`, which is confusing. Explain the packaging trade-off when asked.
 2. **Use a platform-aware launcher as the npm `bin` target.** It could select `opencode` on Unix and `opencode.exe` on Windows from the platform-specific package, so the child process has its native filename. Cost: an additional process or platform-specific `exec` behavior, startup work, signal and exit-code forwarding, and a larger test surface across package managers. A launcher already exists for development in [`bin/opencode.cjs`](../bin/opencode.cjs); using one in release packaging would be a deliberate change to today's direct-execution behavior, not a rename.
-3. **Publish different top-level packages or mutate package-manager links per OS.** This can give Unix a suffix-free target without a launcher, but loses the simple single-package install or makes startup depend on nonportable install/link behavior. Do not assume rewriting `package.json` in postinstall will reliably relink a previously created command.
-4. **Change the displayed process title.** This might cosmetically affect some monitors, but leaves the actual filename and packaging contract unchanged. It is not a fix for the underlying discrepancy.
+3. **Use an esbuild-style hybrid launcher.** Publish a suffix-free JavaScript entrypoint; replace it with the native executable on Unix where safe, but keep the launcher on Windows and as a fallback. This improves the Unix process name and often avoids a second Unix process, but complicates postinstall, upgrades, cross-platform startup, and script-disabled behavior. It still crosses the no-launcher boundary on Windows.
+4. **Publish different top-level packages or mutate package-manager links per OS.** This can give Unix a suffix-free target without a launcher, but loses the simple single-package install or makes startup depend on nonportable install/link behavior. Do not assume rewriting `package.json` in postinstall will reliably relink a previously created command.
+5. **Change the displayed process title.** This might cosmetically affect some monitors, but leaves the actual filename and packaging contract unchanged. It is not a fix for the underlying discrepancy.
 
 ## Proposal and decision boundary
 
