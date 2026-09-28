@@ -164,7 +164,6 @@ export async function runNonInteractivePrompt(input: Input) {
       if (!formAlreadySettled(error)) throw error
     }
     formCancelled = true
-    if (input.compatibility !== "v1") process.exitCode = 1
   }
 
   const consume = async () => {
