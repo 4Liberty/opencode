@@ -64,7 +64,7 @@ for (const direction of ["ltr", "rtl"]) {
     const box = await action.boundingBox()
     const code = root.locator("[data-code]").first()
     const gutterRight = await code.evaluate((element) => element.firstElementChild?.getBoundingClientRect().right)
-    expect((box?.x ?? 0) - (gutterRight ?? 0)).toBe(8)
+    expect((box?.x ?? 0) - (gutterRight ?? 0)).toBeCloseTo(8, 0)
     expect(box?.x).toBeGreaterThanOrEqual(0)
     expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(
       await page.evaluate(() => document.documentElement.clientWidth),
@@ -115,7 +115,7 @@ for (const direction of ["up", "down"] as const) {
         await expect
           .poll(() =>
             action.evaluate((button) => {
-              const host = button.closest('[data-component="file"]')?.querySelector("diffs-container")
+              const host = document.querySelector('[data-component="file"]')?.querySelector("diffs-container")
               const root = host?.shadowRoot
               if (!root) return NaN
               const selection =
@@ -147,6 +147,24 @@ story("leaves a review code click as regular text interaction", async ({ mount }
   const root = await mount("components-session-review--interactive-comments-panel")
   await root.locator('[data-line-type="change-addition"] [data-diff-span]').click()
   await expect(root.getByRole("textbox")).not.toBeVisible()
+})
+
+story("keeps the text selection action visible past the end of a file", async ({ mount, page }) => {
+  const root = await mount("components-session-review--interactive-file-comments")
+  const action = page.getByRole("button", { name: "Add comment", exact: true })
+  await expect(async () => {
+    await root.getByText("export const last = 2", { exact: true }).selectText()
+    await expect(action).toBeVisible()
+  }).toPass()
+
+  const file = root.locator('[data-component="file"]')
+  await expect(action).toHaveCSS("position", "fixed")
+  expect(await action.evaluate((element) => element.closest('[data-component="file"]'))).toBeNull()
+  const actionBox = await action.boundingBox()
+  const fileBox = await file.boundingBox()
+  expect((actionBox?.y ?? 0) + (actionBox?.height ?? 0)).toBeGreaterThan(
+    (fileBox?.y ?? 0) + (fileBox?.height ?? 0),
+  )
 })
 
 story("keeps direct line-number range comments in the review panel", async ({ mount }) => {

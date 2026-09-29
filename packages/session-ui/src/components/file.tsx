@@ -21,6 +21,7 @@ import { type PreloadFileDiffResult, type PreloadMultiFileDiffResult } from "@pi
 import { createMediaQuery } from "@solid-primitives/media"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { ComponentProps, createEffect, createMemo, createSignal, onCleanup, onMount, Show, splitProps } from "solid-js"
+import { Portal } from "solid-js/web"
 import { Button } from "@opencode/ui/button"
 import { createDefaultOptions, styleVariables } from "../pierre"
 import { markCommentedDiffLines, markCommentedFileLines } from "../pierre/commented-lines"
@@ -252,8 +253,7 @@ function useFileViewer(config: ViewerConfig) {
     const roomAbove = rect.top - TEXT_SELECTION_ACTION_HEIGHT - TEXT_SELECTION_ACTION_GAP >= 0
     const preferBelow = selected.direction !== "up"
     const below = preferBelow ? roomBelow || !roomAbove : !roomAbove && roomBelow
-    const gutterEdge =
-      (selected.gutterRight ?? wrapper.getBoundingClientRect().left) - wrapper.getBoundingClientRect().left
+    const gutterEdge = selected.gutterRight ?? wrapper.getBoundingClientRect().left
     setTextSelection({ range: selected.range, rect, label: action.label, below, gutterEdge })
   }
 
@@ -839,36 +839,34 @@ function ViewerShell(props: {
       <div ref={(el) => (props.viewer.overlay = el)} class="pointer-events-none absolute inset-0 z-0" />
       <Show when={props.viewer.textSelection()}>
         {(selection) => (
-          <Button
-            data-slot="file-text-selection-action"
-            data-placement={selection().below ? "bottom" : "top"}
-            size="small"
-            variant="submit"
-            class="z-[110] whitespace-nowrap motion-safe:transition-transform duration-100 ease-out motion-reduce:transition-none"
-            style={{
-              position: "absolute",
-              "--line-comment-gutter-edge": `${selection().gutterEdge}px`,
-              left: `calc(var(--line-comment-gutter-edge) + ${LINE_COMMENT_ACTION_GAP}px)`,
-              top: `${
-                (selection().below ? selection().rect.bottom : selection().rect.top) -
-                props.viewer.wrapper.getBoundingClientRect().top
-              }px`,
-              transform: selection().below
-                ? `translateY(${TEXT_SELECTION_ACTION_GAP}px)`
-                : `translateY(calc(-100% - ${TEXT_SELECTION_ACTION_GAP}px))`,
-            }}
-            onPointerDown={(event: PointerEvent) => {
-              event.preventDefault()
-              event.stopPropagation()
-            }}
-            onMouseDown={(event: MouseEvent) => {
-              event.preventDefault()
-              event.stopPropagation()
-            }}
-            onClick={props.viewer.activateTextSelection}
-          >
-            {selection().label}
-          </Button>
+          <Portal>
+            <Button
+              data-slot="file-text-selection-action"
+              data-placement={selection().below ? "bottom" : "top"}
+              size="small"
+              variant="submit"
+              class="z-[110] whitespace-nowrap motion-safe:transition-transform duration-100 ease-out motion-reduce:transition-none"
+              style={{
+                position: "fixed",
+                left: `${selection().gutterEdge + LINE_COMMENT_ACTION_GAP}px`,
+                top: `${selection().below ? selection().rect.bottom : selection().rect.top}px`,
+                transform: selection().below
+                  ? `translateY(${TEXT_SELECTION_ACTION_GAP}px)`
+                  : `translateY(calc(-100% - ${TEXT_SELECTION_ACTION_GAP}px))`,
+              }}
+              onPointerDown={(event: PointerEvent) => {
+                event.preventDefault()
+                event.stopPropagation()
+              }}
+              onMouseDown={(event: MouseEvent) => {
+                event.preventDefault()
+                event.stopPropagation()
+              }}
+              onClick={props.viewer.activateTextSelection}
+            >
+              {selection().label}
+            </Button>
+          </Portal>
         )}
       </Show>
     </div>

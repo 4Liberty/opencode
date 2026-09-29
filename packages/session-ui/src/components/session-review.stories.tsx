@@ -111,6 +111,23 @@ function InteractiveCommentsV2Story() {
 
 export const InteractiveCommentsPanel = { render: () => <InteractiveCommentsV2Story /> }
 
+export const InteractiveFileComments = {
+  render: () => (
+    <CurrentSessionProviders document={editThenTestDocument}>
+      <div class="h-screen overflow-auto bg-background-base">
+        <div class="relative overflow-hidden pb-40">
+          <File
+            mode="text"
+            file={{ name: "review.ts", contents: "export const first = 1\nexport const last = 2" }}
+            enableLineSelection
+            textSelectionAction={{ label: "Add comment" }}
+          />
+        </div>
+      </div>
+    </CurrentSessionProviders>
+  ),
+}
+
 const gitDiffs = [
   {
     // OpenCode 93e1f383dd79683af4fc5ad139cea0516603c838, unchanged git-show output.
