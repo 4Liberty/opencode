@@ -15,6 +15,8 @@ import { Menu } from "@opencode/ui/menu"
 import { TextInput } from "@opencode/ui/text-input"
 import { ModelTooltip } from "./tooltip"
 import { useLanguage } from "@/runtime/i18n/language"
+import { useData } from "@/runtime/server/current"
+import { useWorkspaceLocation } from "@/workspaces/location"
 import { ExternalLink } from "@/runtime/platform/external-link"
 import { decode64 } from "@/runtime/persistence/base64"
 import { handleDocumentSearchKeydown } from "@/shell/commands/search-keydown"
@@ -22,7 +24,12 @@ import { createMenuDismissController } from "@/shell/commands/menu-dismiss"
 import { createEventListener } from "@solid-primitives/event-listener"
 import { matchesModelSearch } from "./search"
 import { SettingsList } from "@/settings/list"
-import { CONSOLE_GROUP_KEY, consoleModelGroup, ProviderModelIcon, ProviderModelSections } from "@/providers/models/provider-group"
+import {
+  CONSOLE_GROUP_KEY,
+  consoleModelGroup,
+  ProviderModelIcon,
+  ProviderModelSections,
+} from "@/providers/models/provider-group"
 import "@/settings/settings.css"
 
 const isFree = (provider: string, cost: { input: number } | undefined) =>
@@ -219,11 +226,19 @@ export function ModelSelectorPopover(props: {
   onClose?: () => void
 }) {
   const dialog = useDialog()
+  const data = useData()
+  const location = useWorkspaceLocation()
   const controller = createModelSelectorController({
     model: props.model,
     provider: () => props.provider,
     onSelect: () => props.onClose?.(),
   })
+  const chatgptPlan = () => {
+    if (!controller.current()?.startsWith("openai:")) return false
+    const connection = data.location.integration.list(location().ref)?.find((item) => item.id === "openai")
+      ?.connections[0]
+    return connection?.type === "credential" && connection.methodID === "chatgpt-token-sharing"
+  }
 
   return (
     <ModelSelectorPopoverView
@@ -231,8 +246,7 @@ export function ModelSelectorPopover(props: {
       models={controller.models}
       groups={controller.groups}
       current={controller.current()}
-      // ConnectionInfo reports only "oauth", not the active method ID. Never infer SIWC from Codex OAuth.
-      chatgptPlan={false}
+      chatgptPlan={chatgptPlan()}
       select={controller.select}
       onManage={() => {
         void import("./manage").then((module) => {

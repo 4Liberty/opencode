@@ -2,6 +2,7 @@ import { Money } from "@opencode/schema/money"
 import { Agent } from "@opencode/schema/agent"
 import { Session } from "@opencode/core/session"
 import { OpenAIResponses } from "@opencode/ai/protocols/openai-responses"
+import { AIError, RateLimitError } from "@opencode/ai"
 import { describe, expect } from "bun:test"
 import { ConfigProvider, DateTime, Effect } from "effect"
 import { exportJWK, generateKeyPair, SignJWT } from "jose"
@@ -21,6 +22,8 @@ import { AbsolutePath } from "@opencode/core/schema"
 import { SessionModelRequest } from "@opencode/core/session/model-request"
 import { SessionModelTransport } from "@opencode/core/session/model-transport"
 import { SessionRunnerModel } from "@opencode/core/session/runner/model"
+import { SessionRunnerRetry } from "@opencode/core/session/runner/retry"
+import { toSessionError } from "@opencode/core/session/to-session-error"
 import { testEffect } from "../lib/effect"
 import { PluginTestLayer } from "./fixture"
 
@@ -91,6 +94,103 @@ describe("OpenAIPlugin", () => {
     }),
   )
 
+  it.effect("stops deterministic SIWC retries for both HTTP and stream failures", () =>
+    Effect.gen(function* () {
+      const credentials = yield* Credential.Service
+      yield* credentials.create({
+        integrationID: Integration.ID.make("openai"),
+        value: Credential.OAuth.make({
+          type: "oauth",
+          methodID: Integration.MethodID.make("chatgpt-token-sharing"),
+          access: "sharing-token",
+          refresh: "refresh",
+          expires: Date.now() + 60 * 60_000,
+          metadata: { clientID: "oaiapp_issued" },
+        }),
+      })
+      yield* addPlugin()
+      const hooks = yield* PluginHooks.Service
+      const codes = [
+        "subscription_sharing_usage_limit_exceeded",
+        "subscription_sharing_v2_user_not_eligible",
+        "subscription_sharing_unsupported_capability",
+        "subscription_sharing_v2_client_not_enabled",
+        "subscription_sharing_v2_route_not_supported",
+        "subscription_sharing_v2_invalid_user",
+      ]
+      for (const code of codes) {
+        for (const body of [
+          JSON.stringify({ error: { code } }),
+          JSON.stringify({ type: "response.failed", response: { error: { code } } }),
+        ]) {
+          const cause = new AIError({ reason: new RateLimitError({ message: "Rate limit exceeded", body }) })
+          const decide = yield* SessionRunnerRetry.policy(Session.ID.make("ses_sharing_retry"))
+          expect(
+            yield* decide({
+              cause,
+              error: toSessionError(cause),
+              agent: Agent.ID.make("build"),
+              model: Model.Ref.make({ providerID: Provider.ID.openai, id: Model.ID.make("gpt-5.5") }),
+              hook: (event) => hooks.trigger("session", "retry", event).pipe(Effect.asVoid),
+              retry: SessionRunnerRetry.isRetryable(cause),
+            }),
+          ).toEqual({ retry: false })
+        }
+      }
+      for (const code of ["subscription_sharing_usage_unavailable", "subscription_sharing_v2_user_unavailable"]) {
+        const event = yield* hooks.trigger("session", "retry", {
+          sessionID: Session.ID.make("ses_sharing_retry"),
+          agent: Agent.ID.make("build"),
+          model: Model.Ref.make({ providerID: Provider.ID.openai, id: Model.ID.make("gpt-5.5") }),
+          error: {
+            type: "provider.rate-limit",
+            message: "Temporary",
+            response: { body: JSON.stringify({ error: { code } }) },
+          },
+          attempt: 2,
+          decision: { retry: true, delay: 1000 },
+        })
+        expect(event.decision).toEqual({ retry: true, delay: 1000 })
+      }
+    }),
+  )
+
+  for (const method of ["chatgpt-browser", "chatgpt-headless", "key"] as const) {
+    it.effect(`does not change ${method} retries for sharing errors`, () =>
+      Effect.gen(function* () {
+        const credentials = yield* Credential.Service
+        yield* credentials.create({
+          integrationID: Integration.ID.make("openai"),
+          value:
+            method === "key"
+              ? Credential.Key.make({ type: "key", key: "sk-test" })
+              : Credential.OAuth.make({
+                  type: "oauth",
+                  methodID: Integration.MethodID.make(method),
+                  access: "codex-token",
+                  refresh: "refresh",
+                  expires: Date.now() + 60 * 60_000,
+                }),
+        })
+        yield* addPlugin()
+        const hooks = yield* PluginHooks.Service
+        const event = yield* hooks.trigger("session", "retry", {
+          sessionID: Session.ID.make("ses_codex_retry"),
+          agent: Agent.ID.make("build"),
+          model: Model.Ref.make({ providerID: Provider.ID.openai, id: Model.ID.make("gpt-5.5") }),
+          error: {
+            type: "provider.rate-limit",
+            message: "Rate limit exceeded",
+            response: { body: '{"error":{"code":"subscription_sharing_usage_limit_exceeded"}}' },
+          },
+          attempt: 2,
+          decision: { retry: true, delay: 1000 },
+        })
+        expect(event.decision).toEqual({ retry: true, delay: 1000 })
+      }),
+    )
+  }
+
   it.live("registers a user-owned ChatGPT agent with a separate IPv4 callback", () =>
     Effect.gen(function* () {
       yield* addPlugin()
@@ -125,27 +225,29 @@ describe("OpenAIPlugin", () => {
         Effect.sync(() =>
           Bun.serve({
             port: 0,
-            fetch: () =>
-              Response.json({
-                models: [
-                  {
-                    slug: "gpt-visible",
-                    display_name: "Visible",
-                    visibility: "list",
-                    supported_in_api: true,
-                    context_window: 272_000,
-                    input_modalities: ["text"],
-                  },
-                  {
-                    slug: "gpt-hidden",
-                    display_name: "Hidden",
-                    visibility: "hide",
-                    supported_in_api: true,
-                    context_window: 272_000,
-                    input_modalities: ["text"],
-                  },
-                ],
-              }),
+            fetch: (request) =>
+              new URL(request.url).pathname === "/error/models"
+                ? new Response(null, { status: 500 })
+                : Response.json({
+                    models: [
+                      {
+                        slug: "gpt-visible",
+                        display_name: "Visible",
+                        visibility: "list",
+                        supported_in_api: true,
+                        context_window: 272_000,
+                        input_modalities: ["text"],
+                      },
+                      {
+                        slug: "gpt-hidden",
+                        display_name: "Hidden",
+                        visibility: "hide",
+                        supported_in_api: true,
+                        context_window: 272_000,
+                        input_modalities: ["text"],
+                      },
+                    ],
+                  }),
           }),
         ),
         (server) => Effect.sync(() => server.stop()),
@@ -155,6 +257,11 @@ describe("OpenAIPlugin", () => {
           (model) => model.slug,
         ),
       ).toEqual(["gpt-visible"])
+      expect(
+        String(
+          yield* Effect.flip(fetchSharingModels("test-token", App.make(), `http://127.0.0.1:${server.port}/error`)),
+        ),
+      ).toContain("ChatGPT model discovery failed: Error: Request failed: 500")
     }),
   )
 
@@ -402,6 +509,35 @@ describe("OpenAIPlugin", () => {
 
       expect(yield* maxTokens(Provider.ID.openai)).toEqual([undefined, undefined])
       expect(yield* maxTokens(Provider.ID.azure)).toEqual([128_000, 128_000])
+    }),
+  )
+
+  it.effect("keeps output limits for token-sharing Responses requests", () =>
+    Effect.gen(function* () {
+      const credentials = yield* Credential.Service
+      yield* credentials.create({
+        integrationID: Integration.ID.make("openai"),
+        value: Credential.OAuth.make({
+          type: "oauth",
+          methodID: Integration.MethodID.make("chatgpt-token-sharing"),
+          access: "sharing-token",
+          refresh: "refresh",
+          expires: Date.now() + 60 * 60_000,
+          metadata: { clientID: "oaiapp_issued" },
+        }),
+      })
+      yield* addPlugin()
+      const hooks = yield* PluginHooks.Service
+      const draft = {
+        sessionID: Session.ID.make("ses_sharing_output"),
+        agent: Agent.ID.make("build"),
+        model: Model.Ref.make({ providerID: Provider.ID.openai, id: Model.ID.make("gpt-5.5") }),
+        system: [],
+        messages: [],
+        options: { maxTokens: 128_000 },
+      }
+      expect((yield* hooks.trigger("session", "context", { ...draft, tools: {} })).options.maxTokens).toBe(128_000)
+      expect((yield* hooks.trigger("session", "compaction", { ...draft, tools: {} })).options.maxTokens).toBe(128_000)
     }),
   )
 

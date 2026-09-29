@@ -28,6 +28,14 @@ const sharingTokenURL = `${issuer}/api/accounts/oauth/token`
 const sharingResource = "https://api.openai.com/v1"
 const sharingScope = "chatgpt.tokens.use.direct"
 const sharingMethodID = Integration.MethodID.make("chatgpt-token-sharing")
+const nonRetryableSharingCodes = [
+  "subscription_sharing_usage_limit_exceeded",
+  "subscription_sharing_v2_user_not_eligible",
+  "subscription_sharing_unsupported_capability",
+  "subscription_sharing_v2_client_not_enabled",
+  "subscription_sharing_v2_route_not_supported",
+  "subscription_sharing_v2_invalid_user",
+]
 const browserMethodID = Integration.MethodID.make("chatgpt-browser")
 const headlessMethodID = Integration.MethodID.make("chatgpt-headless")
 // ChatGPT accounts lost gpt-5.4 and gpt-5.4-mini in Codex on 2026-08-31 (replacements: gpt-5.6-terra, gpt-5.6-luna).
@@ -403,6 +411,15 @@ export const OpenAIPlugin = define({
       editor.method.update(headless(ctx.app))
     })
     yield* load()
+    yield* ctx.session.hook(
+      "retry",
+      (event) =>
+        Effect.sync(() => {
+          if (!sharing || !nonRetryableSharingCodes.some((code) => event.error.response?.body.includes(code))) return
+          event.decision = { retry: false }
+        }),
+      { providerID: Provider.ID.openai },
+    )
     yield* ctx.provider.transform((providers) => {
       const item = providers.get(Provider.ID.openai)
       if (!item) return
@@ -505,6 +522,7 @@ export const OpenAIPlugin = define({
     // The ChatGPT backend rejects a requested output limit, and OpenAI counts one against rate limits.
     const omitOutputLimit = (evt: SessionRequest) =>
       Effect.sync(() => {
+        if (sharing) return
         delete evt.options.maxTokens
       })
     for (const name of ["context", "compaction"] as const)
@@ -653,7 +671,7 @@ function sharingExchange(code: string, clientID: string, redirect: string, pkce:
       redirect_uri: redirect,
       resource: sharingResource,
     }).toString(),
-  })
+  }).pipe(Effect.mapError((cause) => new Error(`ChatGPT token exchange failed: ${String(cause)}`, { cause })))
 }
 
 function sharingRefresh(value: Credential.OAuth, app: App.Info) {
@@ -679,6 +697,7 @@ export function fetchSharingModels(token: string, app: App.Info, baseURL = shari
   return request<unknown>(`${baseURL}/models`, {
     headers: { Authorization: `Bearer ${token}`, "User-Agent": App.useragent(app) },
   }).pipe(
+    Effect.mapError((cause) => new Error(`ChatGPT model discovery failed: ${String(cause)}`, { cause })),
     Effect.flatMap(decodeModels),
     Effect.flatMap((response) => {
       const models = response.models.filter((model) => model.visibility === "list" && model.supported_in_api)
