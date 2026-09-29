@@ -71,3 +71,12 @@ export const LoginMethods = {
     { type: "key", label: "API key" },
   ]),
 }
+
+export const ChatGPTSignIn = {
+  render: renderConnection("openai", [
+    { type: "oauth", id: "chatgpt-token-sharing", label: "Sign in with ChatGPT" },
+    { type: "oauth", id: "chatgpt-browser", label: "ChatGPT Pro/Plus (browser)" },
+    { type: "oauth", id: "chatgpt-headless", label: "ChatGPT Pro/Plus (headless)" },
+    { type: "key", label: "API key" },
+  ]),
+}
