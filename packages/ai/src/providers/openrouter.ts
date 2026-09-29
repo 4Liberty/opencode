@@ -4,6 +4,7 @@ import { Endpoint } from "../route/endpoint.js"
 import { Protocol } from "../route/protocol.js"
 import { AuthOptions, type ProviderAuthOption } from "../route/auth-options.js"
 import { HttpOptions, ProviderID, type CacheHint, type ModelID, type OpenString } from "../schema/index.js"
+import type { CachePolicyObject } from "../schema/options.js"
 import type { ProviderPackage } from "../provider-package.js"
 import { SystemOne } from "../experimental/system-one.js"
 import { OpenAIChat } from "../protocols/openai-chat.js"
@@ -13,6 +14,16 @@ import { isRecord, ProviderShared } from "../protocols/shared.js"
 export const id = ProviderID.make("openrouter")
 const baseURL = "https://openrouter.ai/api/v1"
 const ADAPTER = "openrouter"
+
+const CLAUDE_AUTO: CachePolicyObject = { tools: true, system: true, messages: { tail: 1 } }
+const QWEN_AUTO: CachePolicyObject = { system: true, messages: { tail: 1 } }
+
+const autoCachePolicy = (modelID: string): CachePolicyObject => {
+  if (modelID.startsWith("anthropic/")) return CLAUDE_AUTO
+  // Alibaba ignores tool-definition markers; content breakpoints work across Qwen models that support them.
+  if (modelID.startsWith("qwen/")) return QWEN_AUTO
+  return {}
+}
 
 export interface OpenRouterProviderRouting {
   readonly [key: string]: unknown
@@ -177,6 +188,7 @@ export const route = Route.make({
   id: ADAPTER,
   provider: id,
   providerMetadataKey: "openrouter",
+  autoCachePolicy,
   protocol,
   endpoint: Endpoint.path("/chat/completions", { baseURL }),
   framing: OpenAIChat.framing,

@@ -13,6 +13,7 @@ import { sanitizeSurrogates } from "../utils/sanitize.js"
 import * as ProviderShared from "../protocols/shared.js"
 import { ToolSchemaProjection } from "../protocols/utils/tool-schema.js"
 import type { LanguageModelSanitizerCompatibility, ProtocolID, ProviderOptions } from "../schema/index.js"
+import type { CachePolicyObject } from "../schema/options.js"
 import {
   AIError,
   CompactionResponse,
@@ -57,6 +58,8 @@ export interface Route<
   readonly transport: Transport<Body, Prepared, unknown>
   readonly defaults: RouteDefaults
   readonly body: RouteBody<Body>
+  /** Route-owned default cache placement; explicit request policies bypass it. */
+  readonly autoCachePolicy?: (modelID: string) => CachePolicyObject
   readonly supportsEffortUpdates?: (request: LLMRequest) => boolean
   readonly sanitizer?: LanguageModelSanitizerCompatibility
   readonly with: {
@@ -299,6 +302,7 @@ export interface MakeInput<Body, Frame, Event, State> {
   readonly headers?: (input: { readonly request: LLMRequest }) => Record<string, string>
   /** Route/request defaults used when compiling requests for this route. */
   readonly defaults?: RouteDefaultsInput
+  readonly autoCachePolicy?: (modelID: string) => CachePolicyObject
 }
 
 export interface MakeTransportInput<Body, Prepared, Frame, Event, State> {
@@ -321,6 +325,7 @@ export interface MakeTransportInput<Body, Prepared, Frame, Event, State> {
   readonly transport: Transport<Body, Prepared, Frame>
   /** Route/request defaults used when compiling requests for this route. */
   readonly defaults?: RouteDefaultsInput
+  readonly autoCachePolicy?: (modelID: string) => CachePolicyObject
 }
 
 const streamError = (route: string, message: string, cause: Cause.Cause<unknown>) => {
@@ -389,6 +394,7 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
       transport: routeInput.transport,
       defaults: routeInput.defaults ?? {},
       body: protocol.body,
+      autoCachePolicy: routeInput.autoCachePolicy,
       supportsEffortUpdates: protocol.supportsEffortUpdates,
       sanitizer: protocol.sanitizer,
       with: (patch: RoutePatch<Body, Prepared>) => {
@@ -550,6 +556,7 @@ export function make<Body, Prepared, Frame, Event, State>(
     headers: input.headers,
     transport: HttpTransport.httpJson({ framing: input.framing }),
     defaults: input.defaults,
+    autoCachePolicy: input.autoCachePolicy,
   })
 }
 

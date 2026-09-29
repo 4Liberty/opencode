@@ -32,6 +32,62 @@ describe("OpenRouter", () => {
     }),
   )
 
+  for (const [modelID, markTools, markContent] of [
+    ["anthropic/claude-sonnet-4.6", true, true],
+    ["qwen/qwen-plus", false, true],
+    ["google/gemini-2.5-flash", false, false],
+    ["openai/gpt-5.6-luna", false, false],
+    ["deepseek/deepseek-v4.1-flash", false, false],
+    ["qwen/qwen3.5-plus-02-15", false, true],
+    ["other/unknown-model", false, false],
+  ] as const) {
+    it.effect(`selects OpenRouter auto cache placement for ${modelID}`, () =>
+      Effect.gen(function* () {
+        const prepared = yield* compileRequest(
+          LLM.request({
+            model: OpenRouter.configure({ apiKey: "test-key" }).model(modelID),
+            system: "Stable prefix",
+            tools: [{ name: "lookup", description: "Lookup", inputSchema: { type: "object", properties: {} } }],
+            prompt: "Current turn",
+            promptCacheKey: "session_123",
+          }),
+        )
+        expect(prepared.body.prompt_cache_key).toBe("session_123")
+        expect(prepared.body.tools?.[0]?.cache_control).toEqual(markTools ? { type: "ephemeral" } : undefined)
+        expect(prepared.body.messages).toMatchObject(
+          markContent
+            ? [
+                { role: "system", content: [{ text: "Stable prefix", cache_control: { type: "ephemeral" } }] },
+                { role: "user", content: [{ text: "Current turn", cache_control: { type: "ephemeral" } }] },
+              ]
+            : [
+                { role: "system", content: "Stable prefix" },
+                { role: "user", content: "Current turn" },
+              ],
+        )
+      }),
+    )
+  }
+
+  it.effect("explicit policy and manual hints bypass the OpenRouter model default", () =>
+    Effect.gen(function* () {
+      const prepared = yield* compileRequest(
+        LLM.request({
+          model: OpenRouter.configure({ apiKey: "test-key" }).model("google/gemini-2.5-flash"),
+          system: [{ type: "text", text: "Pinned prefix", cache: new CacheHint({ type: "ephemeral" }) }],
+          tools: [{ name: "lookup", description: "Lookup", inputSchema: { type: "object", properties: {} } }],
+          prompt: "Hello",
+          cache: { tools: true, messages: { tail: 1 } },
+        }),
+      )
+      expect(prepared.body.tools?.[0]?.cache_control).toEqual({ type: "ephemeral" })
+      expect(prepared.body.messages).toMatchObject([
+        { role: "system", content: [{ text: "Pinned prefix", cache_control: { type: "ephemeral" } }] },
+        { role: "user", content: [{ text: "Hello", cache_control: { type: "ephemeral" } }] },
+      ])
+    }),
+  )
+
   it.effect("lowers the native cache policy to OpenRouter cache controls", () =>
     Effect.gen(function* () {
       const prepared = yield* compileRequest(

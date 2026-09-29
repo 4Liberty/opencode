@@ -1,6 +1,8 @@
 // Apply an `LLMRequest.cache` policy by injecting `CacheHint`s onto the parts
 // the policy designates. Runs once at compile time, before the per-protocol
 // body builder, so the existing inline-hint lowering path handles the rest.
+// Routes may override auto placement; explicit policies and hints always use
+// the caller's placement.
 //
 // The default `"auto"` shape places breakpoints at the last tool definition,
 // the first and last distinct system parts, and the conversation tail. This
@@ -24,8 +26,8 @@ const NONE: CachePolicyObject = {}
 const BREAKPOINT_CAP = 4
 
 // Resolution rules:
-//   - undefined   → "auto" — caching is on by default.
-//   - "auto"      → tools + first/last system + final message boundary.
+//   - undefined   → "auto" — use route-appropriate placement by default.
+//   - "auto"      → tools + system + tail, unless the route chooses otherwise.
 //   - "none"      → no auto placement; manual `CacheHint`s still flow.
 //   - object form → exactly what the caller asked for.
 const resolve = (policy: CachePolicy | undefined): CachePolicyObject => {
@@ -156,9 +158,10 @@ const countHints = (request: LLMRequest) =>
 
 export const applyCachePolicy = (request: LLMRequest): LLMRequest => {
   if (!RESPECTS_INLINE_HINTS.has(request.model.route.id)) return request
-  if (request.model.route.id === "openrouter" && (request.cache === undefined || request.cache === "auto"))
-    return request
-  const policy = resolve(request.cache)
+  const policy =
+    request.model.route.autoCachePolicy && (request.cache === undefined || request.cache === "auto")
+      ? request.model.route.autoCachePolicy(request.model.id)
+      : resolve(request.cache)
   if (!policy.tools && !policy.system && !policy.messages) return request
 
   const hint = makeHint(policy.ttlSeconds)
