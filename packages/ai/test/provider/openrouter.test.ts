@@ -248,6 +248,55 @@ describe("OpenRouter", () => {
     }),
   )
 
+  for (const previous of [Message.user("Before"), Message.assistant("Before")]) {
+    it.effect(`allocates one cache slot for a system update after ${previous.role} content`, () =>
+      Effect.gen(function* () {
+        const cache = new CacheHint({ type: "ephemeral", ttlSeconds: 3_600 })
+        for (const used of [0, 2, 3, 4]) {
+          const prepared = yield* compileRequest(
+            LLM.request({
+              model: OpenRouter.configure({ apiKey: "test-key" }).model("anthropic/claude-sonnet-4.6"),
+              cache: "none",
+              system: Array.from({ length: used }, (_, index) => ({
+                type: "text" as const,
+                text: `System ${index}`,
+                cache,
+              })),
+              messages: [
+                previous,
+                Message.system([{ type: "text", text: "Update", cache }]),
+                Message.user([{ type: "text", text: "After", cache }]),
+              ],
+            }),
+          )
+
+          expect(prepared.body.messages.at(-2)).toEqual({
+            role: "user",
+            content:
+              used === 4
+                ? `${previous.role === "user" ? "Before\n" : ""}<system-update>\nUpdate\n</system-update>`
+                : [
+                    ...(previous.role === "user" ? [{ type: "text", text: "Before" }] : []),
+                    {
+                      type: "text",
+                      text: "<system-update>\nUpdate\n</system-update>",
+                      cache_control: { type: "ephemeral", ttl: "1h" },
+                    },
+                  ],
+          })
+          expect(prepared.body.messages.at(-1)).toEqual({
+            role: "user",
+            content:
+              used < 3 ? [{ type: "text", text: "After", cache_control: { type: "ephemeral", ttl: "1h" } }] : "After",
+          })
+          expect(JSON.stringify(prepared.body.messages).match(/"cache_control":/g) ?? []).toHaveLength(
+            Math.min(4, used + 2),
+          )
+        }
+      }),
+    )
+  }
+
   it.effect("does not emit text cache markers on reasoning-only assistant messages", () =>
     Effect.gen(function* () {
       const prepared = yield* compileRequest(
