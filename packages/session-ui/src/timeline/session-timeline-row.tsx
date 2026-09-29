@@ -5,7 +5,6 @@ import type {
   SessionStatus,
 } from "@opencode/client/promise"
 import { useI18n } from "@opencode/ui/context/i18n"
-import { Tooltip } from "@opencode/ui/tooltip"
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js"
 import { Dynamic } from "solid-js/web"
 import type { SessionUserActions, SessionUserAttachmentReference, SessionUserComment } from "../actions"
@@ -316,6 +315,11 @@ export function createSessionTimelineRowRenderer(input: {
     if (message.type === "model-switched") return undefined
     if (message.type === "skill") return { label: i18n.t("ui.tool.skill"), data: message.name }
     if (message.type === "system") {
+      const sources = Array.isArray(message.metadata?.instructionSources)
+        ? message.metadata.instructionSources.filter((item): item is string => typeof item === "string")
+        : undefined
+      if (message.metadata?.notice === "instructions" && sources?.length)
+        return { label: i18n.t("ui.sessionTimeline.notice.instructionsUpdated"), items: sources }
       const prefix = "Instructions updated: "
       if (message.description?.startsWith(prefix)) {
         const keys = message.description
@@ -331,7 +335,9 @@ export function createSessionTimelineRowRenderer(input: {
       return { label: message.description ?? message.text }
     }
     if (message.type !== "synthetic") return undefined
-    if (message.description === "Continuing after restart") return { label: message.description }
+    if (message.metadata?.notice === "restart") return { label: i18n.t("ui.sessionTimeline.notice.restart") }
+    if (message.description === "Continuing after restart")
+      return { label: i18n.t("ui.sessionTimeline.notice.restart") }
     const source = typeof message.metadata?.source === "string" ? message.metadata.source : undefined
     const state = typeof message.metadata?.state === "string" ? message.metadata.state : undefined
     if (source === "subagent" || source === "shell") {
@@ -515,25 +521,12 @@ export function createSessionTimelineRowRenderer(input: {
           }
         >
           {(message) => (
-            <div
-              data-slot="session-timeline-notice"
-              data-type="location-switched"
-              class={`flex h-7 w-full min-w-0 items-center gap-2 py-1 text-[13px] leading-text-compact tracking-[-0.04px] text-v2-text-text-faint ${inset()}`}
-            >
-              <Tooltip
-                appearance="compact"
-                placement="top"
-                value={i18n.t("ui.sessionTimeline.notice.movedTooltip")}
-                class="shrink-0"
-                triggerTabIndex={0}
-              >
-                <bdi data-slot="session-timeline-notice-label" dir="auto" class="font-[530]">
-                  {i18n.t("ui.sessionTimeline.notice.movedTo")}
-                </bdi>
-              </Tooltip>{" "}
-              <bdi data-slot="session-timeline-notice-value" dir="ltr" class="min-w-0 truncate font-[440]">
-                {message().location.directory}
-              </bdi>
+            <div data-slot="session-timeline-notice" data-type="location-switched" class={`w-full py-2 ${inset()}`}>
+              <TimelineSeparator
+                label={i18n.t("ui.sessionTimeline.notice.movedTo")}
+                value={message().location.directory}
+                tooltip={i18n.t("ui.sessionTimeline.notice.movedTooltip")}
+              />
             </div>
           )}
         </Show>
