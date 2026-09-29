@@ -46,7 +46,9 @@ const layer = Layer.effect(
         const exists = yield* sessions.prompt({ sessionID, text: entry.text, delivery: "queue" }).pipe(
           Effect.as(true),
           Effect.catchTag("Session.NotFoundError", () => Effect.succeed(false)),
-          Effect.catchCause((cause) => Effect.logWarning("scheduled prompt failed", { sessionID, cause }).pipe(Effect.as(true))),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("scheduled prompt failed", { sessionID, cause }).pipe(Effect.as(true)),
+          ),
         )
         // A deleted Session ends its schedule instead of retrying forever.
         if (!exists) return yield* kv.remove(prefix + sessionID)
