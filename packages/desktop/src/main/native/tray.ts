@@ -9,7 +9,7 @@ import { traySessionNotification, type TraySessions } from "./tray-sessions"
 import type { TrayIcons } from "./tray-icons"
 import { trayTabs } from "./tray-tabs"
 import { trayStartupPixels } from "./tray-icon-art"
-import { registerTrayShortcut, TRAY_SHORTCUT } from "./tray-shortcut"
+import { registerTrayShortcut } from "./tray-shortcut"
 
 let tray: Tray | undefined
 let actions: TrayActions | undefined
@@ -132,7 +132,7 @@ function createTray(image: NativeImage) {
     if (!menuOpen) item.popUpContextMenu()
   })
   if (!shortcut.registered)
-    log.warn("Unable to register tray shortcut; it may be in use by another application", { shortcut: TRAY_SHORTCUT })
+    log.warn("Unable to register tray shortcut; it may be in use by another application", { shortcut: shortcut.key })
   return item
 }
 

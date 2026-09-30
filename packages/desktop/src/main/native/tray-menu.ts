@@ -18,7 +18,15 @@ export type TrayActions = {
   session: (id: string) => void
 }
 
-export function trayMenu(actions: TrayActions, snapshot: TraySessions, icons?: TrayMenuIcons, sublabels = true) {
+export function trayMenu(
+  actions: TrayActions,
+  snapshot: TraySessions,
+  icons?: TrayMenuIcons,
+  sublabels = true,
+  platform: NodeJS.Platform = process.platform,
+) {
+  // Windows popup menus do not respond to accelerators, so showing them would advertise shortcuts that do nothing.
+  const accelerator = (key: string) => (platform === "win32" ? {} : { accelerator: key })
   const items = snapshot.sessions.flatMap((session, index) => {
     const group = traySessionGroup(session.status)
     const previous = snapshot.sessions[index - 1]
@@ -85,13 +93,13 @@ export function trayMenu(actions: TrayActions, snapshot: TraySessions, icons?: T
     {
       label: nativeT("desktop.tray.newAgent"),
       icon: icons?.action("newAgent"),
-      accelerator: "CommandOrControl+N",
+      ...accelerator("CommandOrControl+N"),
       click: () => actions.trigger("tab.new"),
     },
     {
       label: nativeT("desktop.menu.settings"),
       icon: icons?.action("settings"),
-      accelerator: "CommandOrControl+,",
+      ...accelerator("CommandOrControl+,"),
       click: () => actions.trigger("settings.open"),
     },
     { label: nativeT("desktop.tray.docs"), icon: icons?.action("docs"), click: actions.docs },
@@ -99,7 +107,7 @@ export function trayMenu(actions: TrayActions, snapshot: TraySessions, icons?: T
     {
       label: nativeT("desktop.tray.quit"),
       icon: icons?.action("quit"),
-      accelerator: "CommandOrControl+Q",
+      ...accelerator("CommandOrControl+Q"),
       click: actions.quit,
     },
   ] satisfies MenuItemConstructorOptions[]

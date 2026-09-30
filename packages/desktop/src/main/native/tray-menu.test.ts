@@ -164,7 +164,7 @@ describe("tray menu", () => {
 
   test("uses the native shortcut column instead of adding shortcuts to action labels", () => {
     const actions = { open() {}, trigger() {}, docs() {}, quit() {}, session() {} }
-    const menu = trayMenu(actions, empty)
+    const menu = trayMenu(actions, empty, undefined, true, "darwin")
     expect(
       menu
         .filter((item) => item.click)
@@ -175,6 +175,14 @@ describe("tray menu", () => {
       ["Docs", undefined],
       ["Quit", "CommandOrControl+Q"],
     ])
+  })
+
+  test("shows plain options without shortcuts on Windows", () => {
+    const actions = { open() {}, trigger() {}, docs() {}, quit() {}, session() {} }
+    const menu = trayMenu(actions, empty, undefined, false, "win32")
+    const options = menu.filter((item) => item.click)
+    expect(options.map((item) => item.label)).toEqual(["New Agent…", "Settings", "Docs", "Quit"])
+    expect(options.some((item) => "accelerator" in item)).toBe(false)
   })
 
   test("does not claim stale sessions are live after a connection failure", () => {

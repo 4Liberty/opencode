@@ -56,10 +56,13 @@ highlight and click target, with compact system spacing and default styling. Tra
 positions the visible favicon alongside the title without changing its size, horizontal padding, or shared hover target.
 Platforms without native secondary labels
 retain separate title/detail rows and an invisible alignment spacer. Menu icons have an extra four-point trailing gutter.
-Footer shortcuts use the operating system's separate, subdued shortcut column:
+On macOS and Linux, footer shortcuts use the operating system's separate, subdued shortcut column:
 **Cmd/Ctrl+N** for New Agent, **Cmd/Ctrl+,** for Settings, and **Cmd/Ctrl+Q** for Quit. Docs has no shortcut.
+They work while the tray menu is open. Windows popup menus do not respond to these shortcuts, so on Windows the footer
+items are plain options without shortcut labels.
 
-**Cmd+Option+O** opens the tray globally on macOS (**Ctrl+Alt+O** on Windows/Linux), even while another app is focused.
+**Cmd+Option+O** opens the tray globally on macOS (**Ctrl+Alt+O** on Linux, **Win+Alt+O** on Windows), even while another
+app is focused. Windows avoids Ctrl+Alt because many keyboard layouts use it as AltGr to type characters.
 It is registered when the tray icon appears and released when the tray is disabled or the app quits. If another application
 already owns the combination, the tray remains usable by mouse and a shortcut-registration warning is written to the log.
 

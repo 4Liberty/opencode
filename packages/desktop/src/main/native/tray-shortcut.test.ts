@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { registerTrayShortcut, TRAY_SHORTCUT } from "./tray-shortcut"
+import { registerTrayShortcut, trayShortcut } from "./tray-shortcut"
 
 test("registers Command/Control+Alt+O and invokes the tray opener", () => {
   const callbacks = new Map<string, () => void>()
@@ -19,8 +19,10 @@ test("registers Command/Control+Alt+O and invokes the tray opener", () => {
     () => {
       opened.push("tray")
     },
+    "darwin",
   )
-  expect(TRAY_SHORTCUT).toBe("CommandOrControl+Alt+O")
+  const TRAY_SHORTCUT = "CommandOrControl+Alt+O"
+  expect(shortcut.key).toBe(TRAY_SHORTCUT)
   expect(shortcut.registered).toBe(true)
   callbacks.get(TRAY_SHORTCUT)?.()
   expect(opened).toEqual(["tray"])
@@ -45,4 +47,23 @@ test("does not unregister a shortcut it could not acquire", () => {
   expect(shortcut.registered).toBe(false)
   shortcut.dispose()
   expect(released).toEqual([])
+})
+
+test("uses Win+Alt+O on Windows so AltGr characters remain typeable", () => {
+  expect(trayShortcut("win32")).toBe("Super+Alt+O")
+  expect(trayShortcut("darwin")).toBe("CommandOrControl+Alt+O")
+  expect(trayShortcut("linux")).toBe("CommandOrControl+Alt+O")
+  const registered: string[] = []
+  registerTrayShortcut(
+    {
+      register: (key) => {
+        registered.push(key)
+        return true
+      },
+      unregister: () => {},
+    },
+    () => {},
+    "win32",
+  )
+  expect(registered).toEqual(["Super+Alt+O"])
 })
