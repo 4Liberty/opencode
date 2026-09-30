@@ -317,7 +317,7 @@ describe("acp service directory behavior", () => {
     expect(invalidConfig).toMatchObject({ _tag: "ACPInvalidConfigOptionError" })
   })
 
-  test("converts MCP configs and deduplicates registrations per session and config", async () => {
+  test("registers MCP configs per session and deduplicates identical re-registrations", async () => {
     const local: McpServer = {
       name: "tools",
       command: "bun",
@@ -332,7 +332,7 @@ describe("acp service directory behavior", () => {
       headers: [{ name: "Authorization", value: "Bearer x" }],
     }
     let created = 0
-    const mcp = "/api/experimental/mcp/"
+    const mcp = /^\/api\/experimental\/session\/(ses_\d+)\/mcp\/(\w+)$/
     await using fixture = makeACPFixture({
       fetch(request) {
         if (request.method === "POST" && request.path === "/api/session") {
@@ -342,7 +342,7 @@ describe("acp service directory behavior", () => {
         if (request.method === "GET" && request.path === "/api/session/ses_1") {
           return Response.json({ data: makeSession("ses_1") })
         }
-        if (request.method === "PUT" && request.path.startsWith(mcp)) {
+        if (request.method === "PUT" && mcp.test(request.path)) {
           return new Response(null, { status: 204 })
         }
         return undefined
@@ -354,9 +354,14 @@ describe("acp service directory behavior", () => {
     await fixture.service.resumeSession({ cwd: "/workspace", sessionId: "ses_1", mcpServers: [changed] })
     await fixture.service.newSession({ cwd: "/workspace", mcpServers: [local] })
 
-    const adds = fixture.requests.filter((request) => request.method === "PUT" && request.path.startsWith(mcp))
-    expect(adds).toHaveLength(4)
-    expect(adds.filter((request) => request.path === `${mcp}tools`).map((request) => request.body)).toEqual([
+    const adds = fixture.requests.filter((request) => request.method === "PUT" && mcp.test(request.path))
+    expect(adds.map((request) => request.path.match(mcp)?.slice(1))).toEqual([
+      ["ses_1", "tools"],
+      ["ses_1", "docs"],
+      ["ses_1", "tools"],
+      ["ses_2", "tools"],
+    ])
+    expect(adds.filter((request) => request.path.endsWith("/mcp/tools")).map((request) => request.body)).toEqual([
       {
         config: {
           type: "local",
@@ -379,7 +384,7 @@ describe("acp service directory behavior", () => {
         },
       },
     ])
-    expect(adds.find((request) => request.path === `${mcp}docs`)?.body).toEqual({
+    expect(adds.find((request) => request.path.endsWith("/mcp/docs"))?.body).toEqual({
       config: {
         type: "remote",
         url: "https://example.com/mcp",
@@ -387,12 +392,7 @@ describe("acp service directory behavior", () => {
         oauth: false,
       },
     })
-    expect(adds.map((request) => request.query)).toEqual([
-      { "location[directory]": "/workspace" },
-      { "location[directory]": "/workspace" },
-      { "location[directory]": "/workspace" },
-      { "location[directory]": "/workspace" },
-    ])
+    expect(adds.map((request) => request.query)).toEqual([{}, {}, {}, {}])
   })
 })
 

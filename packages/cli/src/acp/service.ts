@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util"
 import {
+  isMcpServerNotFoundError,
   isSessionNotFoundError,
   type CommandInfo,
   type ModelRef,
@@ -97,7 +98,7 @@ export function make(input: {
   readonly connection: ACPConnection.Connection
 }): Interface {
   const sessions = new Map<string, Attached>()
-  const registeredMcp = new Map<string, Set<string>>()
+  const registeredMcp = new Map<string, Map<string, string>>()
   const active = new Map<string, { readonly control: TurnControl; readonly turn: Promise<PromptResponse> }>()
   const capabilities = { writeTextFile: false, childSessionUpdates: false }
 
@@ -280,6 +281,7 @@ export function make(input: {
         if (!isSessionNotFoundError(error)) throw error
       })
       await turn?.turn.catch(() => {})
+      await releaseMcpServers(input.client, registeredMcp, params.sessionId)
       detach(params.sessionId)
       return {}
     },
@@ -480,25 +482,41 @@ async function messages(client: OpenCodeClient, sessionID: string) {
 
 async function registerMcpServers(
   client: OpenCodeClient,
-  registered: Map<string, Set<string>>,
+  registered: Map<string, Map<string, string>>,
   session: Attached,
   servers: readonly McpServer[],
 ) {
-  const current = registered.get(session.id) ?? new Set<string>()
+  const current = registered.get(session.id) ?? new Map<string, string>()
   registered.set(session.id, current)
   await Promise.all(
     servers.flatMap((server) => {
       const config = mcpConfig(server)
-      const key = `${server.name}:${stableStringify(config)}`
-      if (current.has(key)) return []
-      current.add(key)
+      const key = stableStringify(config)
+      if (current.get(server.name) === key) return []
+      current.set(server.name, key)
       return [
-        client.mcp.add({ server: server.name, location: { directory: session.cwd }, config }).catch((error) => {
-          current.delete(key)
+        client.session.mcp.add({ sessionID: session.id, server: server.name, config }).catch((error) => {
+          if (current.get(server.name) === key) current.delete(server.name)
           throw error
         }),
       ]
     }),
+  )
+}
+
+async function releaseMcpServers(
+  client: OpenCodeClient,
+  registered: Map<string, Map<string, string>>,
+  sessionID: string,
+) {
+  const servers = Array.from(registered.get(sessionID)?.keys() ?? [])
+  registered.delete(sessionID)
+  await Promise.all(
+    servers.map((server) =>
+      client.session.mcp.remove({ sessionID, server }).catch((error) => {
+        if (!isSessionNotFoundError(error) && !isMcpServerNotFoundError(error)) throw error
+      }),
+    ),
   )
 }
 
