@@ -2,9 +2,7 @@ export * as OpenRouterWire from "./openrouter.js"
 
 import { Option, Schema } from "effect"
 import { LLMRequest, Message, type ContentPart, type ReasoningPart } from "../../schema/index.js"
-import { resolveEffortUpdates } from "../../effort-updates.js"
-import type { OpenResponses } from "../open-responses.js"
-import { OpenResponsesOptions } from "./open-responses-options.js"
+import type { OpenAIResponses } from "../openai-responses.js"
 import { isRecord, ProviderShared } from "../shared.js"
 
 const ReplayDetail = Schema.Struct({
@@ -18,11 +16,13 @@ const decodeReplayDetail = Schema.decodeUnknownOption(ReplayDetail)
 
 // OpenRouter's generic Responses API supports chronological effort updates only on eligible models.
 export function supportsEffortUpdates(request: LLMRequest) {
+  if (request.providerOptions?.contextManagement !== undefined) return false
   if (request.providerOptions?.truncation === "auto" || request.http?.body?.truncation === "auto") return false
   if (Schema.is(Schema.Struct({ mode: Schema.Literal("pro") }))(request.providerOptions?.reasoning)) return false
   if (Schema.is(Schema.Struct({ mode: Schema.Literal("pro") }))(request.http?.body?.reasoning)) return false
   return (
-    request.model.compatibility?.supportsEffortUpdates ?? /^~?openai\/gpt-6-(?:astra|sol|luna)$/i.test(request.model.id)
+    request.model.compatibility?.supportsEffortUpdates ??
+    /^~?openai\/(?:gpt-6-(?:astra|sol|luna)|gpt-6\.1-sol)$/i.test(request.model.id)
   )
 }
 
@@ -32,17 +32,13 @@ export function nativeRequest(request: LLMRequest, format: "responses" | "messag
     ? fitReasoning(options.reasoning, request.generation?.maxTokens)
     : undefined
   const disabled = reasoning?.enabled === false || reasoning?.effort === "none"
-  const updates = resolveEffortUpdates(
-    request,
-    OpenResponsesOptions.resolve(request).reasoningEffort ??
-      (typeof reasoning?.effort === "string" ? reasoning.effort : undefined),
-  )
   return LLMRequest.update(request, {
     providerOptions:
       format === "responses"
         ? {
             ...options,
-            reasoningEffort: updates.effort,
+            reasoningEffort:
+              options.reasoningEffort ?? (typeof reasoning?.effort === "string" ? reasoning.effort : undefined),
           }
         : {
             ...options,
@@ -58,7 +54,7 @@ export function nativeRequest(request: LLMRequest, format: "responses" | "messag
                   return { type: "adaptive", ...(reasoning.exclude === true ? { display: "omitted" } : {}) }
               })(),
           },
-    messages: (format === "responses" ? updates.request : request).messages.map((message) => {
+    messages: request.messages.map((message) => {
       if (
         !message.content.some(
           (part) => part.type === "reasoning" && part.providerMetadata?.openrouter?.reasoningDetails !== undefined,
@@ -94,29 +90,21 @@ export function nativeRequest(request: LLMRequest, format: "responses" | "messag
             ]
           }
           const blocks = replay.flatMap<ReasoningPart>((detail) => {
-            if (detail.type === "reasoning.text" && detail.signature)
-              return [
-                {
-                  ...part,
-                  text: detail.text ?? part.text,
-                  providerMetadata: {
-                    ...part.providerMetadata,
-                    openrouter: { ...part.providerMetadata?.openrouter, signature: detail.signature },
-                  },
+            const metadata = (() => {
+              if (detail.type === "reasoning.text" && detail.signature) return { signature: detail.signature }
+              if (detail.type === "reasoning.encrypted" && detail.data) return { redactedData: detail.data }
+            })()
+            if (!metadata) return []
+            return [
+              {
+                ...part,
+                text: metadata.signature ? (detail.text ?? part.text) : "",
+                providerMetadata: {
+                  ...part.providerMetadata,
+                  openrouter: { ...part.providerMetadata?.openrouter, ...metadata },
                 },
-              ]
-            if (detail.type === "reasoning.encrypted" && detail.data)
-              return [
-                {
-                  ...part,
-                  text: "",
-                  providerMetadata: {
-                    ...part.providerMetadata,
-                    openrouter: { ...part.providerMetadata?.openrouter, redactedData: detail.data },
-                  },
-                },
-              ]
-            return []
+              },
+            ]
           })
           return blocks.length > 0 ? blocks : [part]
         }),
@@ -125,24 +113,44 @@ export function nativeRequest(request: LLMRequest, format: "responses" | "messag
   })
 }
 
-export function responsesOptions<Body extends Pick<OpenResponses.OpenResponsesBody, "reasoning">>(
-  request: LLMRequest,
-  body: Body,
-) {
+export function responsesOptions(request: LLMRequest, body: OpenAIResponses.OpenAIResponsesBody) {
   const { usage: _, ...options } = bodyOptions(request.providerOptions, request.generation?.maxTokens)
   return {
     ...options,
     ...body,
     store: false as const,
     // Native lowering may freeze effort at the history baseline; keep it instead of the current effort.
-    ...(options.reasoning || body.reasoning ? { reasoning: { ...options.reasoning, ...body.reasoning } } : {}),
+    ...(options.reasoning || body.reasoning
+      ? {
+          reasoning: {
+            ...options.reasoning,
+            ...body.reasoning,
+            effort: body.reasoning?.effort,
+            summary:
+              body.reasoning?.summary ??
+              (typeof options.reasoning?.summary === "string" ? options.reasoning.summary : undefined),
+          },
+        }
+      : {}),
+    ...(options.text || body.text ? { text: { ...options.text, ...body.text } } : {}),
   }
 }
 
 export const bodyOptions = (input: unknown, maxTokens: number | undefined) => {
   const openrouter = isRecord(input) ? input : {}
-  const { usage, models, provider, plugins, web_search_options, debug, user, reasoning, promptCacheKey, ...options } =
-    openrouter
+  const {
+    usage,
+    models,
+    provider,
+    plugins,
+    web_search_options,
+    debug,
+    user,
+    reasoning,
+    text,
+    promptCacheKey,
+    ...options
+  } = openrouter
   return {
     ...options,
     ...(usage === undefined || usage === true
@@ -159,6 +167,7 @@ export const bodyOptions = (input: unknown, maxTokens: number | undefined) => {
     ...(isRecord(debug) ? { debug } : {}),
     ...(typeof user === "string" ? { user } : {}),
     ...(isRecord(reasoning) ? { reasoning: fitReasoning(reasoning, maxTokens) } : {}),
+    ...(isRecord(text) ? { text } : {}),
   }
 }
 

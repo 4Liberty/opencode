@@ -7,10 +7,10 @@ import { HttpOptions, ProviderID, type CacheHint, type ModelID, type OpenString 
 import type { ProviderPackage } from "../provider-package.js"
 import { SystemOne } from "../experimental/system-one.js"
 import { OpenAIChat } from "../protocols/openai-chat.js"
-import { OpenResponses } from "../protocols/open-responses.js"
+import { OpenAIResponses } from "../protocols/openai-responses.js"
 import { AnthropicMessages } from "../protocols/anthropic-messages.js"
 import { Framing } from "../route/framing.js"
-import { ProviderShared } from "../protocols/shared.js"
+import { JsonObject } from "../protocols/shared.js"
 import { newBreakpoints, ttlBucket } from "../protocols/utils/cache.js"
 import { OpenRouterWire } from "../protocols/utils/openrouter.js"
 
@@ -58,6 +58,7 @@ export interface OpenRouterOptions {
   readonly plugins?: ReadonlyArray<OpenRouterPlugin>
   readonly provider?: OpenRouterProviderRouting
   readonly reasoning?: Readonly<{
+    [key: string]: unknown
     enabled?: boolean
     exclude?: boolean
     effort?: OpenString<"none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max">
@@ -99,29 +100,16 @@ const OpenRouterBody = Schema.StructWithRest(Schema.Struct(OpenAIChat.bodyFields
 ])
 export type OpenRouterBody = Schema.Schema.Type<typeof OpenRouterBody>
 
-const ResponsesReasoning = Schema.StructWithRest(
-  Schema.Struct({
-    enabled: Schema.optional(Schema.Boolean),
-    exclude: Schema.optional(Schema.Boolean),
-    effort: Schema.optional(Schema.String),
-    max_tokens: Schema.optional(Schema.Number),
-    summary: Schema.optional(Schema.String),
-  }),
-  [Schema.Record(Schema.String, Schema.Unknown)],
-)
 const OpenRouterResponsesBody = Schema.StructWithRest(
   Schema.Struct({
-    ...OpenResponses.coreFields,
-    input: Schema.Array(Schema.Union([OpenResponses.InputItem, OpenResponses.ConfigurationUpdate])),
-    stream: Schema.Literal(true),
+    ...OpenAIResponses.OpenAIResponsesBody.fields,
     store: Schema.Literal(false),
-    reasoning: Schema.optional(ResponsesReasoning),
+    reasoning: Schema.optional(JsonObject),
+    text: Schema.optional(JsonObject),
   }),
-  [Schema.Record(Schema.String, Schema.Unknown)],
+  [JsonObject],
 )
-const OpenRouterMessagesBody = Schema.StructWithRest(AnthropicMessages.AnthropicMessagesBody, [
-  Schema.Record(Schema.String, Schema.Unknown),
-])
+const OpenRouterMessagesBody = Schema.StructWithRest(AnthropicMessages.AnthropicMessagesBody, [JsonObject])
 type OpenRouterMessagesBody = Schema.Schema.Type<typeof OpenRouterMessagesBody>
 
 export const protocol = Protocol.make({
@@ -161,19 +149,15 @@ export const protocol = Protocol.make({
 })
 
 const responsesProtocol = Protocol.make({
-  ...OpenResponses.protocol,
+  ...OpenAIResponses.protocol,
   id: "openrouter-responses",
   supportsEffortUpdates: OpenRouterWire.supportsEffortUpdates,
   body: {
     schema: OpenRouterResponsesBody,
     from: (request) =>
-      OpenResponses.fromRequestWithAdapter(OpenRouterWire.nativeRequest(request, "responses"), {
-        id: "openrouter-responses",
-        name: "OpenRouter Responses",
-      }).pipe(
-        Effect.map((body) => OpenRouterWire.responsesOptions(request, body)),
-        Effect.flatMap(ProviderShared.validateWith(Schema.decodeUnknownEffect(OpenRouterResponsesBody))),
-      ),
+      OpenAIResponses.protocol.body
+        .from(OpenRouterWire.nativeRequest(request, "responses"))
+        .pipe(Effect.map((body) => OpenRouterWire.responsesOptions(request, body))),
   },
 })
 const messagesProtocol = Protocol.make({

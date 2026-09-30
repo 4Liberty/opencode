@@ -3,24 +3,48 @@ import { Effect } from "effect"
 import { CacheHint, LLM, Message } from "../../src/index.js"
 import { LLMClient } from "../../src/route.js"
 import { compileRequest } from "../../src/route/client.js"
-import * as OpenRouter from "../../src/providers/openrouter.js"
+import { OpenRouter } from "../../src/providers/openrouter.js"
 import { it } from "../lib/effect.js"
 import { fixedResponse } from "../lib/http.js"
 import { sseEvents } from "../lib/sse.js"
 
 describe("OpenRouter", () => {
-  it.effect("routes OpenAI, xAI, and Meta models through the same generic Responses protocol", () =>
+  it.effect("routes OpenAI, xAI, and Meta models through the same namespace-aware Responses protocol", () =>
     Effect.forEach(["openai/gpt-4o-mini", "x-ai/grok-4.3", "meta/muse-spark-1.3", "~x-ai/grok-latest"], (id) =>
       Effect.gen(function* () {
         const model = OpenRouter.configure({
           apiKey: "test-key",
           providerOptions: {
-            reasoning: { effort: "low", exclude: true },
-            text: { verbosity: "low" },
+            reasoning: { effort: "low", exclude: true, summary: "detailed" },
+            text: { verbosity: "low", format: { type: "json_schema", name: "result", schema: { type: "object" } } },
             provider: { allow_fallbacks: false },
           },
         }).model(id)
-        const prepared = yield* compileRequest(LLM.request({ model, prompt: "Say hello." }))
+        const prepared = yield* compileRequest(
+          LLM.request({
+            model,
+            prompt: "Say hello.",
+            tools: [
+              {
+                type: "namespace",
+                name: "crm",
+                tools: [
+                  {
+                    type: "namespace",
+                    name: "contacts",
+                    tools: [
+                      {
+                        name: "lookup",
+                        description: "Look up a contact",
+                        inputSchema: { type: "object", properties: {} },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          }),
+        )
 
         expect(model.route.endpoint.baseURL).toBe("https://openrouter.ai/api/v1")
         expect(prepared.route).toBe("openrouter-responses")
@@ -31,8 +55,9 @@ describe("OpenRouter", () => {
           stream: true,
           store: false,
           include: ["reasoning.encrypted_content"],
-          reasoning: { effort: "low", exclude: true },
-          text: { verbosity: "low" },
+          reasoning: { effort: "low", exclude: true, summary: "detailed" },
+          text: { verbosity: "low", format: { type: "json_schema", name: "result", schema: { type: "object" } } },
+          tools: [{ type: "namespace", name: "crm", tools: [{ type: "function", name: "contacts_lookup" }] }],
           provider: { allow_fallbacks: false },
         })
       }),
@@ -92,17 +117,17 @@ describe("OpenRouter", () => {
     Effect.gen(function* () {
       const openrouter = OpenRouter.configure({
         apiKey: "test-key",
-        providerOptions: { provider: { allow_fallbacks: false }, reasoning: { effort: "low" } },
+        providerOptions: { provider: { allow_fallbacks: false }, reasoning: { effort: "low", summary: "detailed" } },
       })
       const messages = [Message.effort({ previous: "high", effort: "low" }), Message.user("Hello")]
-      const response = yield* compileRequest(LLM.request({ model: openrouter.model("openai/gpt-6-luna"), messages }))
+      const response = yield* compileRequest(LLM.request({ model: openrouter.model("openai/gpt-6.1-sol"), messages }))
       const message = yield* compileRequest(
         LLM.request({ model: openrouter.model("anthropic/claude-fable-5.1"), messages }),
       )
 
       expect(response.body).toMatchObject({
         provider: { allow_fallbacks: false },
-        reasoning: { effort: "high" },
+        reasoning: { effort: "high", summary: "detailed" },
         input: [{ type: "configuration_update", reasoning: { effort: "low" } }, { role: "user" }],
       })
       expect(message.body).toMatchObject({
