@@ -26,7 +26,7 @@ const Body = Schema.Struct({
 })
 
 const fromRequest = Effect.fn("MetaMessages.fromRequest")(function* (request: LLMRequest) {
-  const tools = ProviderShared.flattenedTools(request.tools)
+  const tools = request.tools.filter((tool) => tool.type === "tool")
   const body = yield* AnthropicMessages.protocol.body.from(request)
   return {
     ...body,

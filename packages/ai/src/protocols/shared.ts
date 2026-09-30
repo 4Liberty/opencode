@@ -9,13 +9,11 @@ import {
   AIError,
   LLMRequest,
   Message,
-  ToolDefinition,
   type ContentPart,
   type MediaPart,
   type OpenString,
   type ProviderID,
   type TextPart,
-  type ToolEntry,
   type ToolResultPart,
 } from "../schema/index.js"
 import { Json, decodeJson, encodeJson } from "../utils/json.js"
@@ -286,10 +284,6 @@ export const unsupportedOperation = (input: {
       cause: input.cause,
     }),
   })
-
-/** The route flattens namespaces before a flat protocol's `body.from`, so only plain tools remain. */
-export const flattenedTools = (tools: ReadonlyArray<ToolEntry>) =>
-  tools.filter((tool): tool is ToolDefinition => tool.type === "tool")
 
 export const matchToolChoice = <Auto, None, Required, Tool>(
   route: string,

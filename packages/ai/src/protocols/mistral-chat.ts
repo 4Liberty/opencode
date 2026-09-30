@@ -390,7 +390,7 @@ export const fromRequest = Effect.fn("MistralChat.fromRequest")(function* (reque
         tool: (name) => ({ type: "function" as const, function: { name } }),
       })
     : undefined
-  const tools = ProviderShared.flattenedTools(request.tools)
+  const tools = request.tools.filter((tool) => tool.type === "tool")
   return {
     model: request.model.id,
     messages: yield* lowerMessages(request),

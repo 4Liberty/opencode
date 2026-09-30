@@ -181,8 +181,9 @@ const lowerToolEntry = Effect.fn("OpenAIResponses.lowerToolEntry")(function* (to
     type: "namespace" as const,
     name: tool.name,
     description: tool.description ?? `Tools in the ${tool.name} namespace.`,
-    tools: yield* Effect.forEach(ProviderShared.flattenedTools(tool.tools), (leaf) =>
-      OpenResponses.lowerTool(NAME, leaf),
+    tools: yield* Effect.forEach(
+      tool.tools.filter((leaf) => leaf.type === "tool"),
+      (leaf) => OpenResponses.lowerTool(NAME, leaf),
     ),
   }
 })
