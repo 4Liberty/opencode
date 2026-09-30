@@ -1,12 +1,13 @@
 import { Effect } from "effect"
 import {
-  AIError,
   LLMRequest,
   Message,
   ToolDefinition,
+  type ContentPart,
   type LLMEvent,
+  type ToolCallPart,
   type ToolEntry,
-  type ToolNamespace,
+  type ToolResultPart,
 } from "./schema/index.js"
 import { ProviderShared } from "./protocols/shared.js"
 
@@ -20,95 +21,73 @@ import { ProviderShared } from "./protocols/shared.js"
  */
 export type NamespaceStyle = "flat" | "native"
 
-interface ToolName {
+interface Name {
   readonly namespace?: string
   readonly name: string
 }
 
-interface Leaf {
-  readonly namespace?: string
-  readonly tool: ToolDefinition
-}
-
-/**
- * Lower declared tool names in a request to the protocol's wire names, and
- * return the inverse for the protocol's tool events.
- */
+/** Lower declared tool names to wire names, and return `raise` to map tool events back. */
 export const lower = Effect.fn("ToolNames.lower")(function* (request: LLMRequest, style: NamespaceStyle) {
-  const leaves = yield* collect(request.tools, [])
-  const names = leaves.map((leaf) => {
-    const declared = { namespace: leaf.namespace, name: leaf.tool.name }
-    return { declared, wire: key(wire(declared, style)) }
-  })
-  const collision = names.flatMap((entry, index) =>
-    names
-      .slice(0, index)
-      .filter((other) => other.wire === entry.wire)
-      .map((other) => [other, entry] as const),
-  )[0]
-  if (collision !== undefined)
-    return yield* ProviderShared.invalidRequest(
-      `Tools "${key(collision[0].declared)}" and "${key(collision[1].declared)}" both use the provider tool name "${collision[1].wire}"`,
-    )
-  const declared = new Map(names.map((entry) => [entry.wire, entry.declared]))
+  const names = new Map<string, Name>()
+  for (const leaf of walk(request.tools)) {
+    const bad = leaf.path.find((part) => part.includes("."))
+    if (bad !== undefined) return yield* ProviderShared.invalidRequest(`Tool namespace "${bad}" must not contain "."`)
+    const name = { namespace: leaf.path.join(".") || undefined, name: leaf.tool.name }
+    const key = id(wire(name, style))
+    const taken = names.get(key)
+    if (taken)
+      return yield* ProviderShared.invalidRequest(
+        `Tools "${id(taken)}" and "${id(name)}" both use the provider tool name "${key}"`,
+      )
+    names.set(key, name)
+  }
+
+  const named = (part: ContentPart): part is ToolCallPart | ToolResultPart =>
+    (part.type === "tool-call" || part.type === "tool-result") && part.namespace !== undefined
+
   return {
     request: LLMRequest.update(request, {
-      tools: style === "flat" ? leaves.map((leaf) => rename(leaf, style)) : yield* nativeTools(request.tools),
-      messages: lowerMessages(request.messages, style),
+      // Native namespaces are one level deep, so deeper levels join into the leaf name.
+      tools:
+        style === "flat"
+          ? flatten(request.tools)
+          : request.tools.map((tool) => (tool.type === "tool" ? tool : { ...tool, tools: flatten(tool.tools) })),
+      messages: request.messages.map((msg) =>
+        msg.content.some(named)
+          ? new Message({
+              ...msg,
+              content: msg.content.map((part) => (named(part) ? { ...part, ...wire(part, style) } : part)),
+            })
+          : msg,
+      ),
     }),
     raise: (event: LLMEvent): LLMEvent => {
-      if (!("name" in event)) return event
-      const name = declared.get(key(event))
-      return name === undefined ? event : { ...event, namespace: name.namespace, name: name.name }
+      const name = "name" in event ? names.get(id(event)) : undefined
+      return name ? { ...event, ...name } : event
     },
   }
 })
 
-const collect = (tools: ReadonlyArray<ToolEntry>, path: ReadonlyArray<string>): Effect.Effect<Leaf[], AIError> =>
-  Effect.forEach(tools, (tool) => {
-    if (tool.type === "tool")
-      return Effect.succeed([{ namespace: path.length === 0 ? undefined : path.join("."), tool }])
-    if (tool.name.includes("."))
-      return ProviderShared.invalidRequest(`Tool namespace "${tool.name}" must not contain "."`)
-    return collect(tool.tools, [...path, tool.name])
-  }).pipe(Effect.map((groups) => groups.flat()))
+const walk = (
+  tools: ReadonlyArray<ToolEntry>,
+  path: ReadonlyArray<string> = [],
+): Array<{ readonly path: ReadonlyArray<string>; readonly tool: ToolDefinition }> =>
+  tools.flatMap((tool) => (tool.type === "tool" ? [{ path, tool }] : walk(tool.tools, [...path, tool.name])))
 
-// Native namespaces are one level deep, so deeper levels join into the leaf name.
-const nativeTools = (tools: ReadonlyArray<ToolEntry>) =>
-  Effect.forEach(
-    tools,
-    (tool): Effect.Effect<ToolEntry, AIError> =>
-      tool.type === "tool"
-        ? Effect.succeed(tool)
-        : collect(tool.tools, [tool.name]).pipe(
-            Effect.map((leaves): ToolNamespace => ({ ...tool, tools: leaves.map((leaf) => rename(leaf, "native")) })),
-          ),
+const flatten = (tools: ReadonlyArray<ToolEntry>) =>
+  walk(tools).map((leaf) =>
+    leaf.path.length === 0
+      ? leaf.tool
+      : new ToolDefinition({ ...leaf.tool, name: [...leaf.path, leaf.tool.name].join("_") }),
   )
 
-const lowerMessages = (messages: ReadonlyArray<Message>, style: NamespaceStyle) =>
-  messages.map((message) => {
-    const content = message.content.map((part) => {
-      if ((part.type !== "tool-call" && part.type !== "tool-result") || part.namespace === undefined) return part
-      const name = wire(part, style)
-      return { ...part, namespace: name.namespace, name: name.name }
-    })
-    return content.every((part, index) => part === message.content[index])
-      ? message
-      : new Message({ ...message, content })
-  })
-
-const rename = (leaf: Leaf, style: NamespaceStyle) =>
-  leaf.namespace === undefined
-    ? leaf.tool
-    : new ToolDefinition({ ...leaf.tool, name: wire({ namespace: leaf.namespace, name: leaf.tool.name }, style).name })
-
-const wire = (tool: ToolName, style: NamespaceStyle): ToolName => {
-  if (tool.namespace === undefined) return { name: tool.name }
-  const path = tool.namespace.split(".")
-  if (style === "flat") return { name: [...path, tool.name].join("_") }
-  return { namespace: path[0], name: [...path.slice(1), tool.name].join("_") }
+const wire = (tool: Name, style: NamespaceStyle): Name => {
+  const path = tool.namespace?.split(".") ?? []
+  if (style === "native" && path.length > 0)
+    return { namespace: path[0], name: [...path.slice(1), tool.name].join("_") }
+  return { namespace: undefined, name: [...path, tool.name].join("_") }
 }
 
-const key = (tool: ToolName) => (tool.namespace === undefined ? tool.name : `${tool.namespace}.${tool.name}`)
+const id = (tool: Name) => (tool.namespace ? `${tool.namespace}.${tool.name}` : tool.name)
 
 export * as ToolNames from "./tool-names.js"
