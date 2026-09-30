@@ -3,6 +3,7 @@ import { createStore } from "solid-js/store"
 import { useParams } from "@solidjs/router"
 import { DataProvider } from "@opencode/session-ui/context"
 import { SessionUserMessage } from "@opencode/session-ui/message"
+import { isLocationNotFoundError } from "@opencode/client/promise"
 import { TextShimmer } from "@opencode/ui/text-shimmer"
 import { CommentsProvider } from "@/composer/comments"
 import { readPromptPresentation } from "@/composer/comment-note"
@@ -29,7 +30,6 @@ import { createSessionResolution } from "./session-resolution"
 import { SessionScreen } from "./screen"
 import { PreparingComposer } from "./preparing-composer"
 import type { MissingLocation } from "./composer/location-missing"
-import { containsDirectory } from "@/workspaces/paths"
 
 export function TargetSessionRouteContent() {
   const params = useParams<{ serverKey: string; id: string }>()
@@ -49,21 +49,18 @@ export function TargetSessionRouteContent() {
     onCleanup(() => {
       stale = true
     })
-    const api = server.ctx.sdk.api.worktree
-    // A missing row alone cannot distinguish a deleted worktree from a directory
-    // that was never registered. Preserve positive evidence before refresh prunes it.
-    const coversSession = (item: { directory: string; strategy?: string }) =>
-      !!item.strategy && containsDirectory(item.directory, directory)
-    void api
-      .list({ projectID: project.id })
-      .then(async (before) => {
-        if (stale || !before.some(coversSession)) return
-        await api.refresh({ projectID: project.id })
-        const after = await api.list({ projectID: project.id })
-        if (stale || after.some(coversSession) || server.ctx.sdk.connection.status() !== "connected") return
-        setLocationState("missing", { sessionID: session.id, projectID: project.id, directory })
-      })
-      .catch(() => undefined)
+    void server.ctx.sdk.api.location.get({ location: { directory } }).then(
+      () => undefined,
+      (error) => {
+        if (
+          !stale &&
+          server.ctx.sdk.connection.status() === "connected" &&
+          isLocationNotFoundError(error) &&
+          error.directory === directory
+        )
+          setLocationState("missing", { sessionID: session.id, projectID: project.id, directory })
+      },
+    )
   })
   const missing = createMemo(() => {
     const session = data.session.get(params.id)
