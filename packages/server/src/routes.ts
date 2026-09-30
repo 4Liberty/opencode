@@ -22,7 +22,6 @@ import { ShellSelect } from "@opencode/core/shell/select"
 import { Job } from "@opencode/core/job"
 import { Mcp } from "@opencode/core/mcp/index"
 import { Global } from "@opencode/util/global"
-import { FSUtil } from "@opencode/util/fs-util"
 import { InstructionDiscovery } from "@opencode/core/instruction-discovery"
 import { LocationServiceMap } from "@opencode/core/location-service-map"
 import { LocationActivity } from "@opencode/core/location-activity"
@@ -52,7 +51,6 @@ import type { ServerOptions } from "./options"
 
 const applicationServiceNodes = [
   Global.node,
-  FSUtil.node,
   Database.node,
   Bus.node,
   EventLogger.node,
@@ -170,7 +168,6 @@ function makeRoutes<AuthError, AuthServices>(
             PermissionSaved.Service,
             PluginUpdate.Service,
             Project.Service,
-            FSUtil.Service,
             WellKnown.Service,
           )(context),
         ),

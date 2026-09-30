@@ -1,7 +1,7 @@
 import { Location } from "@opencode/schema/location"
-import { Schema } from "effect"
-import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
-import { LocationNotFoundError, ServiceUnavailableError } from "../errors.js"
+import { Context, Schema } from "effect"
+import { HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
+import { ServiceUnavailableError } from "../errors.js"
 
 export const LocationQuery = Schema.Struct({
   location: Schema.optional(
@@ -26,16 +26,18 @@ export const locationQueryOpenApi = OpenApi.annotations({
   },
 })
 
-// Get checks the path before entering the location scope; reload acts on all
-// loaded locations and must not boot the caller's location first.
-export const makeLocationGroup = () =>
+// Middleware is applied per endpoint: reload acts on every loaded location and
+// must not boot the caller's location first.
+export const makeLocationGroup = <LocationId extends HttpApiMiddleware.AnyId, LocationService>(
+  locationMiddleware: Context.Key<LocationId, LocationService>,
+) =>
   HttpApiGroup.make("server.location")
     .add(
       HttpApiEndpoint.get("location.get", "/api/location", {
         query: LocationQuery,
         success: Location.PublicInfo,
-        error: LocationNotFoundError,
       })
+        .middleware(locationMiddleware)
         .annotateMerge(locationQueryOpenApi)
         .annotateMerge(
           OpenApi.annotations({
