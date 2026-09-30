@@ -34,6 +34,8 @@ const pendingMarkdown = '[data-component="markdown"]:not([data-markdown-ready])'
 // exactly to the end, while a one-pixel nudge upward is a deliberate move away from it.
 const endEpsilon = 0.5
 const upwardKeys = new Set(["up", "page-up", "home"])
+// Stuck headers can clear the session title's 16px fade only where they can detect being stuck and cover it.
+const coverTitleFade = CSS.supports("container-type", "scroll-state")
 const cache = new Map<
   string,
   {
@@ -683,7 +685,10 @@ export function createTimelineVirtualizer(input: Input) {
           onScroll={handleListScroll}
           onClick={input.onSelectionInteraction}
           class="relative min-w-0 w-full h-full"
-          style={{ "--sticky-accordion-top": input.showHeader() ? "48px" : "0px" }}
+          style={{
+            "--sticky-accordion-top": !input.showHeader() ? "0px" : coverTitleFade ? "64px" : "48px",
+            "--sticky-accordion-fade": input.showHeader() && coverTitleFade ? "16px" : "0px",
+          }}
         >
           <Show when={input.showHeader()} fallback={<div aria-hidden="true" class="h-4 md:hidden" />}>
             {props.header}

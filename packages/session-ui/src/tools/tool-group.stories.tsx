@@ -166,7 +166,7 @@ export const StickyHeader = {
       <section
         data-story="sticky-header-scroll"
         class="relative w-full max-w-[1030px] overflow-y-auto bg-v2-background-bg-base"
-        style={{ height: `${args.height}px`, "--sticky-accordion-top": "48px" }}
+        style={{ height: `${args.height}px`, "--sticky-accordion-top": "64px", "--sticky-accordion-fade": "16px" }}
       >
         <div class="sticky top-0 z-30 w-full bg-[linear-gradient(to_bottom,var(--v2-background-bg-base)_48px,transparent)] pb-4 pe-3 ps-2.5">
           <div class="flex h-12 items-center px-1 text-[13px] font-[530] leading-4 tracking-[-0.04px] text-v2-text-text-base">

@@ -669,9 +669,41 @@
       background-color: var(--v2-background-bg-base);
     }
 
-    /* Nested sticky file headers stop below the open group header. */
+    /* Nested sticky file headers stop below the open group header, which already covers the fade. */
     > [data-slot="collapsible-content"] {
       --sticky-accordion-top: calc(var(--context-group-sticky-top) + 28px + var(--tool-content-gap));
+      --sticky-accordion-fade: 0px;
+    }
+  }
+}
+
+/* Stuck headers sit below the session title fade and cover the faded strip above them. */
+[data-component="collapsed-tool-group"] > [data-component="collapsible"] > [data-slot="collapsible-trigger"],
+:is([data-component="edit-tool"], [data-component="write-tool"], [data-component="apply-patch-tool"])
+  > [data-component="collapsible"]
+  > [data-slot="collapsible-trigger"] {
+  &:is([aria-expanded="true"], [data-locked]) {
+    container-type: scroll-state;
+  }
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    bottom: 100%;
+    display: none;
+    height: var(--sticky-accordion-fade, 0px);
+    background-color: var(--v2-background-bg-base);
+  }
+}
+
+@container scroll-state(stuck: top) {
+  [data-component="collapsed-tool-group"] > [data-component="collapsible"] > [data-slot="collapsible-trigger"],
+  :is([data-component="edit-tool"], [data-component="write-tool"], [data-component="apply-patch-tool"])
+    > [data-component="collapsible"]
+    > [data-slot="collapsible-trigger"] {
+    &::before {
+      display: block;
     }
   }
 }
@@ -1292,6 +1324,8 @@
   }
 
   > [data-component="collapsible"] > [data-slot="collapsible-content"] {
+    /* The sticky tool title above the file headers already covers the fade. */
+    --sticky-accordion-fade: 0px;
     border: none;
     border-inline-start: none;
     margin-inline-start: 0;

@@ -182,7 +182,8 @@ for (const scenario of scenarios) {
             .poll(() =>
               header.evaluate((element) => {
                 const viewport = element.closest<HTMLElement>(".scroll-view__viewport")!
-                const title = viewport.querySelector("[data-session-title]")?.firstElementChild
+                // Stuck headers sit below the whole title, including its fade.
+                const title = viewport.querySelector("[data-session-title]")
                 const toolTitle = element
                   .closest('[data-component="edit-tool"]')
                   ?.querySelector('[data-slot="collapsible-trigger"][data-locked]')
@@ -194,7 +195,13 @@ for (const scenario of scenarios) {
                 const top = sessionTop + (group?.getBoundingClientRect().height ?? 0)
                 const rect = element.getBoundingClientRect()
                 const trigger = element.querySelector("button")!
+                // The first stuck header covers the faded strip between it and the title.
+                const cover = getComputedStyle(group ?? toolTitle ?? element, "::before")
+                const fade = title
+                  ? title.getBoundingClientRect().height - title.firstElementChild!.getBoundingClientRect().height
+                  : 0
                 return {
+                  cover: cover.display === "block" && cover.height === `${fade}px`,
                   gap: Math.abs(rect.top - top - (toolTitle?.getBoundingClientRect().height ?? 0)),
                   groupGap: group ? Math.abs(group.getBoundingClientRect().top - sessionTop) : 0,
                   titleGap: toolTitle ? Math.abs(toolTitle.getBoundingClientRect().top - top) : 0,
@@ -204,7 +211,7 @@ for (const scenario of scenarios) {
                 }
               }),
             )
-            .toEqual({ gap: 0, groupGap: 0, titleGap: 0, clickable: true })
+            .toEqual({ cover: true, gap: 0, groupGap: 0, titleGap: 0, clickable: true })
           await page.screenshot({ path: info.outputPath(`${file}.png`) })
         }
 

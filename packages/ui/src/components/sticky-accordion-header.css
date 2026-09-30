@@ -3,4 +3,22 @@
   top: calc(var(--sticky-accordion-top, 0px) + var(--sticky-accordion-offset, 0px));
   z-index: 10;
   background-color: var(--background-stronger);
+  container-type: scroll-state;
+
+  /* When stuck, cover the faded strip that --sticky-accordion-fade reserves above the header. */
+  &::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    bottom: 100%;
+    display: none;
+    height: var(--sticky-accordion-fade, 0px);
+    background-color: var(--v2-background-bg-base);
+  }
+}
+
+@container scroll-state(stuck: top) {
+  [data-component="sticky-accordion-header"]::before {
+    display: block;
+  }
 }
