@@ -287,11 +287,8 @@ export const unsupportedOperation = (input: {
     }),
   })
 
-/**
- * Tool definitions of a route-lowered request. The route flattens namespaces
- * before a flat protocol's `body.from`, so no namespace reaches this point.
- */
-export const toolDefinitions = (tools: ReadonlyArray<ToolEntry>) =>
+/** The route flattens namespaces before a flat protocol's `body.from`, so only plain tools remain. */
+export const flatTools = (tools: ReadonlyArray<ToolEntry>) =>
   tools.filter((tool): tool is ToolDefinition => tool.type === "tool")
 
 export const matchToolChoice = <Auto, None, Required, Tool>(

@@ -1031,10 +1031,9 @@ const fromRequest = Effect.fn("AnthropicMessages.fromRequest")(function* (reques
   // messages. Tools live highest in the cache hierarchy, so when callers
   // over-mark we keep their tool hints and shed the message-tail ones first.
   const breakpoints = Cache.newBreakpoints(ANTHROPIC_BREAKPOINT_CAP)
-  const definitions = ProviderShared.toolDefinitions(request.tools)
-  const tools = definitions.length === 0 ? undefined : definitions.map((tool) => lowerTool(breakpoints, tool))
+  const tools = ProviderShared.flatTools(request.tools).map((tool) => lowerTool(breakpoints, tool))
   // Anthropic rejects tool_choice when tools are absent; "none" is only meaningful with tools present.
-  const toolChoice = tools === undefined || !request.toolChoice ? undefined : yield* lowerToolChoice(request.toolChoice)
+  const toolChoice = tools.length === 0 || !request.toolChoice ? undefined : yield* lowerToolChoice(request.toolChoice)
   const systemParts = request.system.filter((part) => part.text.length > 0)
   const system =
     systemParts.length === 0
@@ -1057,7 +1056,7 @@ const fromRequest = Effect.fn("AnthropicMessages.fromRequest")(function* (reques
     model: request.model.id,
     system,
     messages,
-    tools,
+    tools: tools.length === 0 ? undefined : tools,
     tool_choice: toolChoice,
     stream: true as const,
     max_tokens: maxTokens,
