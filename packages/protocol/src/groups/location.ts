@@ -1,7 +1,7 @@
 import { Location } from "@opencode/schema/location"
-import { Context, Schema } from "effect"
-import { HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
-import { ServiceUnavailableError } from "../errors.js"
+import { Schema } from "effect"
+import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
+import { LocationNotFoundError, ServiceUnavailableError } from "../errors.js"
 
 export const LocationQuery = Schema.Struct({
   location: Schema.optional(
@@ -10,10 +10,6 @@ export const LocationQuery = Schema.Struct({
     }),
   ),
 }).annotate({ identifier: "LocationQuery" })
-
-const ProbeQuery = Schema.Struct({
-  directory: Schema.String,
-}).annotate({ identifier: "LocationProbeQuery" })
 
 export const locationQueryOpenApi = OpenApi.annotations({
   transform: (operation) => {
@@ -30,31 +26,16 @@ export const locationQueryOpenApi = OpenApi.annotations({
   },
 })
 
-// Middleware is applied per endpoint: reload acts on every loaded location and
-// must not boot the caller's location first.
-export const makeLocationGroup = <LocationId extends HttpApiMiddleware.AnyId, LocationService>(
-  locationMiddleware: Context.Key<LocationId, LocationService>,
-) =>
+// Get checks the path before entering the location scope; reload acts on all
+// loaded locations and must not boot the caller's location first.
+export const makeLocationGroup = () =>
   HttpApiGroup.make("server.location")
-    .add(
-      HttpApiEndpoint.get("location.probe", "/api/location/probe", {
-        query: ProbeQuery,
-        success: Schema.Struct({ exists: Schema.Boolean }),
-      }).annotateMerge(
-        OpenApi.annotations({
-          identifier: "location.probe",
-          summary: "Probe location path",
-          description:
-            "Check if an explicit path exists without loading its location. Only filesystem NotFound returns false; other filesystem failures do not imply absence.",
-        }),
-      ),
-    )
     .add(
       HttpApiEndpoint.get("location.get", "/api/location", {
         query: LocationQuery,
         success: Location.PublicInfo,
+        error: LocationNotFoundError,
       })
-        .middleware(locationMiddleware)
         .annotateMerge(locationQueryOpenApi)
         .annotateMerge(
           OpenApi.annotations({

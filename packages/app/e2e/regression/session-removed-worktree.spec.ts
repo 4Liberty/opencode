@@ -22,9 +22,13 @@ test("keeps a session in a removed worktree readable and movable", async ({ page
   })
   await page.route("**/api/**", (route) => {
     const url = new URL(route.request().url())
-    if (url.pathname === "/api/location/probe" && url.searchParams.get("directory") === missing)
-      return route.fulfill({ json: { exists: false }, headers: { "access-control-allow-origin": "*" } })
     if (url.searchParams.get("location[directory]") !== missing) return route.fallback()
+    if (url.pathname === "/api/location")
+      return route.fulfill({
+        status: 404,
+        json: { _tag: "LocationNotFoundError", directory: missing, message: `Location not found: ${missing}` },
+        headers: { "access-control-allow-origin": "*" },
+      })
     if (!["/api/location", "/api/agent", "/api/provider", "/api/model", "/api/model/default"].includes(url.pathname))
       return route.fallback()
     return route.fulfill({
@@ -75,7 +79,7 @@ test("preserves a draft when a worktree disappears and resumes after choosing a 
   const sessionID = "ses_draft_recovery"
   const session = { id: sessionID, projectID: fixture.project.id, directory: source, title: "Draft recovery" }
   const transport = await installSseTransport(page, { server: fixture.serverKey })
-  let exists = true
+  let missing = false
   await mockOpenCodeServer(page, {
     directory: destination,
     project: { ...fixture.project, worktree: destination },
@@ -86,9 +90,15 @@ test("preserves a draft when a worktree disappears and resumes after choosing a 
       items: [{ id: "msg_draft", type: "user", text: "Saved draft history", time: { created: 1 } }],
     }),
   })
-  await page.route("**/api/location/probe?**", (route) =>
-    route.fulfill({ json: { exists }, headers: { "access-control-allow-origin": "*" } }),
-  )
+  await page.route("**/api/location?**", (route) => {
+    const url = new URL(route.request().url())
+    if (url.searchParams.get("location[directory]") !== source || !missing) return route.fallback()
+    return route.fulfill({
+      status: 404,
+      json: { _tag: "LocationNotFoundError", directory: source, message: `Location not found: ${source}` },
+      headers: { "access-control-allow-origin": "*" },
+    })
+  })
   let moves = 0
   await page.route(`**/api/session/${sessionID}/move`, (route) => {
     moves++
@@ -106,14 +116,18 @@ test("preserves a draft when a worktree disappears and resumes after choosing a 
   await expect(prompt).toBeEditable()
   await prompt.fill("A draft to keep after moving")
   const connection = await transport.waitForConnection()
-  const missing = page.waitForResponse((response) => {
+  const missingResponse = page.waitForResponse((response) => {
     const url = new URL(response.url())
-    return url.pathname === "/api/location/probe" && url.searchParams.get("directory") === source && response.ok()
+    return (
+      url.pathname === "/api/location" &&
+      url.searchParams.get("location[directory]") === source &&
+      response.status() === 404
+    )
   })
-  exists = false
+  missing = true
   await transport.close()
   await transport.waitForConnection({ after: connection.id })
-  await missing
+  await missingResponse
   await expect(page.getByRole("status")).toContainText("Session location unavailable")
   await expect(prompt).toHaveCount(0)
   await expect(page.getByText("Saved draft history", { exact: true })).toBeVisible()
@@ -146,7 +160,7 @@ test("preserves a draft when a worktree disappears and resumes after choosing a 
   expect((await secondMove).postDataJSON()).toEqual({ directory: destination })
   expect(moves).toBe(2)
   session.directory = destination
-  exists = true
+  missing = false
   await transport.send({
     id: "evt_draft_recovery_moved",
     type: "session.moved",
@@ -162,7 +176,7 @@ test("preserves a draft when a worktree disappears and resumes after choosing a 
 test("ignores a stale missing result after the session moves", async ({ page }) => {
   const source = "/projects/old-worktree"
   const destination = "/projects/new-worktree"
-  const sessionID = "ses_stale_probe"
+  const sessionID = "ses_stale_location_read"
   const session = { id: sessionID, projectID: fixture.project.id, directory: source, title: "Moving session" }
   const requested = Promise.withResolvers<void>()
   const release = Promise.withResolvers<void>()
@@ -174,13 +188,17 @@ test("ignores a stale missing result after the session moves", async ({ page }) 
     sessions: [session],
     pageMessages: () => ({ items: [] }),
   })
-  await page.route("**/api/location/probe?**", async (route) => {
-    if (new URL(route.request().url()).searchParams.get("directory") === source) {
+  await page.route("**/api/location?**", async (route) => {
+    if (new URL(route.request().url()).searchParams.get("location[directory]") === source) {
       requested.resolve()
       await release.promise
-      return route.fulfill({ json: { exists: false }, headers: { "access-control-allow-origin": "*" } })
+      return route.fulfill({
+        status: 404,
+        json: { _tag: "LocationNotFoundError", directory: source, message: `Location not found: ${source}` },
+        headers: { "access-control-allow-origin": "*" },
+      })
     }
-    return route.fulfill({ json: { exists: true }, headers: { "access-control-allow-origin": "*" } })
+    return route.fallback()
   })
   await page.goto(`/server/${base64Encode(fixture.serverKey)}/session/${sessionID}`)
   await requested.promise
@@ -190,7 +208,9 @@ test("ignores a stale missing result after the session moves", async ({ page }) 
   await transport.waitForConnection()
   const next = page.waitForResponse((response) => {
     const url = new URL(response.url())
-    return url.pathname === "/api/location/probe" && url.searchParams.get("directory") === destination && response.ok()
+    return (
+      url.pathname === "/api/location" && url.searchParams.get("location[directory]") === destination && response.ok()
+    )
   })
   session.directory = destination
   await transport.send({
@@ -203,7 +223,11 @@ test("ignores a stale missing result after the session moves", async ({ page }) 
   await next
   const old = page.waitForResponse((response) => {
     const url = new URL(response.url())
-    return url.pathname === "/api/location/probe" && url.searchParams.get("directory") === source && response.ok()
+    return (
+      url.pathname === "/api/location" &&
+      url.searchParams.get("location[directory]") === source &&
+      response.status() === 404
+    )
   })
   release.resolve()
   await old
@@ -225,12 +249,14 @@ test("moves a removed-worktree session into an existing worktree", async ({ page
     sessions: [session],
     pageMessages: () => ({ items: [] }),
   })
-  await page.route("**/api/location/probe?**", (route) =>
-    route.fulfill({
-      json: { exists: new URL(route.request().url()).searchParams.get("directory") !== source },
+  await page.route("**/api/location?**", (route) => {
+    if (new URL(route.request().url()).searchParams.get("location[directory]") !== source) return route.fallback()
+    return route.fulfill({
+      status: 404,
+      json: { _tag: "LocationNotFoundError", directory: source, message: `Location not found: ${source}` },
       headers: { "access-control-allow-origin": "*" },
-    }),
-  )
+    })
+  })
   await page.route(`**/api/session/${sessionID}/move`, (route) => route.fulfill({ status: 204, body: "" }))
   await page.goto(`/server/${base64Encode(fixture.serverKey)}/session/${sessionID}`)
   await expect(page.getByRole("status")).toContainText("Session location unavailable")

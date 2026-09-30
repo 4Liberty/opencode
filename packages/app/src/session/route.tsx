@@ -3,6 +3,7 @@ import { createStore } from "solid-js/store"
 import { useParams } from "@solidjs/router"
 import { DataProvider } from "@opencode/session-ui/context"
 import { SessionUserMessage } from "@opencode/session-ui/message"
+import { isLocationNotFoundError } from "@opencode/client/promise"
 import { TextShimmer } from "@opencode/ui/text-shimmer"
 import { CommentsProvider } from "@/composer/comments"
 import { readPromptPresentation } from "@/composer/comment-note"
@@ -48,12 +49,12 @@ export function TargetSessionRouteContent() {
     onCleanup(() => {
       stale = true
     })
-    void server.ctx.sdk.api.location.probe({ directory }).then(
-      (result) => {
-        if (!stale && !result.exists)
+    void server.ctx.sdk.api.location.get({ location: { directory } }).then(
+      () => undefined,
+      (error) => {
+        if (!stale && isLocationNotFoundError(error) && error.directory === directory)
           setLocationState("missing", { sessionID: session.id, projectID: project.id, directory })
       },
-      () => undefined,
     )
   })
   const missing = createMemo(() => {

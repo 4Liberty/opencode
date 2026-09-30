@@ -9,8 +9,6 @@ import type {
   ServerPairOutput,
   ServerConnectInput,
   ServerConnectOutput,
-  LocationProbeInput,
-  LocationProbeOutput,
   LocationGetInput,
   LocationGetOutput,
   LocationReloadOutput,
@@ -303,11 +301,6 @@ const adaptGroupServer = (raw: RawClient["server.server"]) => ({
   connect: EndpointServerConnect(raw),
 })
 
-const EndpointLocationProbe = (raw: RawClient["server.location"]) => (input: LocationProbeInput) =>
-  preserveEffect<LocationProbeOutput>()(
-    raw["location.probe"]({ query: { directory: input["directory"] } }).pipe(Effect.mapError(mapClientError)),
-  )
-
 const EndpointLocationGet = (raw: RawClient["server.location"]) => (input?: LocationGetInput) =>
   preserveEffect<LocationGetOutput>()(
     raw["location.get"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
@@ -317,7 +310,6 @@ const EndpointLocationReload = (raw: RawClient["server.location"]) => () =>
   preserveEffect<LocationReloadOutput>()(raw["location.reload"]({}).pipe(Effect.mapError(mapClientError)))
 
 const adaptGroupLocation = (raw: RawClient["server.location"]) => ({
-  probe: EndpointLocationProbe(raw),
   get: EndpointLocationGet(raw),
   reload: EndpointLocationReload(raw),
 })
