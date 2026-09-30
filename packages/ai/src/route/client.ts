@@ -581,7 +581,7 @@ const lowerRequest = (request: LLMRequest) =>
   ToolNames.lower(prepareRequest(request), request.model.route.namespaces ?? "flat")
 
 const compile = Effect.fn("LLM.compile")(function* (request: LLMRequest, options?: StreamOptions) {
-  const lowered = yield* lowerRequest(request)
+  const lowered = lowerRequest(request)
   const resolved = lowered.request
   const route = resolved.model.route
 
@@ -683,15 +683,13 @@ export const layer: Layer.Layer<Service, never, RequestExecutor.Service> = Layer
       options: TriggerCompactOptions,
     ): Effect.Effect<CompactionCheckpointResponse, AIError>
     function compact(request: LLMRequest, options?: EndpointCompactOptions | TriggerCompactOptions) {
-      return lowerRequest(request).pipe(
-        Effect.flatMap((lowered): Effect.Effect<CompactionResponse | CompactionCheckpointResponse, AIError> => {
-          if (options?.mechanism === "trigger" && canCompact(request, options))
-            return request.model.route.compact.trigger(lowered.request, executor, options)
-          if ((options?.mechanism === undefined || options.mechanism === "endpoint") && canCompact(request))
-            return request.model.route.compact.endpoint(lowered.request, executor, options)
-          return unsupportedCompaction(request, options?.mechanism)
-        }),
-      )
+      return Effect.suspend((): Effect.Effect<CompactionResponse | CompactionCheckpointResponse, AIError> => {
+        if (options?.mechanism === "trigger" && canCompact(request, options))
+          return request.model.route.compact.trigger(lowerRequest(request).request, executor, options)
+        if ((options?.mechanism === undefined || options.mechanism === "endpoint") && canCompact(request))
+          return request.model.route.compact.endpoint(lowerRequest(request).request, executor, options)
+        return unsupportedCompaction(request, options?.mechanism)
+      })
     }
     return Service.of({
       stream,

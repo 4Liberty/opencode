@@ -1,6 +1,4 @@
-import { Effect } from "effect"
 import { LLMRequest, Message, ToolDefinition, type LLMEvent, type ToolEntry } from "./schema/index.js"
-import { ProviderShared } from "./protocols/shared.js"
 
 /**
  * How a protocol receives tool namespaces. Callers always use the declared
@@ -14,21 +12,17 @@ interface Name {
   readonly name: string
 }
 
-/** Lower declared tool names to wire names; `raise` maps tool events back. */
-export const lower = Effect.fn("ToolNames.lower")(function* (request: LLMRequest, style: NamespaceStyle) {
-  const names = new Map<string, Name>()
-  for (const leaf of walk(request.tools)) {
-    const bad = leaf.path.find((part) => part.includes("."))
-    if (bad !== undefined) return yield* ProviderShared.invalidRequest(`Tool namespace "${bad}" must not contain "."`)
-    const name = { namespace: leaf.path.join(".") || undefined, name: leaf.tool.name }
-    const key = id(wire(name, style))
-    const taken = names.get(key)
-    if (taken)
-      return yield* ProviderShared.invalidRequest(
-        `Tools "${id(taken)}" and "${id(name)}" both use the provider tool name "${key}"`,
-      )
-    names.set(key, name)
-  }
+/**
+ * Lower declared tool names to wire names; `raise` maps tool events back.
+ * Tools that share a wire name resolve last-one-wins in both directions.
+ */
+export const lower = (request: LLMRequest, style: NamespaceStyle) => {
+  const names = new Map(
+    walk(request.tools).map((leaf) => {
+      const name = { namespace: leaf.path.join(".") || undefined, name: leaf.tool.name }
+      return [id(wire(name, style)), name] as const
+    }),
+  )
   return {
     request: LLMRequest.update(request, {
       // Native namespaces are one level deep, so deeper levels join into the leaf name.
@@ -50,7 +44,7 @@ export const lower = Effect.fn("ToolNames.lower")(function* (request: LLMRequest
       return name ? { ...event, ...name } : event
     },
   }
-})
+}
 
 const walk = (
   tools: ReadonlyArray<ToolEntry>,
@@ -58,10 +52,14 @@ const walk = (
 ): Array<{ path: ReadonlyArray<string>; tool: ToolDefinition }> =>
   tools.flatMap((tool) => (tool.type === "tool" ? [{ path, tool }] : walk(tool.tools, [...path, tool.name])))
 
-const flatten = (tools: ReadonlyArray<ToolEntry>) =>
-  walk(tools).map((leaf) =>
-    leaf.path.length ? new ToolDefinition({ ...leaf.tool, name: [...leaf.path, leaf.tool.name].join("_") }) : leaf.tool,
-  )
+const flatten = (tools: ReadonlyArray<ToolEntry>) => [
+  ...new Map(
+    walk(tools).map((leaf) => {
+      const name = [...leaf.path, leaf.tool.name].join("_")
+      return [name, leaf.path.length ? new ToolDefinition({ ...leaf.tool, name }) : leaf.tool] as const
+    }),
+  ).values(),
+]
 
 const wire = (tool: Name, style: NamespaceStyle): Name => {
   const path = tool.namespace?.split(".") ?? []

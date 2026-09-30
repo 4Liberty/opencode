@@ -213,23 +213,6 @@ describe("Open Responses-compatible route", () => {
           strict: false,
         },
       ])
-
-      const collision = yield* compileRequest(
-        LLM.request({
-          model,
-          tools: [
-            ToolDefinition.make({ name: "acme_users", description: "Top-level users", inputSchema: {} }),
-            {
-              type: "namespace",
-              name: "acme",
-              tools: [ToolDefinition.make({ name: "users", description: "Lookup users", inputSchema: {} })],
-            },
-          ],
-        }),
-      ).pipe(Effect.flip)
-      expect(collision.message).toContain(
-        'Tools "acme_users" and "acme.users" both use the provider tool name "acme_users"',
-      )
     }),
   )
 
