@@ -330,6 +330,7 @@ export interface ParserState {
 // fields into `LLMRequest`.
 interface LoweringOptions {
   readonly cacheControl?: (cache: CacheHint | undefined) => OpenAIChatCacheControl | undefined
+  readonly cacheTools?: boolean
   readonly toolCallID?: (id: string) => string
 }
 
@@ -341,7 +342,7 @@ const lowerTool = (tool: ToolDefinition, options: LoweringOptions, supportsStric
     parameters: tool.inputSchema,
     ...(supportsStrictMode ? { strict: false } : {}),
   },
-  cache_control: options.cacheControl?.(tool.cache),
+  cache_control: options.cacheTools === false ? undefined : options.cacheControl?.(tool.cache),
 })
 
 const lowerToolChoice = (toolChoice: NonNullable<LLMRequest["toolChoice"]>) =>
