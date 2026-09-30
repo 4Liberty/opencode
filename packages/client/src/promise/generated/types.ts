@@ -2742,6 +2742,10 @@ export type ServerConnectInput = { readonly code: { readonly code: string }["cod
 
 export type ServerConnectOutput = PairingSession
 
+export type LocationProbeInput = { readonly directory: { readonly directory: string }["directory"] }
+
+export type LocationProbeOutput = { exists: boolean }
+
 export type LocationGetInput = {
   readonly location?: { readonly location?: { readonly directory?: string | undefined } | undefined }["location"]
 }

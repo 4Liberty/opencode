@@ -1,6 +1,7 @@
 import { Location } from "@opencode/core/location"
 import { LocationServiceMap } from "@opencode/core/location-service-map"
 import { ServiceUnavailableError } from "@opencode/protocol/errors"
+import { FSUtil } from "@opencode/util/fs-util"
 import { Cause, Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Api } from "../api"
@@ -8,7 +9,15 @@ import { Api } from "../api"
 export const LocationHandler = HttpApiBuilder.group(Api, "server.location", (handlers) =>
   Effect.gen(function* () {
     const locations = yield* LocationServiceMap.Service
+    const fs = yield* FSUtil.Service
     return handlers
+      .handle("location.probe", (ctx) =>
+        fs.stat(ctx.query.directory).pipe(
+          Effect.as({ exists: true }),
+          Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed({ exists: false })),
+          Effect.orDie,
+        ),
+      )
       .handle(
         "location.get",
         Effect.fn(function* () {

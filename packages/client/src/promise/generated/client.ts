@@ -3,6 +3,8 @@ import type {
   ServerPairOutput,
   ServerConnectInput,
   ServerConnectOutput,
+  LocationProbeInput,
+  LocationProbeOutput,
   LocationGetInput,
   LocationGetOutput,
   LocationReloadOutput,
@@ -440,6 +442,18 @@ export function make(options: ClientOptions) {
         ),
     },
     location: {
+      probe: (input: LocationProbeInput, requestOptions?: RequestOptions) =>
+        request<LocationProbeOutput>(
+          {
+            method: "GET",
+            path: `/api/location/probe`,
+            query: { directory: input["directory"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
       get: (input?: LocationGetInput, requestOptions?: RequestOptions) =>
         request<LocationGetOutput>(
           {

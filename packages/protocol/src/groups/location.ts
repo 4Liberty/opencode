@@ -11,6 +11,10 @@ export const LocationQuery = Schema.Struct({
   ),
 }).annotate({ identifier: "LocationQuery" })
 
+const ProbeQuery = Schema.Struct({
+  directory: Schema.String,
+}).annotate({ identifier: "LocationProbeQuery" })
+
 export const locationQueryOpenApi = OpenApi.annotations({
   transform: (operation) => {
     const parameters = operation.parameters
@@ -32,6 +36,19 @@ export const makeLocationGroup = <LocationId extends HttpApiMiddleware.AnyId, Lo
   locationMiddleware: Context.Key<LocationId, LocationService>,
 ) =>
   HttpApiGroup.make("server.location")
+    .add(
+      HttpApiEndpoint.get("location.probe", "/api/location/probe", {
+        query: ProbeQuery,
+        success: Schema.Struct({ exists: Schema.Boolean }),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "location.probe",
+          summary: "Probe location path",
+          description:
+            "Check if an explicit path exists without loading its location. Only filesystem NotFound returns false; other filesystem failures do not imply absence.",
+        }),
+      ),
+    )
     .add(
       HttpApiEndpoint.get("location.get", "/api/location", {
         query: LocationQuery,

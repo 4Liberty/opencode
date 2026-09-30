@@ -29,6 +29,14 @@ for (const endpoint of ["/api/location", "/api/agent"]) {
         if (recover && requests > 1) return route.fallback()
         return route.fulfill({ status: 500, body: "", headers: { "access-control-allow-origin": "*" } })
       })
+      await page.route("**/api/location/probe?**", (route) =>
+        route.fulfill({
+          status: 500,
+          json: { _tag: "ServiceUnavailableError", message: "Probe failed" },
+          headers: { "access-control-allow-origin": "*" },
+        }),
+      )
+      const probe = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/location/probe")
       const failure = page.waitForResponse(
         (response) => new URL(response.url()).pathname === endpoint && response.status() === 500,
       )
@@ -41,6 +49,7 @@ for (const endpoint of ["/api/location", "/api/agent"]) {
         )
       })
       await page.goto(`/server/${base64Encode(fixture.serverKey)}/session/${sessionID}`)
+      expect((await probe).status()).toBe(500)
       await failure
       await expect(page.getByText("Keep working in this worktree", { exact: true })).toBeVisible()
       const prompt = page.getByRole("textbox", { name: "Prompt", exact: true })

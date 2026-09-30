@@ -80,14 +80,14 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const sdk = useWorkspaceLocation()
     const data = useData()
     const serverSDK = useServerSDK()
-    const providers = useProviders(() => sdk().catalogDirectory)
+    const providers = useProviders(() => sdk().directory)
     const models = useModels()
     const settings = useSettings()
     const configuredModel = useConfiguredModel()
 
     const id = createMemo(() => params.id || undefined)
     const list = createMemo(() =>
-      normalizeAgentList(data.location.agent.list({ directory: sdk().catalogDirectory }) ?? []).filter(
+      normalizeAgentList(data.location.agent.list({ directory: sdk().directory }) ?? []).filter(
         (item) => item.mode !== "subagent" && !item.hidden,
       ),
     )
