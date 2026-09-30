@@ -25,6 +25,7 @@ import { Environment } from "@opencode/core/environment/index"
 import { EnvironmentUnavailable } from "@opencode/core/environment/unavailable"
 import { Location } from "@opencode/core/location"
 import { Mcp } from "@opencode/core/mcp/index"
+import { McpSession } from "@opencode/core/mcp/session"
 import { McpClient } from "@opencode/core/mcp/client"
 import { McpStdio } from "@opencode/core/mcp/stdio"
 import { Permission } from "@opencode/core/permission"
@@ -284,6 +285,7 @@ function resourceMcpLayer(
       yield* ConfigMcpPlugin.register(bus.subscribe())
     }),
   ).pipe(
+    Layer.provideMerge(McpSession.layer(options)),
     Layer.provideMerge(Mcp.layer(options)),
     Layer.provideMerge(Form.layer),
     Layer.provide(
@@ -349,7 +351,7 @@ function resourceMcpLayer(
           },
         }),
         Layer.mock(Credential.Service, {}),
-        Layer.mock(SessionStore.Service, {}),
+        AppNodeBuilder.build(SessionStore.node),
         overrides?.environment ?? hostEnvironmentLayer,
       ),
     ),
@@ -1991,17 +1993,8 @@ testEffect(Layer.empty).live("keeps MCP config snapshots stable during an in-fli
 
 const shutdownIt = testEffect(
   AppNodeBuilder.build(
-    LayerNode.group([
-      Bus.node,
-      Integration.node,
-      Credential.node,
-      Form.node,
-      Environment.node,
-      Location.node,
-      SessionStore.node,
-    ]),
+    LayerNode.group([Bus.node, Integration.node, Credential.node, Form.node, Environment.node, Location.node]),
     [
-      SessionStore.node.replace(Layer.mock(SessionStore.Service, {})),
       Location.node.replace(
         Layer.succeed(
           Location.Service,

@@ -317,7 +317,7 @@ describe("acp service directory behavior", () => {
     expect(invalidConfig).toMatchObject({ _tag: "ACPInvalidConfigOptionError" })
   })
 
-  test("registers MCP configs per session and deduplicates identical re-registrations", async () => {
+  test("registers MCP configs for the session on every attach", async () => {
     const local: McpServer = {
       name: "tools",
       command: "bun",
@@ -349,7 +349,7 @@ describe("acp service directory behavior", () => {
       },
     })
 
-    await fixture.service.newSession({ cwd: "/workspace", mcpServers: [local, local, remote] })
+    await fixture.service.newSession({ cwd: "/workspace", mcpServers: [local, remote] })
     await fixture.service.resumeSession({ cwd: "/workspace", sessionId: "ses_1", mcpServers: [local, remote] })
     await fixture.service.resumeSession({ cwd: "/workspace", sessionId: "ses_1", mcpServers: [changed] })
     await fixture.service.newSession({ cwd: "/workspace", mcpServers: [local] })
@@ -359,9 +359,18 @@ describe("acp service directory behavior", () => {
       ["ses_1", "tools"],
       ["ses_1", "docs"],
       ["ses_1", "tools"],
+      ["ses_1", "docs"],
+      ["ses_1", "tools"],
       ["ses_2", "tools"],
     ])
     expect(adds.filter((request) => request.path.endsWith("/mcp/tools")).map((request) => request.body)).toEqual([
+      {
+        config: {
+          type: "local",
+          command: ["bun", "server.ts"],
+          environment: { TOKEN: "x" },
+        },
+      },
       {
         config: {
           type: "local",
@@ -392,7 +401,7 @@ describe("acp service directory behavior", () => {
         oauth: false,
       },
     })
-    expect(adds.map((request) => request.query)).toEqual([{}, {}, {}, {}])
+    expect(adds.map((request) => request.query)).toEqual([{}, {}, {}, {}, {}, {}])
   })
 })
 

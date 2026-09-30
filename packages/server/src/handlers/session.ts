@@ -4,7 +4,7 @@ import { SessionTitle } from "@opencode/core/session/title"
 import { SessionTransfer } from "@opencode/core/session/transfer"
 import { InstructionEntry } from "@opencode/core/session/instruction-entry"
 import { Form } from "@opencode/core/form"
-import { Mcp } from "@opencode/core/mcp/index"
+import { McpSession } from "@opencode/core/mcp/session"
 import { DateTime, Effect, Stream } from "effect"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
 import { Api } from "../api"
@@ -18,7 +18,6 @@ import {
   FormNotFoundError,
   InvalidRequestError,
   InvalidCursorError,
-  McpServerNotFoundError,
   MessageNotFoundError,
   ServiceUnavailableError,
   SessionBusyError,
@@ -26,6 +25,7 @@ import {
 } from "@opencode/protocol/errors"
 import { AbsolutePath } from "@opencode/core/schema"
 import { failedMessageDecode, failedSnapshot, missingMessage, missingSession } from "./session-error"
+import { notFound } from "./mcp"
 
 const DefaultSessionsLimit = 50
 
@@ -588,22 +588,16 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       .handle(
         "session.mcp.add",
         Effect.fn(function* (ctx) {
-          const mcp = yield* Mcp.Service
-          yield* mcp.add(ctx.params.server, ctx.payload.config, ctx.params.sessionID)
+          const mcp = yield* McpSession.Service
+          yield* mcp.add(ctx.params.sessionID, ctx.params.server, ctx.payload.config)
           return HttpApiSchema.NoContent.make()
         }),
       )
       .handle(
         "session.mcp.remove",
         Effect.fn(function* (ctx) {
-          const mcp = yield* Mcp.Service
-          yield* mcp
-            .remove(ctx.params.server, ctx.params.sessionID)
-            .pipe(
-              Effect.mapError(
-                (error) => new McpServerNotFoundError({ server: error.server, message: error.message }),
-              ),
-            )
+          const mcp = yield* McpSession.Service
+          yield* notFound(mcp.remove(ctx.params.sessionID, ctx.params.server))
           return HttpApiSchema.NoContent.make()
         }),
       )

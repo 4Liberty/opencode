@@ -98,7 +98,7 @@ export function make(input: {
   readonly connection: ACPConnection.Connection
 }): Interface {
   const sessions = new Map<string, Attached>()
-  const registeredMcp = new Map<string, Map<string, string>>()
+  const registeredMcp = new Map<string, Set<string>>()
   const active = new Map<string, { readonly control: TurnControl; readonly turn: Promise<PromptResponse> }>()
   const capabilities = { writeTextFile: false, childSessionUpdates: false }
 
@@ -482,34 +482,22 @@ async function messages(client: OpenCodeClient, sessionID: string) {
 
 async function registerMcpServers(
   client: OpenCodeClient,
-  registered: Map<string, Map<string, string>>,
+  registered: Map<string, Set<string>>,
   session: Attached,
   servers: readonly McpServer[],
 ) {
-  const current = registered.get(session.id) ?? new Map<string, string>()
+  const current = registered.get(session.id) ?? new Set<string>()
   registered.set(session.id, current)
   await Promise.all(
-    servers.flatMap((server) => {
-      const config = mcpConfig(server)
-      const key = stableStringify(config)
-      if (current.get(server.name) === key) return []
-      current.set(server.name, key)
-      return [
-        client.session.mcp.add({ sessionID: session.id, server: server.name, config }).catch((error) => {
-          if (current.get(server.name) === key) current.delete(server.name)
-          throw error
-        }),
-      ]
+    servers.map(async (server) => {
+      await client.session.mcp.add({ sessionID: session.id, server: server.name, config: mcpConfig(server) })
+      current.add(server.name)
     }),
   )
 }
 
-async function releaseMcpServers(
-  client: OpenCodeClient,
-  registered: Map<string, Map<string, string>>,
-  sessionID: string,
-) {
-  const servers = Array.from(registered.get(sessionID)?.keys() ?? [])
+async function releaseMcpServers(client: OpenCodeClient, registered: Map<string, Set<string>>, sessionID: string) {
+  const servers = Array.from(registered.get(sessionID) ?? [])
   registered.delete(sessionID)
   await Promise.all(
     servers.map((server) =>
@@ -535,15 +523,6 @@ function mcpConfig(server: McpServer) {
     command: [server.command, ...server.args],
     environment: Object.fromEntries(server.env.map((entry) => [entry.name, entry.value])),
   }
-}
-
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`
-  if (!value || typeof value !== "object") return JSON.stringify(value)
-  return `{${Object.entries(value)
-    .toSorted(([a], [b]) => a.localeCompare(b))
-    .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
-    .join(",")}}`
 }
 
 async function sendUsageUpdate(
