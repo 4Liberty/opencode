@@ -172,8 +172,7 @@ const lowerTool = Effect.fn("OpenAIResponses.lowerTool")(function* (tool: ToolDe
   return yield* OpenResponses.lowerTool(NAME, tool)
 })
 
-// Native namespaces hold only function tools, so deeper levels flatten into
-// the leaf names the same way non-native protocols flatten the whole tree.
+// The route has already joined namespace levels below the first into leaf names.
 const lowerToolEntry = Effect.fn("OpenAIResponses.lowerToolEntry")(function* (tool: ToolEntry) {
   if (tool.type === "tool") return yield* lowerTool(tool)
   // OpenAI requires a namespace description; fall back to a generic one so a
@@ -182,7 +181,7 @@ const lowerToolEntry = Effect.fn("OpenAIResponses.lowerToolEntry")(function* (to
     type: "namespace" as const,
     name: tool.name,
     description: tool.description ?? `Tools in the ${tool.name} namespace.`,
-    tools: yield* Effect.forEach(ProviderShared.flattenTools(tool.tools), (leaf) =>
+    tools: yield* Effect.forEach(ProviderShared.toolDefinitions(tool.tools), (leaf) =>
       OpenResponses.lowerTool(NAME, leaf),
     ),
   }
@@ -308,6 +307,7 @@ export const protocol = Protocol.make({
     terminal: OpenResponses.terminal,
   },
   supportsEffortUpdates,
+  namespaces: "native",
 })
 
 const endpoint = Endpoint.path<OpenAIResponsesBody>(PATH, { baseURL: DEFAULT_BASE_URL })

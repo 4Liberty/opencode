@@ -10,6 +10,7 @@ import { applyCachePolicy } from "../cache-policy.js"
 import { applyEffortUpdates } from "../effort-updates.js"
 import { normalizeToolHistory } from "../tool-history.js"
 import { sanitizeSurrogates } from "../utils/sanitize.js"
+import { ToolNames, type NamespaceStyle } from "../tool-names.js"
 import * as ProviderShared from "../protocols/shared.js"
 import { ToolSchemaProjection } from "../protocols/utils/tool-schema.js"
 import type { LanguageModelSanitizerCompatibility, ProtocolID, ProviderOptions } from "../schema/index.js"
@@ -59,6 +60,7 @@ export interface Route<
   readonly body: RouteBody<Body>
   readonly supportsEffortUpdates?: (request: LLMRequest) => boolean
   readonly sanitizer?: LanguageModelSanitizerCompatibility
+  readonly namespaces: NamespaceStyle
   readonly with: {
     <Next extends CompactionOperations | undefined>(
       patch: RoutePatch<Body, Prepared> & { readonly compact: Next },
@@ -391,6 +393,7 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
       body: protocol.body,
       supportsEffortUpdates: protocol.supportsEffortUpdates,
       sanitizer: protocol.sanitizer,
+      namespaces: protocol.namespaces ?? "flat",
       with: (patch: RoutePatch<Body, Prepared>) => {
         const { compact, id, provider, providerMetadataKey, auth, transport, endpoint, ...defaults } = patch
         return build({
@@ -572,8 +575,12 @@ const prepareRequest = (request: LLMRequest) => {
     : LLMRequest.update(resolved, { http: mergeHttpOptions(new HttpOptions({ headers }), resolved.http) })
 }
 
+// Protocols receive wire tool names; callers keep declared names in both directions.
+const lowerRequest = (request: LLMRequest) => ToolNames.lower(prepareRequest(request), request.model.route.namespaces)
+
 const compile = Effect.fn("LLM.compile")(function* (request: LLMRequest, options?: StreamOptions) {
-  const resolved = prepareRequest(request)
+  const lowered = yield* lowerRequest(request)
+  const resolved = lowered.request
   const route = resolved.model.route
 
   const body = yield* route.body
@@ -586,6 +593,7 @@ const compile = Effect.fn("LLM.compile")(function* (request: LLMRequest, options
     route,
     body,
     prepared,
+    raise: lowered.raise,
   }
 })
 
@@ -606,7 +614,9 @@ const streamRequestWith = (runtime: TransportRuntime) => (request: LLMRequest, o
   Stream.unwrap(
     Effect.gen(function* () {
       const compiled = yield* compile(request, options)
-      return compiled.route.streamPrepared(compiled.prepared, compiled.request, runtime, options)
+      return compiled.route
+        .streamPrepared(compiled.prepared, compiled.request, runtime, options)
+        .pipe(Stream.map(compiled.raise))
     }),
   )
 
@@ -672,10 +682,14 @@ export const layer: Layer.Layer<Service, never, RequestExecutor.Service> = Layer
     ): Effect.Effect<CompactionCheckpointResponse, AIError>
     function compact(request: LLMRequest, options?: EndpointCompactOptions | TriggerCompactOptions) {
       return Effect.suspend((): Effect.Effect<CompactionResponse | CompactionCheckpointResponse, AIError> => {
-        if (options?.mechanism === "trigger" && canCompact(request, options))
-          return request.model.route.compact.trigger(prepareRequest(request), executor, options)
-        if ((options?.mechanism === undefined || options.mechanism === "endpoint") && canCompact(request))
-          return request.model.route.compact.endpoint(prepareRequest(request), executor, options)
+        if (options?.mechanism === "trigger" && canCompact(request, options)) {
+          const trigger = request.model.route.compact.trigger
+          return lowerRequest(request).pipe(Effect.flatMap((lowered) => trigger(lowered.request, executor, options)))
+        }
+        if ((options?.mechanism === undefined || options.mechanism === "endpoint") && canCompact(request)) {
+          const endpoint = request.model.route.compact.endpoint
+          return lowerRequest(request).pipe(Effect.flatMap((lowered) => endpoint(lowered.request, executor, options)))
+        }
         return unsupportedCompaction(request, options?.mechanism)
       })
     }

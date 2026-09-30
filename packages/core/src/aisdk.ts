@@ -368,6 +368,7 @@ function modelFromLanguage(info: RuntimeInfo, language: LanguageModelV3) {
     protocol: "ai-sdk",
     // AI SDK providers convert tool schemas themselves, so model-family sanitizers stay off here.
     sanitizer: "none",
+    namespaces: "flat",
     endpoint: Endpoint.path("/", { baseURL: "https://ai-sdk.local" }),
     auth: Auth.none,
     transport: {
@@ -477,9 +478,8 @@ function callOptions(
   modelID: ID,
   optionKey: string,
 ): LanguageModelV3CallOptions {
-  const flattened = ProviderShared.flattenToolRequest(request)
   return {
-    prompt: prompt(flattened.request),
+    prompt: prompt(request),
     maxOutputTokens: request.generation?.maxTokens,
     temperature: request.generation?.temperature,
     stopSequences: request.generation?.stop === undefined ? undefined : [...request.generation.stop],
@@ -488,7 +488,7 @@ function callOptions(
     presencePenalty: request.generation?.presencePenalty,
     frequencyPenalty: request.generation?.frequencyPenalty,
     seed: request.generation?.seed,
-    tools: flattened.tools.map(tool),
+    tools: ProviderShared.toolDefinitions(request.tools).map(tool),
     toolChoice: toolChoice(request.toolChoice),
     headers: request.http?.headers,
     providerOptions: requestProviderOptions(request.providerOptions, packageName, modelID, optionKey),
