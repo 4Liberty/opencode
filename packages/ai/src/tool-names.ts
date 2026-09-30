@@ -8,6 +8,8 @@ import { LLMRequest, Message, ToolDefinition, type LLMEvent, type ToolEntry } fr
 export type NamespaceStyle = "flat" | "native"
 
 interface Name {
+  // Declared as a tree but returned as a dotted path string, because tool parts and events carry
+  // `namespace?: string`. A namespace name containing "." is therefore indistinguishable from nesting.
   readonly namespace?: string
   readonly name: string
 }
