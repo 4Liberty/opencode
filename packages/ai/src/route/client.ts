@@ -60,7 +60,8 @@ export interface Route<
   readonly body: RouteBody<Body>
   readonly supportsEffortUpdates?: (request: LLMRequest) => boolean
   readonly sanitizer?: LanguageModelSanitizerCompatibility
-  readonly namespaces: NamespaceStyle
+  /** How protocol bodies receive tool namespaces; defaults to `"flat"`. */
+  readonly namespaces?: NamespaceStyle
   readonly with: {
     <Next extends CompactionOperations | undefined>(
       patch: RoutePatch<Body, Prepared> & { readonly compact: Next },
@@ -393,7 +394,7 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
       body: protocol.body,
       supportsEffortUpdates: protocol.supportsEffortUpdates,
       sanitizer: protocol.sanitizer,
-      namespaces: protocol.namespaces ?? "flat",
+      namespaces: protocol.namespaces,
       with: (patch: RoutePatch<Body, Prepared>) => {
         const { compact, id, provider, providerMetadataKey, auth, transport, endpoint, ...defaults } = patch
         return build({
@@ -576,7 +577,8 @@ const prepareRequest = (request: LLMRequest) => {
 }
 
 // Protocols receive wire tool names; callers keep declared names in both directions.
-const lowerRequest = (request: LLMRequest) => ToolNames.lower(prepareRequest(request), request.model.route.namespaces)
+const lowerRequest = (request: LLMRequest) =>
+  ToolNames.lower(prepareRequest(request), request.model.route.namespaces ?? "flat")
 
 const compile = Effect.fn("LLM.compile")(function* (request: LLMRequest, options?: StreamOptions) {
   const lowered = yield* lowerRequest(request)
