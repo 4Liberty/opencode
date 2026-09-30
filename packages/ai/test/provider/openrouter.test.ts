@@ -139,6 +139,62 @@ describe("OpenRouter", () => {
     }),
   )
 
+  it.effect("inherits OpenAI effort support and applies the gateway's truncation restriction", () =>
+    Effect.forEach(
+      [
+        { id: "~openai/gpt-6.1-sol", supported: true },
+        { id: "x-ai/grok-4.3", supported: false },
+        { id: "meta/muse-spark-1.3", supported: false },
+        { id: "openai/gpt-6-luna", supported: false, providerOptions: { reasoning: { mode: "pro" } } },
+        { id: "openai/gpt-6-luna", supported: false, http: { body: { reasoning: { mode: "pro" } } } },
+        { id: "openai/gpt-6-luna", supported: false, providerOptions: { contextManagement: [{ type: "compaction" }] } },
+        { id: "openai/gpt-6-luna", supported: false, providerOptions: { truncation: "auto" } },
+        { id: "openai/gpt-6-luna", supported: false, http: { body: { truncation: "auto" } } },
+      ],
+      (input) =>
+        Effect.gen(function* () {
+          const prepared = yield* compileRequest(
+            LLM.request({
+              model: OpenRouter.configure({
+                apiKey: "test-key",
+                providerOptions: { reasoning: { effort: "low" } },
+              }).responses(input.id),
+              messages: [
+                Message.user("Before"),
+                Message.effort({ previous: "high", effort: "low" }),
+                Message.user("After"),
+              ],
+              providerOptions: input.providerOptions,
+              http: input.http,
+            }),
+          )
+
+          expect(
+            prepared.body.input.filter((item) => "type" in item && item.type === "configuration_update"),
+          ).toHaveLength(input.supported ? 1 : 0)
+          expect(prepared.body.reasoning?.effort).toBe(input.supported ? "high" : "low")
+        }),
+    ),
+  )
+
+  it.effect("does not restore the current effort over a model-default history baseline", () =>
+    Effect.gen(function* () {
+      const prepared = yield* compileRequest(
+        LLM.request({
+          model: OpenRouter.configure({
+            apiKey: "test-key",
+            providerOptions: { reasoning: { effort: "low", exclude: true } },
+          }).responses("openai/gpt-6-luna"),
+          messages: [Message.user("Before"), Message.effort({ effort: "low" }), Message.user("After")],
+        }),
+      )
+
+      expect(prepared.body.reasoning?.effort).toBeUndefined()
+      expect(prepared.body.reasoning?.exclude).toBe(true)
+      expect(prepared.body.input).toContainEqual({ type: "configuration_update", reasoning: { effort: "low" } })
+    }),
+  )
+
   it.effect("replays saved Chat reasoning details through the native APIs", () =>
     Effect.gen(function* () {
       const openrouter = OpenRouter.configure({ apiKey: "test-key" })
@@ -154,6 +210,7 @@ describe("OpenRouter", () => {
                   reasoningDetails: [
                     { type: "reasoning.text", text: "A", signature: "first" },
                     { type: "reasoning.text", text: "B", signature: "second" },
+                    { type: "reasoning.encrypted", data: "redacted" },
                   ],
                 },
               },
@@ -177,6 +234,7 @@ describe("OpenRouter", () => {
       expect(message.body.messages[0]?.content).toMatchObject([
         { type: "thinking", thinking: "A", signature: "first" },
         { type: "thinking", thinking: "B", signature: "second" },
+        { type: "redacted_thinking", data: "redacted" },
       ])
       expect(response.body.input[0]).toMatchObject({ type: "reasoning", encrypted_content: "opaque" })
     }),

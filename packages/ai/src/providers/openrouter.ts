@@ -151,13 +151,14 @@ export const protocol = Protocol.make({
 const responsesProtocol = Protocol.make({
   ...OpenAIResponses.protocol,
   id: "openrouter-responses",
-  supportsEffortUpdates: OpenRouterWire.supportsEffortUpdates,
+  // The gateway additionally rejects chronological effort updates with automatic truncation.
+  supportsEffortUpdates: (request) =>
+    request.providerOptions?.truncation !== "auto" &&
+    request.http?.body?.truncation !== "auto" &&
+    (OpenAIResponses.protocol.supportsEffortUpdates?.(request) ?? false),
   body: {
     schema: OpenRouterResponsesBody,
-    from: (request) =>
-      OpenAIResponses.protocol.body
-        .from(OpenRouterWire.nativeRequest(request, "responses"))
-        .pipe(Effect.map((body) => OpenRouterWire.responsesOptions(request, body))),
+    from: OpenRouterWire.responses,
   },
 })
 const messagesProtocol = Protocol.make({
@@ -165,17 +166,7 @@ const messagesProtocol = Protocol.make({
   id: "openrouter-messages",
   body: {
     schema: OpenRouterMessagesBody,
-    from: (request) =>
-      AnthropicMessages.protocol.body.from(OpenRouterWire.nativeRequest(request, "messages")).pipe(
-        Effect.map((body) => {
-          const {
-            reasoning: _,
-            usage: _usage,
-            ...options
-          } = OpenRouterWire.bodyOptions(request.providerOptions, body.max_tokens)
-          return { ...options, ...body }
-        }),
-      ),
+    from: OpenRouterWire.messages,
   },
 })
 

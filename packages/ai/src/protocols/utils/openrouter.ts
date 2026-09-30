@@ -1,8 +1,9 @@
 export * as OpenRouterWire from "./openrouter.js"
 
-import { Option, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { LLMRequest, Message, type ContentPart, type ReasoningPart } from "../../schema/index.js"
-import type { OpenAIResponses } from "../openai-responses.js"
+import { OpenAIResponses } from "../openai-responses.js"
+import { AnthropicMessages } from "../anthropic-messages.js"
 import { isRecord, ProviderShared } from "../shared.js"
 
 const ReplayDetail = Schema.Struct({
@@ -14,130 +15,103 @@ const ReplayDetail = Schema.Struct({
 })
 const decodeReplayDetail = Schema.decodeUnknownOption(ReplayDetail)
 
-// OpenRouter's generic Responses API supports chronological effort updates only on eligible models.
-export function supportsEffortUpdates(request: LLMRequest) {
-  if (request.providerOptions?.contextManagement !== undefined) return false
-  if (request.providerOptions?.truncation === "auto" || request.http?.body?.truncation === "auto") return false
-  if (Schema.is(Schema.Struct({ mode: Schema.Literal("pro") }))(request.providerOptions?.reasoning)) return false
-  if (Schema.is(Schema.Struct({ mode: Schema.Literal("pro") }))(request.http?.body?.reasoning)) return false
-  return (
-    request.model.compatibility?.supportsEffortUpdates ??
-    /^~?openai\/(?:gpt-6-(?:astra|sol|luna)|gpt-6\.1-sol)$/i.test(request.model.id)
-  )
-}
-
-export function nativeRequest(request: LLMRequest, format: "responses" | "messages") {
-  const options = request.providerOptions ?? {}
-  const reasoning = isRecord(options.reasoning)
-    ? fitReasoning(options.reasoning, request.generation?.maxTokens)
-    : undefined
-  const disabled = reasoning?.enabled === false || reasoning?.effort === "none"
-  return LLMRequest.update(request, {
-    providerOptions:
-      format === "responses"
-        ? {
-            ...options,
-            reasoningEffort:
-              options.reasoningEffort ?? (typeof reasoning?.effort === "string" ? reasoning.effort : undefined),
-          }
-        : {
-            ...options,
-            effort:
-              options.effort ?? (typeof reasoning?.effort === "string" && !disabled ? reasoning.effort : undefined),
-            thinking:
-              options.thinking ??
-              (() => {
-                if (disabled) return { type: "disabled" }
-                if (typeof reasoning?.max_tokens === "number")
-                  return { type: "enabled", budget_tokens: reasoning.max_tokens }
-                if (reasoning?.enabled === true || typeof reasoning?.effort === "string")
-                  return { type: "adaptive", ...(reasoning.exclude === true ? { display: "omitted" } : {}) }
-              })(),
-          },
-    messages: request.messages.map((message) => {
-      if (
-        !message.content.some(
-          (part) => part.type === "reasoning" && part.providerMetadata?.openrouter?.reasoningDetails !== undefined,
-        )
-      )
-        return message
-      return Message.make({
-        ...message,
-        // Chat stores signatures in reasoning_details; native APIs require individual signed blocks/items.
-        content: message.content.flatMap<ContentPart>((part) => {
-          if (part.type !== "reasoning") return [part]
-          const details = part.providerMetadata?.openrouter?.reasoningDetails
-          if (!Array.isArray(details)) return [part]
-          const replay = details.flatMap((detail) => Option.toArray(decodeReplayDetail(detail)))
-          if (format === "responses") {
-            const encrypted = replay.find(
-              (detail) => detail.type === "reasoning.encrypted" || detail.type === "encrypted",
-            )
-            return [
-              {
-                ...part,
-                providerMetadata: {
-                  ...part.providerMetadata,
-                  openrouter: {
-                    ...part.providerMetadata?.openrouter,
-                    reasoningEncryptedContent:
-                      part.providerMetadata?.openrouter?.reasoningEncryptedContent ??
-                      encrypted?.data ??
-                      encrypted?.encrypted,
-                  },
-                },
-              },
-            ]
-          }
-          const blocks = replay.flatMap<ReasoningPart>((detail) => {
-            const metadata = (() => {
-              if (detail.type === "reasoning.text" && detail.signature) return { signature: detail.signature }
-              if (detail.type === "reasoning.encrypted" && detail.data) return { redactedData: detail.data }
-            })()
-            if (!metadata) return []
-            return [
-              {
-                ...part,
-                text: metadata.signature ? (detail.text ?? part.text) : "",
-                providerMetadata: {
-                  ...part.providerMetadata,
-                  openrouter: { ...part.providerMetadata?.openrouter, ...metadata },
-                },
-              },
-            ]
-          })
-          return blocks.length > 0 ? blocks : [part]
-        }),
-      })
-    }),
-  })
-}
-
-export function responsesOptions(request: LLMRequest, body: OpenAIResponses.OpenAIResponsesBody) {
+export const responses = Effect.fn("OpenRouter.responses")(function* (request: LLMRequest) {
   const { usage: _, ...options } = bodyOptions(request.providerOptions, request.generation?.maxTokens)
+  const body = yield* OpenAIResponses.protocol.body.from(
+    LLMRequest.update(request, {
+      providerOptions: {
+        ...request.providerOptions,
+        reasoningEffort: request.providerOptions?.reasoningEffort ?? options.reasoning?.effort,
+      },
+      messages: replayMessages(request, "responses"),
+    }),
+  )
   return {
     ...options,
     ...body,
     store: false as const,
-    // Native lowering may freeze effort at the history baseline; keep it instead of the current effort.
+    // The shared lowerer owns the chronological effort baseline, including the model default.
     ...(options.reasoning || body.reasoning
       ? {
           reasoning: {
             ...options.reasoning,
             ...body.reasoning,
             effort: body.reasoning?.effort,
-            summary:
-              body.reasoning?.summary ??
-              (typeof options.reasoning?.summary === "string" ? options.reasoning.summary : undefined),
+            summary: body.reasoning?.summary ?? options.reasoning?.summary,
           },
         }
       : {}),
     ...(options.text || body.text ? { text: { ...options.text, ...body.text } } : {}),
   }
+})
+
+export const messages = Effect.fn("OpenRouter.messages")(function* (request: LLMRequest) {
+  const { reasoning, usage: _, ...options } = bodyOptions(request.providerOptions, request.generation?.maxTokens)
+  const disabled = reasoning?.enabled === false || reasoning?.effort === "none"
+  const body = yield* AnthropicMessages.protocol.body.from(
+    LLMRequest.update(request, {
+      providerOptions: {
+        ...request.providerOptions,
+        effort:
+          request.providerOptions?.effort ??
+          (!disabled && typeof reasoning?.effort === "string" ? reasoning.effort : undefined),
+        thinking:
+          request.providerOptions?.thinking ??
+          (() => {
+            if (disabled) return { type: "disabled" }
+            if (typeof reasoning?.max_tokens === "number")
+              return { type: "enabled", budget_tokens: reasoning.max_tokens }
+            if (reasoning?.enabled === true || typeof reasoning?.effort === "string")
+              return { type: "adaptive", ...(reasoning.exclude === true ? { display: "omitted" } : {}) }
+          })(),
+      },
+      messages: replayMessages(request, "messages"),
+    }),
+  )
+  return { ...options, ...body }
+})
+
+function replayMessages(request: LLMRequest, format: "responses" | "messages") {
+  return request.messages.map((message) =>
+    message.role !== "assistant"
+      ? message
+      : Message.make({
+          ...message,
+          content: message.content.flatMap<ContentPart>((part) =>
+            part.type === "reasoning" ? replayReasoning(part, format) : [part],
+          ),
+        }),
+  )
 }
 
-export const bodyOptions = (input: unknown, maxTokens: number | undefined) => {
-  const openrouter = isRecord(input) ? input : {}
+// Existing Chat histories store signatures in reasoning_details, not native block/item metadata.
+function replayReasoning(part: ReasoningPart, format: "responses" | "messages"): ReasoningPart[] {
+  const metadata = part.providerMetadata?.openrouter
+  if (!Array.isArray(metadata?.reasoningDetails)) return [part]
+  const details = metadata.reasoningDetails.flatMap((detail) => Option.toArray(decodeReplayDetail(detail)))
+  const withMetadata = (extra: Record<string, unknown>, text = part.text): ReasoningPart => ({
+    ...part,
+    text,
+    providerMetadata: { ...part.providerMetadata, openrouter: { ...metadata, ...extra } },
+  })
+  if (format === "responses") {
+    const encrypted = details.find((detail) => detail.type === "reasoning.encrypted" || detail.type === "encrypted")
+    return [
+      withMetadata({
+        reasoningEncryptedContent: metadata.reasoningEncryptedContent ?? encrypted?.data ?? encrypted?.encrypted,
+      }),
+    ]
+  }
+  const blocks = details.flatMap<ReasoningPart>((detail) => {
+    if (detail.type === "reasoning.text" && detail.signature)
+      return [withMetadata({ signature: detail.signature }, detail.text ?? part.text)]
+    if (detail.type === "reasoning.encrypted" && detail.data) return [withMetadata({ redactedData: detail.data }, "")]
+    return []
+  })
+  return blocks.length ? blocks : [part]
+}
+
+export const bodyOptions = (input: LLMRequest["providerOptions"], maxTokens: number | undefined) => {
   const {
     usage,
     models,
@@ -150,7 +124,7 @@ export const bodyOptions = (input: unknown, maxTokens: number | undefined) => {
     text,
     promptCacheKey,
     ...options
-  } = openrouter
+  } = input ?? {}
   return {
     ...options,
     ...(usage === undefined || usage === true
