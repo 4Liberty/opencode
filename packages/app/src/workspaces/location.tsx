@@ -9,11 +9,16 @@ export type { LocationContext } from "@/runtime/server/client"
 export type WorkspaceLocation = LocationContext & {
   readonly ref: LocationRef
   readonly current: LocationGetOutput | undefined
+  readonly catalogDirectory: string
 }
 
 const context = createSimpleContext({
   name: "Location",
-  init: (props: { directory: string | Accessor<string>; workspaceID?: string | Accessor<string | undefined> }) => {
+  init: (props: {
+    directory: string | Accessor<string>
+    workspaceID?: string | Accessor<string | undefined>
+    catalogDirectory?: Accessor<string | undefined>
+  }) => {
     const serverSDK = useServerSDK()
     const server = useServer()
     const data = useData()
@@ -53,6 +58,7 @@ const context = createSimpleContext({
       ...location(),
       ref: ref(),
       current: current(),
+      catalogDirectory: props.catalogDirectory?.() ?? ref().directory,
     }))
   },
 })

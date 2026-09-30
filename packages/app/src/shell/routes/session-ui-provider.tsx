@@ -14,6 +14,7 @@ import { readLocalImage } from "@/runtime/server/image"
 export function SessionUIProvider(
   props: ParentProps<{
     directory: string
+    providerDirectory?: string
     server: ServerConnection.Key
   }>,
 ) {
@@ -39,7 +40,7 @@ export function SessionUIProvider(
     await data.session.sync(sessionID).catch(() => undefined)
     navigate(href(sessionID))
   }
-  const providers = useProviders(directory)
+  const providers = useProviders(() => props.providerDirectory ?? directory())
   const sessionUIData = createMemo(() => ({
     provider: providers.ready()
       ? { all: providers.all(), default: providers.default(), connected: providers.connected().map((item) => item.id) }

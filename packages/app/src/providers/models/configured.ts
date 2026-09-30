@@ -9,13 +9,13 @@ export function useConfiguredModel() {
   const server = useServerSDK()
   createEffect(
     on(
-      () => [location().directory, server.connection.status()] as const,
+      () => [location().catalogDirectory, server.connection.status()] as const,
       ([directory]) => {
         void data.location.config.sync({ directory }).catch(() => undefined)
       },
     ),
   )
-  const documents = () => data.location.config.list({ directory: location().directory })
+  const documents = () => data.location.config.list({ directory: location().catalogDirectory })
   const model = createMemo(() => {
     const entry = documents()?.findLast((entry) => entry.type === "document" && entry.info.model !== undefined)
     const model = entry?.type === "document" ? entry.info.model : undefined

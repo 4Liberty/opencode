@@ -17,13 +17,13 @@ export function createComposerControls(input: { sessionKey: Accessor<string>; mo
   const local = useLocal()
   const sdk = useWorkspaceLocation()
   const data = useData()
-  const providers = useProviders(() => sdk().directory)
+  const providers = useProviders(() => sdk().catalogDirectory)
   const view = layout.view(input.sessionKey)
 
   return createMemo<ComposerControls>(() => {
     return {
       agents: {
-        available: normalizeAgentList(data.location.agent.list({ directory: sdk().directory }) ?? []),
+        available: normalizeAgentList(data.location.agent.list({ directory: sdk().catalogDirectory }) ?? []),
         options: local.agent.list().map((agent) => agent.name),
         current: local.agent.current()?.name ?? "",
         visible: local.agent.visible(),
@@ -34,7 +34,7 @@ export function createComposerControls(input: { sessionKey: Accessor<string>; mo
         paid: providers.paid().length > 0,
         loading:
           !(input.model ?? local.model).ready() ||
-          (local.agent.visible() && data.location.agent.list({ directory: sdk().directory }) === undefined) ||
+          (local.agent.visible() && data.location.agent.list({ directory: sdk().catalogDirectory }) === undefined) ||
           !providers.ready(),
       },
       session: {
@@ -67,7 +67,7 @@ export function createComposerModelSelection(input: {
       },
     ),
   )
-  const providers = useProviders(() => sdk().directory)
+  const providers = useProviders(() => sdk().catalogDirectory)
   const connected = createMemo(() => new Set(providers.connected().map((item) => item.id)))
 
   const valid = (model: Pick<ModelKey, "providerID" | "modelID">) => {

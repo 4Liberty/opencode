@@ -1,4 +1,6 @@
-import { ErrorBoundary, createEffect, createMemo, Show, type ParentProps } from "solid-js"
+import { ErrorBoundary, createEffect, createMemo, onCleanup, Show, type ParentProps } from "solid-js"
+import { createStore } from "solid-js/store"
+import { retry } from "@opencode/util/retry"
 import { useParams } from "@solidjs/router"
 import { DataProvider } from "@opencode/session-ui/context"
 import { SessionUserMessage } from "@opencode/session-ui/message"
@@ -17,6 +19,7 @@ import { ServerConnection } from "@/runtime/server/registry"
 import { TerminalProvider } from "@/session/terminal/context"
 import { useSettingsCommand } from "@/settings/command"
 import { SessionUIProvider } from "@/shell/routes/session-ui-provider"
+import { isProjectDirectory } from "@/workspaces/paths"
 import { useTabs, type PendingSession } from "@/shell/tabs/tabs"
 import { requireServerKey } from "@/shell/routes/session"
 import { useSessionModel } from "./model"
@@ -33,15 +36,54 @@ export function TargetSessionRouteContent() {
   const data = useData()
   const server = useServer()
   const tabs = useTabs()
-  const directory = createMemo(() => data.session.get(params.id)?.location.directory)
+  const [locationState, setLocationState] = createStore({ unavailableSource: "" })
+  createEffect(() => {
+    const session = data.session.get(params.id)
+    if (!session) return
+    const source = session.location.directory
+    const project = data.project.get(session.projectID)
+    if (
+      !project ||
+      data.location.info({ directory: source }) ||
+      isProjectDirectory({ worktree: project.canonical, sandboxes: project.sandboxes }, source)
+    )
+      return
+    let stale = false
+    onCleanup(() => {
+      stale = true
+    })
+    void retry(() => data.location.syncInfo({ directory: source }), { retryIf: () => !stale }).then(
+      () => {
+        if (!stale) setLocationState("unavailableSource", "")
+      },
+      () => {
+        if (!stale) setLocationState("unavailableSource", source)
+      },
+    )
+  })
+  const catalogDirectory = createMemo(() => {
+    const session = data.session.get(params.id)
+    if (!session) return
+    const source = session.location.directory
+    const project = data.project.get(session.projectID)
+    if (!project || source !== locationState.unavailableSource || data.location.info({ directory: source }))
+      return source
+    if (data.location.provider.list({ directory: source }) && data.location.model.list({ directory: source }))
+      return source
+    // A removed worktree cannot supply a catalog, but its session still belongs to the known project.
+    return project.canonical
+  })
 
   return (
     <>
       <MarkSessionNotificationsViewed sessionID={() => params.id} />
-      <ModelsProvider directory={directory}>
+      <ModelsProvider directory={catalogDirectory}>
         <TargetSessionSettingsCommand />
         <SessionRouteErrorBoundary sessionID={params.id} serverKey={requireServerKey(params.serverKey)}>
-          <Show when={tabs.pendingSession(server.key, params.id)} fallback={<ResolvedTargetSessionRoute />}>
+          <Show
+            when={tabs.pendingSession(server.key, params.id)}
+            fallback={<ResolvedTargetSessionRoute catalogDirectory={catalogDirectory} />}
+          >
             {(pending) => <PreparingSession sessionID={params.id} pending={pending()} />}
           </Show>
         </SessionRouteErrorBoundary>
@@ -111,7 +153,7 @@ function SessionRouteErrorBoundary(props: ParentProps<{ sessionID?: string; serv
   )
 }
 
-function ResolvedTargetSessionRoute() {
+function ResolvedTargetSessionRoute(props: { catalogDirectory: () => string | undefined }) {
   const params = useParams<{ id: string }>()
   const server = useServer()
   const tabs = useTabs()
@@ -136,8 +178,8 @@ function ResolvedTargetSessionRoute() {
     >
       <Show when={directory()} fallback={<PendingSessionState sessionID={params.id} />}>
         {(value) => (
-          <LocationProvider directory={value}>
-            <SessionUIProvider directory={value()} server={server.key}>
+          <LocationProvider directory={value} catalogDirectory={props.catalogDirectory}>
+            <SessionUIProvider directory={value()} providerDirectory={props.catalogDirectory()} server={server.key}>
               <TargetSessionPage />
             </SessionUIProvider>
           </LocationProvider>
