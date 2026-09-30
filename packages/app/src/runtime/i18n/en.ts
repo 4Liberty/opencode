@@ -1151,6 +1151,7 @@ export const dict = {
   "settings.tab.about": "About",
   "settings.about.version": "Version {{version}}",
   "settings.about.devVersion": "development",
+  "settings.about.copyVersionFailed": "Failed to copy version",
   "settings.about.license": "Released under the MIT License",
   "settings.about.writtenBy": "Written by",
   "settings.about.illustratedBy": "Illustrated by",
