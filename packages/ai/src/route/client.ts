@@ -683,17 +683,15 @@ export const layer: Layer.Layer<Service, never, RequestExecutor.Service> = Layer
       options: TriggerCompactOptions,
     ): Effect.Effect<CompactionCheckpointResponse, AIError>
     function compact(request: LLMRequest, options?: EndpointCompactOptions | TriggerCompactOptions) {
-      return Effect.suspend((): Effect.Effect<CompactionResponse | CompactionCheckpointResponse, AIError> => {
-        if (options?.mechanism === "trigger" && canCompact(request, options)) {
-          const trigger = request.model.route.compact.trigger
-          return lowerRequest(request).pipe(Effect.flatMap((lowered) => trigger(lowered.request, executor, options)))
-        }
-        if ((options?.mechanism === undefined || options.mechanism === "endpoint") && canCompact(request)) {
-          const endpoint = request.model.route.compact.endpoint
-          return lowerRequest(request).pipe(Effect.flatMap((lowered) => endpoint(lowered.request, executor, options)))
-        }
-        return unsupportedCompaction(request, options?.mechanism)
-      })
+      return lowerRequest(request).pipe(
+        Effect.flatMap((lowered): Effect.Effect<CompactionResponse | CompactionCheckpointResponse, AIError> => {
+          if (options?.mechanism === "trigger" && canCompact(request, options))
+            return request.model.route.compact.trigger(lowered.request, executor, options)
+          if ((options?.mechanism === undefined || options.mechanism === "endpoint") && canCompact(request))
+            return request.model.route.compact.endpoint(lowered.request, executor, options)
+          return unsupportedCompaction(request, options?.mechanism)
+        }),
+      )
     }
     return Service.of({
       stream,

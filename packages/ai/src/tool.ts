@@ -3,7 +3,6 @@ import { Tool } from "@opencode/schema/tool"
 import type {
   ToolCallPart,
   ToolDefinition as ToolDefinitionClass,
-  ToolEntry,
   ToolOutput as ToolOutputType,
 } from "./schema/index.js"
 import { ToolDefinition, ToolFailure, ToolOutput } from "./schema/index.js"
@@ -208,49 +207,28 @@ export function make(config: TypedToolConfig | DynamicToolConfig): AnyTool {
 }
 
 /**
- * A record of named tools. A dotted key such as `crm.lookup` declares `lookup`
- * inside the `crm` namespace, matching the `namespace.name` identity that
- * `ToolRuntime.dispatch` resolves.
+ * A record of named tools. The record key becomes the tool name on the wire.
  */
 export type Tools = Record<string, AnyTool>
 
 /**
- * Convert a tools record into the tool entries that `LLMRequest.tools`
- * expects, nesting dotted keys into namespaces.
+ * Convert a tools record into the `ToolDefinition[]` shape that
+ * `LLMRequest.tools` expects.
  *
  * Tool names come from the record keys, so the per-tool cached
  * `_definition` is rebuilt with the correct name here. The JSON Schema body
  * is reused.
  */
-export const toDefinitions = (tools: Tools): ReadonlyArray<ToolEntry> =>
-  nest(
-    Object.entries(tools).map(([key, item]) => ({
-      path: key.split("."),
-      definition: item._definition,
-    })),
+export const toDefinitions = (tools: Tools): ReadonlyArray<ToolDefinitionClass> =>
+  Object.entries(tools).map(
+    ([name, item]) =>
+      new ToolDefinition({
+        name,
+        description: item._definition.description,
+        inputSchema: item._definition.inputSchema,
+        outputSchema: item._definition.outputSchema,
+      }),
   )
-
-const nest = (
-  entries: ReadonlyArray<{ readonly path: ReadonlyArray<string>; readonly definition: ToolDefinitionClass }>,
-): ReadonlyArray<ToolEntry> =>
-  [...new Set(entries.map((entry) => (entry.path.length === 1 ? entry : entry.path[0])))].map((group) => {
-    if (typeof group !== "string")
-      return new ToolDefinition({
-        name: group.path[0],
-        description: group.definition.description,
-        inputSchema: group.definition.inputSchema,
-        outputSchema: group.definition.outputSchema,
-      })
-    return {
-      type: "namespace" as const,
-      name: group,
-      tools: nest(
-        entries
-          .filter((entry) => entry.path.length > 1 && entry.path[0] === group)
-          .map((entry) => ({ ...entry, path: entry.path.slice(1) })),
-      ),
-    }
-  })
 
 const toJsonSchema = (schema: Schema.Top): JsonSchema.JsonSchema => {
   const document = Schema.toJsonSchemaDocument(schema)
