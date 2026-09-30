@@ -32,7 +32,9 @@ export const Plugin = {
             Effect.gen(function* () {
               // Listing every server checks each server name so per-server rules still apply.
               const servers =
-                input.server === undefined ? (yield* mcp.servers()).map((server) => server.name) : [input.server]
+                input.server === undefined
+                  ? (yield* mcp.servers(context.sessionID)).map((server) => server.name)
+                  : [input.server]
               yield* permission.assert({
                 action: "opencode_list_mcp_resources",
                 resources: servers,
@@ -42,8 +44,8 @@ export const Plugin = {
                 agent: context.agent,
                 source: { type: "tool", messageID: context.messageID, id: context.id },
               })
-              if (input.server === undefined) return { output: yield* mcp.resourceCatalog() }
-              return { output: yield* mcp.resources({ server: input.server }) }
+              if (input.server === undefined) return { output: yield* mcp.resourceCatalog(context.sessionID) }
+              return { output: yield* mcp.resources({ server: input.server, sessionID: context.sessionID }) }
             }).pipe(Effect.mapError((error) => new ToolFailure({ message: error.message, error }))),
         })
         editor.add({
@@ -71,7 +73,7 @@ export const Plugin = {
                 agent: context.agent,
                 source: { type: "tool", messageID: context.messageID, id: context.id },
               })
-              const resource = yield* mcp.readResource(input)
+              const resource = yield* mcp.readResource({ ...input, sessionID: context.sessionID })
               if (!resource)
                 return yield* new ToolFailure({
                   message: `MCP server "${input.server}" is not connected or does not expose resources`,

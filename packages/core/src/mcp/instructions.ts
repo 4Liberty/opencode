@@ -1,5 +1,6 @@
 export * as McpInstructions from "./instructions.js"
 
+import type { Session } from "@opencode/schema/session"
 import { makeLocationNode } from "@opencode/util/effect/app-node"
 import { Context, Effect, Layer, Schema } from "effect"
 import { Permission } from "../permission.js"
@@ -55,7 +56,7 @@ const update = (previous: ReadonlyArray<Summary>, current: ReadonlyArray<Summary
 
 export interface Interface {
   /** Lists server instructions reachable under the given ruleset; callers pass the merged agent and Session permissions. */
-  readonly load: (permissions: Permission.Ruleset) => Effect.Effect<Instructions.List>
+  readonly load: (permissions: Permission.Ruleset, sessionID?: Session.ID) => Effect.Effect<Instructions.List>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/McpInstructions") {}
@@ -66,7 +67,7 @@ export const layer = Layer.effect(
     const mcp = yield* Mcp.Service
 
     return Service.of({
-      load: Effect.fn("McpInstructions.load")(function* (permissions) {
+      load: Effect.fn("McpInstructions.load")(function* (permissions, sessionID) {
         const source = (value: ReadonlyArray<Summary> | Instructions.Removed) =>
           Instructions.make<ReadonlyArray<Summary>>({
             key: Instructions.Key.make("core/mcp-guidance"),
@@ -78,7 +79,7 @@ export const layer = Layer.effect(
               removed: () => "MCP server instructions are no longer available.",
             },
           })
-        const [instructions, tools] = yield* Effect.all([mcp.instructions(), mcp.tools()], {
+        const [instructions, tools] = yield* Effect.all([mcp.instructions(sessionID), mcp.tools(sessionID)], {
           concurrency: "unbounded",
         })
         const canExecute = Permission.evaluate("execute", "*", permissions).effect !== "deny"

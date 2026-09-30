@@ -131,12 +131,12 @@ const layer = Layer.effect(
       const permissions = Permission.merge(agent.info.permissions, session.permissions ?? [])
       const loaded = yield* Effect.all(
         {
-          tools: registry.snapshot(permissions),
+          tools: mcpTools.overlay(sessionID).pipe(Effect.flatMap((overlay) => registry.snapshot(permissions, overlay))),
           builtins: builtins.load(),
           discovery: discovery.load(),
           skills: skillInstructions.load(permissions),
           references: referenceInstructions.load(),
-          mcp: mcpInstructions.load(permissions),
+          mcp: mcpInstructions.load(permissions, sessionID),
           entries: entries.load(sessionID),
         },
         { concurrency: "unbounded" },

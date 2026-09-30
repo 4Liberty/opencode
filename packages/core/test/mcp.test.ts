@@ -30,6 +30,7 @@ import { McpStdio } from "@opencode/core/mcp/stdio"
 import { Permission } from "@opencode/core/permission"
 import { AbsolutePath } from "@opencode/core/schema"
 import { Session } from "@opencode/core/session"
+import { SessionStore } from "@opencode/core/session/store"
 import { State } from "@opencode/core/state"
 import { McpTool } from "@opencode/core/tool/mcp"
 import { McpResourceTools } from "@opencode/core/tool/plugin/mcp-resource"
@@ -348,6 +349,7 @@ function resourceMcpLayer(
           },
         }),
         Layer.mock(Credential.Service, {}),
+        Layer.mock(SessionStore.Service, {}),
         overrides?.environment ?? hostEnvironmentLayer,
       ),
     ),
@@ -1989,8 +1991,17 @@ testEffect(Layer.empty).live("keeps MCP config snapshots stable during an in-fli
 
 const shutdownIt = testEffect(
   AppNodeBuilder.build(
-    LayerNode.group([Bus.node, Integration.node, Credential.node, Form.node, Environment.node, Location.node]),
+    LayerNode.group([
+      Bus.node,
+      Integration.node,
+      Credential.node,
+      Form.node,
+      Environment.node,
+      Location.node,
+      SessionStore.node,
+    ]),
     [
+      SessionStore.node.replace(Layer.mock(SessionStore.Service, {})),
       Location.node.replace(
         Layer.succeed(
           Location.Service,

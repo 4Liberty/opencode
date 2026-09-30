@@ -4,6 +4,7 @@ import { Mcp } from "@opencode/schema/mcp"
 import { McpEvent } from "@opencode/schema/mcp-event"
 import { ephemeral } from "@opencode/schema/event"
 import type { Session } from "@opencode/schema/session"
+import { SessionEvent } from "@opencode/schema/session-event"
 import { createHash } from "node:crypto"
 import { isDeepStrictEqual } from "node:util"
 import { Cause, Context, Effect, Exit, FiberSet, Latch, Layer, Schema, Scope, Semaphore, Stream, Types } from "effect"
@@ -15,6 +16,7 @@ import { Form } from "../form.js"
 import { Integration } from "../integration.js"
 import { KeyedMutex } from "../effect/keyed-mutex.js"
 import { Location } from "../location.js"
+import { SessionStore } from "../session/store.js"
 import { waitForAbort } from "@opencode/util/process"
 import { State } from "../state.js"
 import type { McpClient } from "./client.js"
@@ -33,7 +35,12 @@ export interface ServerInstructions {
 }
 
 /** SDK tool definition tagged with the server that owns it. */
-export type Tool = McpClient.Tool & { readonly server: ServerName; readonly codemode?: boolean }
+export type Tool = McpClient.Tool & {
+  readonly server: ServerName
+  readonly codemode?: boolean
+  /** Owner of the Session-scoped server that provides this tool; absent for Location servers. */
+  readonly sessionID?: Session.ID
+}
 export type ToolResultContent = McpClient.CallToolContent
 export type ToolResult = McpClient.CallToolResult & { readonly server: ServerName; readonly tool: string }
 export type Prompt = McpClient.Prompt & { readonly server: ServerName }
@@ -64,6 +71,7 @@ export class ToolCallError extends Schema.TaggedError<ToolCallError>()("MCP.Tool
 
 type ServerEntry = {
   readonly config: Mcp.ServerConfig
+  readonly sessionID?: Session.ID
   status: Status
   readonly startup: Latch.Latch
   scope?: Scope.Closeable
@@ -97,31 +105,41 @@ export type Editor = {
 
 const cloneConfig = (config: Mcp.ServerConfig) => structuredClone(config) as Types.DeepMutable<Mcp.ServerConfig>
 
+/**
+ * Methods taking a `sessionID` resolve the servers visible to that Session: servers registered for the
+ * Session or one of its ancestors, nearest owner first, shadowing Location servers of the same name.
+ * Without a `sessionID` they address Location servers only.
+ */
 export interface Interface extends State.Transformable<Editor> {
-  readonly servers: () => Effect.Effect<ServerInfo[]>
-  readonly add: (server: ServerName | string, config: Mcp.ServerConfig) => Effect.Effect<void>
+  readonly servers: (sessionID?: Session.ID) => Effect.Effect<ServerInfo[]>
+  /** Session-scoped servers are process-local and released when removed or when their Session is deleted or moved. */
+  readonly add: (server: ServerName | string, config: Mcp.ServerConfig, sessionID?: Session.ID) => Effect.Effect<void>
   readonly connect: (server: ServerName | string) => Effect.Effect<void, NotFoundError>
   readonly disconnect: (server: ServerName | string) => Effect.Effect<void, NotFoundError>
-  readonly remove: (server: ServerName | string) => Effect.Effect<void, NotFoundError>
-  readonly tools: () => Effect.Effect<Tool[]>
+  readonly remove: (server: ServerName | string, sessionID?: Session.ID) => Effect.Effect<void, NotFoundError>
+  readonly tools: (sessionID?: Session.ID) => Effect.Effect<Tool[]>
   readonly callTool: (input: {
     readonly server: ServerName | string
     readonly name: string
     readonly args?: Record<string, unknown>
     readonly sessionID?: Session.ID
   }) => Effect.Effect<ToolResult, NotFoundError | ToolCallError>
-  readonly instructions: () => Effect.Effect<ServerInstructions[]>
+  readonly instructions: (sessionID?: Session.ID) => Effect.Effect<ServerInstructions[]>
   readonly prompts: () => Effect.Effect<Prompt[]>
   readonly prompt: (input: {
     readonly server: ServerName | string
     readonly name: string
     readonly args?: Record<string, string>
   }) => Effect.Effect<PromptResult | undefined, NotFoundError>
-  readonly resourceCatalog: () => Effect.Effect<ResourceCatalog>
-  readonly resources: (input: { readonly server: ServerName | string }) => Effect.Effect<ResourceCatalog, Error>
+  readonly resourceCatalog: (sessionID?: Session.ID) => Effect.Effect<ResourceCatalog>
+  readonly resources: (input: {
+    readonly server: ServerName | string
+    readonly sessionID?: Session.ID
+  }) => Effect.Effect<ResourceCatalog, Error>
   readonly readResource: (input: {
     readonly server: ServerName | string
     readonly uri: string
+    readonly sessionID?: Session.ID
   }) => Effect.Effect<ResourceContent | undefined, Error>
 }
 
@@ -147,13 +165,17 @@ export const layer = (options?: Options) =>
       const forms = yield* Form.Service
       const integration = yield* Integration.Service
       const credentials = yield* Credential.Service
+      const store = yield* SessionStore.Service
       const root = yield* Effect.scope
       const fork = yield* FiberSet.makeRuntime<never, void, never>()
 
       const entries = new Map<ServerName, ServerEntry>()
+      const sessionEntries = new Map<Session.ID, Map<ServerName, ServerEntry>>()
       // Serializes lifecycle operations per server. Anything taking this lock from a connection
       // callback must stay forked: lifecycle operations close scopes while holding it, firing onClose.
-      const locks = KeyedMutex.makeUnsafe<ServerName>()
+      const locks = KeyedMutex.makeUnsafe<string>()
+      const slot = (name: ServerName, sessionID: Session.ID | undefined) =>
+        sessionID === undefined ? name : sessionID + "\u0000" + name
       // Legacy era only: pending URL-mode elicitation forms, settled by notifications/elicitation/complete.
       const urlElicitations = new Map<string, Form.ID>()
 
@@ -200,9 +222,25 @@ export const layer = (options?: Options) =>
           })
           .pipe(Scope.provide(scope))
       })
-      const requireServer = Effect.fnUntraced(function* (server: ServerName | string) {
+      const sessionServers = Effect.fnUntraced(function* (sessionID: Session.ID | undefined) {
+        const scoped = new Map<ServerName, ServerEntry>()
+        if (sessionID === undefined || sessionEntries.size === 0) return scoped
+        let current: Session.ID | undefined = sessionID
+        while (current) {
+          for (const [name, entry] of sessionEntries.get(current) ?? []) if (!scoped.has(name)) scoped.set(name, entry)
+          current = (yield* store.get(current))?.parentID
+        }
+        return scoped
+      })
+
+      const visibleServers = Effect.fnUntraced(function* (sessionID: Session.ID | undefined) {
+        const scoped = yield* sessionServers(sessionID)
+        return [...Array.from(entries).filter(([name]) => !scoped.has(name)), ...scoped]
+      })
+
+      const requireServer = Effect.fnUntraced(function* (server: ServerName | string, sessionID?: Session.ID) {
         const name = ServerName.make(server)
-        const entry = entries.get(name)
+        const entry = (yield* sessionServers(sessionID)).get(name) ?? entries.get(name)
         if (!entry) return yield* new NotFoundError({ server: name })
         return { name, entry }
       })
@@ -292,6 +330,7 @@ export const layer = (options?: Options) =>
         ...tool,
         server,
         ...(entry.config.codemode === undefined ? {} : { codemode: entry.config.codemode }),
+        ...(entry.sessionID === undefined ? {} : { sessionID: entry.sessionID }),
       })
 
       const refreshTools = (name: ServerName, entry: ServerEntry, connection: McpClient.Connection) =>
@@ -317,7 +356,7 @@ export const layer = (options?: Options) =>
         <E>(effect: Effect.Effect<void, E>) =>
           fork(
             Effect.suspend(() => (entry.client === connection ? effect : Effect.void)).pipe(
-              locks.withLock(name),
+              locks.withLock(slot(name, entry.sessionID)),
               Effect.ignore,
             ),
           )
@@ -330,7 +369,7 @@ export const layer = (options?: Options) =>
           yield* Effect.logInfo("mcp session expired, reconnecting", { server: name })
           yield* stopServer(name, entry)
           yield* startServer(name, entry)
-        }).pipe(locks.withLock(name))
+        }).pipe(locks.withLock(slot(name, entry.sessionID)))
 
       // Runs a request against the live connection and, if that request observed a session expiry,
       // reconnects and runs it once more against the replacement. Any other failure passes through.
@@ -518,6 +557,48 @@ export const layer = (options?: Options) =>
         yield* bus.publish(McpEvent.StatusChanged, { server: name })
       })
 
+      // Session-scoped servers skip OAuth integration registration: integrations are keyed by name and
+      // URL, so a Session registration would share and then dispose another owner's credential wiring.
+      const addSessionServer = (sessionID: Session.ID, name: ServerName, serverConfig: Mcp.ServerConfig) =>
+        Effect.gen(function* () {
+          const config = cloneConfig(serverConfig)
+          const servers = sessionEntries.get(sessionID) ?? new Map<ServerName, ServerEntry>()
+          const previous = servers.get(name)
+          if (previous && isDeepStrictEqual(previous.config, config)) return
+          if (previous) yield* stopServer(name, previous)
+          const entry: ServerEntry = { config, sessionID, status: { status: "pending" }, startup: Latch.makeUnsafe() }
+          sessionEntries.set(sessionID, servers.set(name, entry))
+          yield* (
+            config.disabled
+              ? Effect.sync(() => {
+                  entry.status = { status: "disabled" }
+                })
+              : startServer(name, entry)
+          ).pipe(Effect.ensuring(entry.startup.open))
+        }).pipe(locks.withLock(slot(name, sessionID)))
+
+      const removeSessionServer = (sessionID: Session.ID, name: ServerName) =>
+        Effect.gen(function* () {
+          const servers = sessionEntries.get(sessionID)
+          const entry = servers?.get(name)
+          if (!servers || !entry) return yield* new NotFoundError({ server: name })
+          yield* stopServer(name, entry)
+          servers.delete(name)
+          if (servers.size === 0) sessionEntries.delete(sessionID)
+        }).pipe(locks.withLock(slot(name, sessionID)))
+
+      fork(
+        bus.subscribe([SessionEvent.Deleted, SessionEvent.Moved]).pipe(
+          Stream.runForEach((event) =>
+            Effect.forEach(
+              Array.from(sessionEntries.get(event.data.sessionID)?.keys() ?? []),
+              (name) => removeSessionServer(event.data.sessionID, name).pipe(Effect.ignore),
+              { discard: true },
+            ),
+          ),
+        ),
+      )
+
       let applied: Map<ServerName, Mcp.ServerConfig> | undefined
       const overrides = new Map<ServerName, Mcp.ServerConfig | false>()
       const reconcileLock = Semaphore.makeUnsafe(1)
@@ -614,13 +695,14 @@ export const layer = (options?: Options) =>
       return Service.of({
         transform: state.transform,
         reload: state.reload,
-        servers: Effect.fn("MCP.servers")(function* () {
-          return Array.from(entries)
+        servers: Effect.fn("MCP.servers")(function* (sessionID) {
+          return (yield* visibleServers(sessionID))
             .toSorted(([a], [b]) => a.localeCompare(b))
             .map(([name, entry]): ServerInfo => ({ name, status: entry.status, integrationID: entry.integrationID }))
         }),
-        add: Effect.fn("MCP.add")(function* (server, config) {
+        add: Effect.fn("MCP.add")(function* (server, config, sessionID) {
           const name = ServerName.make(server)
+          if (sessionID !== undefined) return yield* addSessionServer(sessionID, name, config)
           overrides.set(name, config)
           yield* state.reload()
         }),
@@ -641,20 +723,21 @@ export const layer = (options?: Options) =>
             yield* bus.publish(McpEvent.StatusChanged, { server: name })
           }).pipe(locks.withLock(name))
         }),
-        remove: Effect.fn("MCP.remove")(function* (server) {
+        remove: Effect.fn("MCP.remove")(function* (server, sessionID) {
           const name = ServerName.make(server)
+          if (sessionID !== undefined) return yield* removeSessionServer(sessionID, name)
           yield* requireServer(name)
           overrides.set(name, false)
           yield* state.reload()
         }),
         // Reads report what is connected now; servers still starting contribute once they publish a change.
-        tools: Effect.fn("MCP.tools")(function* () {
-          return Array.from(entries.values())
-            .flatMap((entry) => entry.tools ?? [])
+        tools: Effect.fn("MCP.tools")(function* (sessionID) {
+          return (yield* visibleServers(sessionID))
+            .flatMap(([, entry]) => entry.tools ?? [])
             .toSorted((a, b) => a.server.localeCompare(b.server) || a.name.localeCompare(b.name))
         }),
         callTool: Effect.fn("MCP.callTool")(function* (input) {
-          const target = yield* requireServer(input.server)
+          const target = yield* requireServer(input.server, input.sessionID)
           yield* target.entry.startup.await
           if (!target.entry.client)
             return yield* new ToolCallError({
@@ -671,8 +754,8 @@ export const layer = (options?: Options) =>
           )
           return { ...result, server: target.name, tool: input.name }
         }),
-        instructions: Effect.fn("MCP.instructions")(function* () {
-          return Array.from(entries)
+        instructions: Effect.fn("MCP.instructions")(function* (sessionID) {
+          return (yield* visibleServers(sessionID))
             .flatMap(([server, entry]) => {
               const instructions = entry.client?.instructions
               if (!instructions) return []
@@ -695,10 +778,10 @@ export const layer = (options?: Options) =>
           if (!result) return undefined
           return { ...result, server: target.name, name: input.name }
         }),
-        resourceCatalog: Effect.fn("MCP.resourceCatalog")(function* () {
+        resourceCatalog: Effect.fn("MCP.resourceCatalog")(function* (sessionID) {
           const empty = ResourceCatalog.make({ resources: [], templates: [] })
           const catalogs = yield* Effect.forEach(
-            Array.from(entries),
+            yield* visibleServers(sessionID),
             ([name, entry]) =>
               entry.client
                 ? loadCatalog(name, entry, entry.client).pipe(Effect.orElseSucceed(() => empty))
@@ -708,13 +791,13 @@ export const layer = (options?: Options) =>
           return mergeCatalogs(catalogs)
         }),
         resources: Effect.fn("MCP.resources")(function* (input) {
-          const target = yield* requireServer(input.server)
+          const target = yield* requireServer(input.server, input.sessionID)
           yield* target.entry.startup.await
           if (!target.entry.client) return ResourceCatalog.make({ resources: [], templates: [] })
           return mergeCatalogs([yield* loadCatalog(target.name, target.entry, target.entry.client)])
         }),
         readResource: Effect.fn("MCP.readResource")(function* (input) {
-          const target = yield* requireServer(input.server)
+          const target = yield* requireServer(input.server, input.sessionID)
           yield* target.entry.startup.await
           if (!target.entry.client) return undefined
           const result = yield* recovering(target.name, target.entry, target.entry.client, (connection) =>
@@ -757,7 +840,7 @@ export function configured(options?: Options) {
   return makeLocationNode({
     service: Service,
     layer: layer(options),
-    deps: [Location.node, Environment.node, Bus.node, Form.node, Integration.node, Credential.node],
+    deps: [Location.node, Environment.node, Bus.node, Form.node, Integration.node, Credential.node, SessionStore.node],
   })
 }
 
