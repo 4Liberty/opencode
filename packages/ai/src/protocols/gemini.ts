@@ -438,7 +438,7 @@ const lowerMessages = Effect.fn("Gemini.lowerMessages")(function* (request: LLMR
 })
 
 const fromRequest = Effect.fn("Gemini.fromRequest")(function* (request: LLMRequest) {
-  const tools = ProviderShared.flatTools(request.tools)
+  const tools = ProviderShared.flattenedTools(request.tools)
   const hasTools = tools.length > 0
   const generation = request.generation
   const options = yield* decodeOptions(request.providerOptions ?? {})

@@ -288,7 +288,7 @@ export const unsupportedOperation = (input: {
   })
 
 /** The route flattens namespaces before a flat protocol's `body.from`, so only plain tools remain. */
-export const flatTools = (tools: ReadonlyArray<ToolEntry>) =>
+export const flattenedTools = (tools: ReadonlyArray<ToolEntry>) =>
   tools.filter((tool): tool is ToolDefinition => tool.type === "tool")
 
 export const matchToolChoice = <Auto, None, Required, Tool>(

@@ -816,7 +816,7 @@ export const fromRequestWithAdapter = Effect.fn("OpenResponses.fromRequestWithAd
   request: LLMRequest,
   adapter: ProviderAdapter,
 ) {
-  const tools = ProviderShared.flatTools(request.tools)
+  const tools = ProviderShared.flattenedTools(request.tools)
   return {
     ...(yield* lowerConversation(request, adapter)),
     ...lowerGeneration(request),

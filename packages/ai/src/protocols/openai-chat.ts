@@ -826,7 +826,7 @@ export const fromRequest = Effect.fn("OpenAIChat.fromRequest")(function* (
   const zaiToolStream =
     request.model.compatibility?.zaiToolStream ?? detectZaiToolStream(provider, baseURL, request.model.id)
   const hasHistory = hasToolHistory(request.messages)
-  const tools = ProviderShared.flatTools(request.tools)
+  const tools = ProviderShared.flattenedTools(request.tools)
   const hasActiveTools = tools.length > 0
   return {
     model: request.model.id,

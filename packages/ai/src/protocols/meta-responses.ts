@@ -67,7 +67,7 @@ const adapter = {
 
 const fromRequest = Effect.fn("MetaResponses.fromRequest")(function* (request: LLMRequest) {
   const key = request.model.route.providerMetadataKey ?? String(request.model.provider)
-  const tools = ProviderShared.flatTools(request.tools)
+  const tools = ProviderShared.flattenedTools(request.tools)
   const projected = LLMRequest.update(request, {
     messages: request.messages.map((message) =>
       Message.make({
