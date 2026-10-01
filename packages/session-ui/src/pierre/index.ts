@@ -1,6 +1,7 @@
 import { DiffLineAnnotation, FileContents, FileDiffOptions, type SelectedLineRange } from "@pierre/diffs"
 import { ComponentProps } from "solid-js"
 import { lineCommentStyles } from "../components/line-comment-styles"
+import { diffColorTuningCSS } from "./diff-color-tuning"
 
 export type DiffProps<T = {}> = FileDiffOptions<T, undefined> & {
   before: FileContents
@@ -244,6 +245,7 @@ const unsafeCSS = `
 
 ${lineCommentStyles}
 
+${diffColorTuningCSS}
 `
 
 export function createDefaultOptions<T>(style: FileDiffOptions<T, undefined>["diffStyle"]) {
