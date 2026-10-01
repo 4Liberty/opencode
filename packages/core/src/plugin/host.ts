@@ -96,19 +96,25 @@ export const make = Effect.fn("PluginHost.make")(function* (
   const decodeWorktree = Schema.decodeUnknownEffect(Worktree.Info)
   const decodeWorktrees = Schema.decodeUnknownEffect(Schema.Array(Worktree.ListEntry))
 
-  const agentsAt = <A>(ref: Location.Ref, use: (agents: Agent.Interface) => Effect.Effect<A>) =>
-    Effect.gen(function* () {
+  const atAgentLocation = <A>(
+    input: Parameters<typeof locationRef>[0],
+    use: (agents: Agent.Interface) => Effect.Effect<A>,
+  ) => {
+    const ref = locationRef(input)
+    if (!ref || isCurrentLocation(ref)) return response(use(agents))
+    return Effect.gen(function* () {
       const location = yield* Location.Service
-      const agents = yield* Agent.Service
+      const remote = yield* Agent.Service
       return {
         location: new Location.Info({
           directory: location.directory,
           workspaceID: location.workspaceID,
           project: location.project,
         }),
-        data: yield* use(agents),
+        data: yield* use(remote),
       }
-    }).pipe(Effect.provide(locations.get(ref)), Effect.orDie, Effect.withSpan("PluginHost.agentsAt"))
+    }).pipe(Effect.provide(locations.get(ref)), Effect.orDie, Effect.withSpan("PluginHost.atAgentLocation"))
+  }
 
   // Keep the instance graph's inferred types independent of Session handles.
   const context: Plugin.Context = {
@@ -117,35 +123,16 @@ export const make = Effect.fn("PluginHost.make")(function* (
     options: {},
     rpc: Object.assign(rpc.client, { register: rpc.register }),
     agent: {
-      get: (input) => {
-        const ref = locationRef(input)
-        const output =
-          ref && !isCurrentLocation(ref)
-            ? agentsAt(ref, (agents) => agents.list()).pipe(
-                Effect.map((result) => ({
-                  ...result,
-                  data: result.data.find((agent) => agent.id === input.agentID),
-                })),
-              )
-            : response(agents.get(input.agentID))
-        return output.pipe(
+      get: (input) =>
+        atAgentLocation(input, (agents) => agents.get(input.agentID)).pipe(
           Effect.flatMap((result) =>
             result.data
               ? Effect.succeed({ ...result, data: result.data })
               : Effect.fail(new Error(`Agent not found: ${input.agentID}`)),
           ),
-        )
-      },
-      list: (input) => {
-        const ref = locationRef(input)
-        if (ref && !isCurrentLocation(ref)) return agentsAt(ref, (agents) => agents.list())
-        return response(agents.list())
-      },
-      default: (input) => {
-        const ref = locationRef(input)
-        if (ref && !isCurrentLocation(ref)) return agentsAt(ref, (agents) => agents.default())
-        return response(agents.default())
-      },
+        ),
+      list: (input) => atAgentLocation(input, (agents) => agents.list()),
+      default: (input) => atAgentLocation(input, (agents) => agents.default()),
       reload: agents.reload,
       transform: (callback) =>
         agents.transform((editor) => {

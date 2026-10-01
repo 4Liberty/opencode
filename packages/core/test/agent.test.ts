@@ -90,7 +90,6 @@ describe("Agent", () => {
   it.effect("resolves the default agent the same way sessions select one", () =>
     Effect.gen(function* () {
       const agent = yield* Agent.Service
-      let configured: string | undefined
       yield* agent.transform((editor) => {
         editor.update(Agent.ID.make("plan"), (info) => {
           info.mode = "primary"
@@ -107,7 +106,6 @@ describe("Agent", () => {
         editor.update(Agent.ID.make("explore"), (info) => {
           info.mode = "subagent"
         })
-        if (configured !== undefined) editor.default(Agent.ID.make(configured))
       })
       const resolved = Effect.gen(function* () {
         const info = yield* agent.default()
@@ -125,8 +123,7 @@ describe("Agent", () => {
         ] as const,
         ([id, expected]) =>
           Effect.gen(function* () {
-            configured = id
-            yield* agent.reload()
+            yield* agent.transform((editor) => editor.default(Agent.ID.make(id)))
             expect(yield* resolved).toBe(Agent.ID.make(expected))
           }),
       )
@@ -136,20 +133,22 @@ describe("Agent", () => {
   it.effect("falls back to the first selectable agent without build", () =>
     Effect.gen(function* () {
       const agent = yield* Agent.Service
-      let primary = true
       yield* agent.transform((editor) => {
         editor.update(Agent.ID.make("explore"), (info) => {
           info.mode = "subagent"
         })
         editor.update(Agent.ID.make("plan"), (info) => {
-          info.mode = primary ? "primary" : "subagent"
+          info.mode = "primary"
         })
       })
 
       expect((yield* agent.default())?.id).toBe(Agent.ID.make("plan"))
 
-      primary = false
-      yield* agent.reload()
+      yield* agent.transform((editor) =>
+        editor.update(Agent.ID.make("plan"), (info) => {
+          info.mode = "subagent"
+        }),
+      )
       expect(yield* agent.default()).toBeUndefined()
       expect(yield* agent.select()).toEqual({ id: Agent.defaultID, info: undefined })
     }),

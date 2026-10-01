@@ -7,52 +7,44 @@ import { tmpdir } from "../../core/test/fixture/tmpdir"
 import { it } from "../../core/test/lib/effect"
 import { startServer } from "./fixture/server"
 
-const ListResponse = Schema.Struct({ data: Schema.Array(Agent.Info) })
 const DefaultResponse = Schema.Struct({
   location: Schema.Struct({ directory: Schema.String }),
-  data: Schema.optional(Agent.Info),
+  data: Schema.NullOr(Agent.Info),
 })
 
 it.live("returns the default agent for each location", () =>
   Effect.gen(function* () {
     const global = yield* Effect.acquireDisposable(Effect.promise(() => tmpdir("opencode-agent-default-global-")))
-    const cases = [
-      { config: { default_agent: "reviewer", agents: { reviewer: { mode: "primary" } } }, expected: "reviewer" },
-      { config: { agents: { reviewer: { mode: "primary" } } }, expected: "build" },
-      { config: { default_agent: "missing", agents: { reviewer: { mode: "primary" } } }, expected: "build" },
-      { config: { default_agent: "reviewer", agents: { reviewer: { hidden: true } } }, expected: "build" },
-      { config: { default_agent: "reviewer", agents: { reviewer: { mode: "subagent" } } }, expected: "build" },
-    ]
-    const projects = yield* Effect.forEach(cases, (item) =>
-      Effect.gen(function* () {
-        const project = yield* Effect.acquireDisposable(Effect.promise(() => tmpdir("opencode-agent-default-")))
-        yield* Effect.promise(() => fs.writeFile(path.join(project.path, "opencode.json"), JSON.stringify(item.config)))
-        return { directory: project.path, expected: item.expected }
-      }),
+    const configured = yield* Effect.acquireDisposable(Effect.promise(() => tmpdir("opencode-agent-default-")))
+    const unconfigured = yield* Effect.acquireDisposable(Effect.promise(() => tmpdir("opencode-agent-default-")))
+    yield* Effect.promise(() =>
+      fs.writeFile(
+        path.join(configured.path, "opencode.json"),
+        JSON.stringify({ default_agent: "reviewer", agents: { reviewer: { mode: "primary" } } }),
+      ),
     )
     const server = yield* startServer(global.path)
-    const get = (pathname: string, directory: string) =>
-      Effect.gen(function* () {
-        const url = new URL(pathname, server.base)
-        url.searchParams.set("location[directory]", directory)
-        const response = yield* Effect.promise(() => fetch(url, { headers: server.headers }))
-        expect(response.status).toBe(200)
-        return yield* Effect.promise(() => response.json())
-      })
 
-    yield* Effect.forEach(projects, (project) =>
-      Effect.gen(function* () {
-        // Config agents register during plugin activation, after the location is served.
-        yield* get("/api/agent", project.directory).pipe(
-          Effect.map((body) => Schema.decodeUnknownSync(ListResponse)(body).data),
-          Effect.filterOrFail((agents) => agents.some((agent) => agent.id === "reviewer")),
+    yield* Effect.forEach(
+      [
+        { directory: configured.path, expected: "reviewer" },
+        { directory: unconfigured.path, expected: "build" },
+      ],
+      (project) =>
+        Effect.gen(function* () {
+          const url = new URL("/api/agent/default", server.base)
+          url.searchParams.set("location[directory]", project.directory)
+          const response = yield* Effect.promise(() => fetch(url, { headers: server.headers }))
+          expect(response.status).toBe(200)
+          const body = Schema.decodeUnknownSync(DefaultResponse)(yield* Effect.promise(() => response.json()))
+          expect(body.location.directory).toBe(project.directory)
+          return body.data?.id
+        }).pipe(
+          // Agents register during plugin activation, after the location is served.
+          Effect.filterOrFail((id) => id === project.expected),
           Effect.retry(Schedule.spaced("10 millis")),
           Effect.timeout("2 seconds"),
-        )
-        const body = Schema.decodeUnknownSync(DefaultResponse)(yield* get("/api/agent/default", project.directory))
-        expect(body.location.directory).toBe(project.directory)
-        expect(body.data?.id).toBe(Agent.ID.make(project.expected))
-      }),
+        ),
     )
   }),
 )

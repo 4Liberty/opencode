@@ -30,7 +30,8 @@ export const AgentGroup = HttpApiGroup.make("server.agent")
         OpenApi.annotations({
           identifier: "agent.default",
           summary: "Get default agent",
-          description: "Retrieve the agent used when a session has no explicit agent selection.",
+          description:
+            "Retrieve the agent used when a session has no explicit agent selection. The result may precede initial plugin and config settlement.",
         }),
       ),
   )
