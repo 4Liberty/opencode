@@ -12,6 +12,7 @@ import { PersistentPty } from "@opencode/schema/persistent-pty"
 import { HttpServer } from "effect/unstable/http"
 import { Env } from "./env"
 import { ServiceConfig } from "./services/service-config"
+import { HiddenConsole } from "./services/hidden-console"
 import { RetainedImage } from "./services/retained-image"
 import { ServiceRegistration } from "./services/service-registration"
 import { WebUi } from "./services/web-ui"
@@ -52,7 +53,11 @@ const processEffect = Effect.fnUntraced(function* (options: Options) {
           Effect.mapError(() => new Error("Invalid PTY restart handoff")),
         )
   const global = yield* Global.Service
-  if (options.mode === "service") yield* Effect.sync(() => process.chdir(global.home))
+  if (options.mode === "service") {
+    yield* Effect.sync(() => process.chdir(global.home))
+    const status = yield* Effect.sync(() => HiddenConsole.attach())
+    if (status !== undefined) yield* Effect.logWarning("could not attach a hidden console", { status })
+  }
   return yield* Effect.scoped(
     Effect.gen(function* () {
       const foreground = options.mode === "default"
