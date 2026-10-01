@@ -21,6 +21,20 @@ export const AgentGroup = HttpApiGroup.make("server.agent")
       ),
   )
   .add(
+    HttpApiEndpoint.get("agent.default", "/api/agent/default", {
+      query: LocationQuery,
+      success: Location.response(Schema.UndefinedOr(Agent.Info)),
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "agent.default",
+          summary: "Get default agent",
+          description: "Retrieve the agent used when a session has no explicit agent selection.",
+        }),
+      ),
+  )
+  .add(
     HttpApiEndpoint.get("agent.get", "/api/agent/:agentID", {
       params: { agentID: Agent.ID },
       query: LocationQuery,

@@ -295,6 +295,7 @@ export function fromPromise(plugin: Plugin) {
           agent: {
             get: adaptApiMethod(AgentEndpoints["agent.get"], host.agent.get),
             list: adaptApiMethod(AgentEndpoints["agent.list"], host.agent.list),
+            default: adaptApiMethod(AgentEndpoints["agent.default"], host.agent.default),
             transform: transform(host.agent),
             reload: () => run(host.agent.reload()),
           },

@@ -96,7 +96,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
   const decodeWorktree = Schema.decodeUnknownEffect(Worktree.Info)
   const decodeWorktrees = Schema.decodeUnknownEffect(Schema.Array(Worktree.ListEntry))
 
-  const listAgents = Effect.fn("PluginHost.listAgents")((ref: Location.Ref) =>
+  const agentsAt = <A>(ref: Location.Ref, use: (agents: Agent.Interface) => Effect.Effect<A>) =>
     Effect.gen(function* () {
       const location = yield* Location.Service
       const agents = yield* Agent.Service
@@ -106,10 +106,9 @@ export const make = Effect.fn("PluginHost.make")(function* (
           workspaceID: location.workspaceID,
           project: location.project,
         }),
-        data: yield* agents.list(),
+        data: yield* use(agents),
       }
-    }).pipe(Effect.provide(locations.get(ref)), Effect.orDie),
-  )
+    }).pipe(Effect.provide(locations.get(ref)), Effect.orDie, Effect.withSpan("PluginHost.agentsAt"))
 
   // Keep the instance graph's inferred types independent of Session handles.
   const context: Plugin.Context = {
@@ -122,7 +121,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
         const ref = locationRef(input)
         const output =
           ref && !isCurrentLocation(ref)
-            ? listAgents(ref).pipe(
+            ? agentsAt(ref, (agents) => agents.list()).pipe(
                 Effect.map((result) => ({
                   ...result,
                   data: result.data.find((agent) => agent.id === input.agentID),
@@ -139,8 +138,13 @@ export const make = Effect.fn("PluginHost.make")(function* (
       },
       list: (input) => {
         const ref = locationRef(input)
-        if (ref && !isCurrentLocation(ref)) return listAgents(ref)
+        if (ref && !isCurrentLocation(ref)) return agentsAt(ref, (agents) => agents.list())
         return response(agents.list())
+      },
+      default: (input) => {
+        const ref = locationRef(input)
+        if (ref && !isCurrentLocation(ref)) return agentsAt(ref, (agents) => agents.default())
+        return response(agents.default())
       },
       reload: agents.reload,
       transform: (callback) =>

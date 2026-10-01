@@ -13,6 +13,13 @@ export const AgentHandler = HttpApiBuilder.group(Api, "server.agent", (handlers)
       }),
     )
     .handle(
+      "agent.default",
+      Effect.fn(function* () {
+        const agents = yield* Agent.Service
+        return yield* response(agents.default())
+      }),
+    )
+    .handle(
       "agent.get",
       Effect.fn(function* (ctx) {
         const agent = yield* Agent.Service.use((service) => service.get(ctx.params.agentID))

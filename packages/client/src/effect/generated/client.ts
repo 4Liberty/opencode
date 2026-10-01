@@ -14,6 +14,8 @@ import type {
   LocationReloadOutput,
   AgentListInput,
   AgentListOutput,
+  AgentDefaultInput,
+  AgentDefaultOutput,
   AgentGetInput,
   AgentGetOutput,
   PluginListInput,
@@ -319,6 +321,11 @@ const EndpointAgentList = (raw: RawClient["server.agent"]) => (input?: AgentList
     raw["agent.list"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
+const EndpointAgentDefault = (raw: RawClient["server.agent"]) => (input?: AgentDefaultInput) =>
+  preserveEffect<AgentDefaultOutput>()(
+    raw["agent.default"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError)),
+  )
+
 const EndpointAgentGet = (raw: RawClient["server.agent"]) => (input: AgentGetInput) =>
   preserveEffect<AgentGetOutput>()(
     raw["agent.get"]({ params: { agentID: input["agentID"] }, query: { location: input["location"] } }).pipe(
@@ -328,6 +335,7 @@ const EndpointAgentGet = (raw: RawClient["server.agent"]) => (input: AgentGetInp
 
 const adaptGroupAgent = (raw: RawClient["server.agent"]) => ({
   list: EndpointAgentList(raw),
+  default: EndpointAgentDefault(raw),
   get: EndpointAgentGet(raw),
 })
 

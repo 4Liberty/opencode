@@ -87,6 +87,74 @@ describe("Agent", () => {
     }),
   )
 
+  it.effect("resolves the default agent the same way sessions select one", () =>
+    Effect.gen(function* () {
+      const agent = yield* Agent.Service
+      let configured: string | undefined
+      yield* agent.transform((editor) => {
+        editor.update(Agent.ID.make("plan"), (info) => {
+          info.mode = "primary"
+        })
+        editor.update(Agent.ID.make("build"), (info) => {
+          info.mode = "primary"
+        })
+        editor.update(Agent.ID.make("reviewer"), (info) => {
+          info.mode = "primary"
+        })
+        editor.update(Agent.ID.make("secret"), (info) => {
+          info.hidden = true
+        })
+        editor.update(Agent.ID.make("explore"), (info) => {
+          info.mode = "subagent"
+        })
+        if (configured !== undefined) editor.default(Agent.ID.make(configured))
+      })
+      const resolved = Effect.gen(function* () {
+        const info = yield* agent.default()
+        expect((yield* agent.select()).info).toEqual(info)
+        return info?.id
+      })
+
+      expect(yield* resolved).toBe(Agent.ID.make("build"))
+      yield* Effect.forEach(
+        [
+          ["reviewer", "reviewer"],
+          ["missing", "build"],
+          ["secret", "build"],
+          ["explore", "build"],
+        ] as const,
+        ([id, expected]) =>
+          Effect.gen(function* () {
+            configured = id
+            yield* agent.reload()
+            expect(yield* resolved).toBe(Agent.ID.make(expected))
+          }),
+      )
+    }),
+  )
+
+  it.effect("falls back to the first selectable agent without build", () =>
+    Effect.gen(function* () {
+      const agent = yield* Agent.Service
+      let primary = true
+      yield* agent.transform((editor) => {
+        editor.update(Agent.ID.make("explore"), (info) => {
+          info.mode = "subagent"
+        })
+        editor.update(Agent.ID.make("plan"), (info) => {
+          info.mode = primary ? "primary" : "subagent"
+        })
+      })
+
+      expect((yield* agent.default())?.id).toBe(Agent.ID.make("plan"))
+
+      primary = false
+      yield* agent.reload()
+      expect(yield* agent.default()).toBeUndefined()
+      expect(yield* agent.select()).toEqual({ id: Agent.defaultID, info: undefined })
+    }),
+  )
+
   it.effect("rebuilds state when a transform is replaced", () =>
     Effect.gen(function* () {
       const agent = yield* Agent.Service

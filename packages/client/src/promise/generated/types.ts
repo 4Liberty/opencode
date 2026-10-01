@@ -2759,6 +2759,12 @@ export type AgentListInput = {
 
 export type AgentListOutput = { location: LocationPublicRef; data: Array<AgentInfo> }
 
+export type AgentDefaultInput = {
+  readonly location?: { readonly location?: { readonly directory?: string | undefined } | undefined }["location"]
+}
+
+export type AgentDefaultOutput = { location: LocationPublicRef; data: AgentInfo | null }
+
 export type AgentGetInput = {
   readonly agentID: { readonly agentID: string }["agentID"]
   readonly location?: { readonly location?: { readonly directory?: string | undefined } | undefined }["location"]

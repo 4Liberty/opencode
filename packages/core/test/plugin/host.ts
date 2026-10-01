@@ -39,6 +39,7 @@ export function host(overrides: Overrides = {}): Plugin.Context {
     agent: overrides.agent ?? {
       get: () => Effect.die("unused agent.get"),
       list: () => Effect.die("unused agent.list"),
+      default: () => Effect.die("unused agent.default"),
       transform: () => Effect.die("unused agent.transform"),
       reload: () => Effect.die("unused agent.reload"),
     },
@@ -204,6 +205,7 @@ export function agentHost(agent: Agent.Interface): Plugin.Context["agent"] {
         ),
       ),
     list: () => Effect.die("unused agent.list"),
+    default: () => Effect.die("unused agent.default"),
     reload: agent.reload,
     transform: (callback) =>
       agent.transform((editor) =>

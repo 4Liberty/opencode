@@ -76,6 +76,10 @@ export type AgentListInput = { readonly location?: { readonly directory?: string
 export type AgentListOutput = { readonly location: Location.PublicRef; readonly data: ReadonlyArray<Agent.Info> }
 export type AgentListOperation<E = never> = (input?: AgentListInput) => Effect.Effect<AgentListOutput, E>
 
+export type AgentDefaultInput = { readonly location?: { readonly directory?: string | undefined } | undefined }
+export type AgentDefaultOutput = { readonly location: Location.PublicRef; readonly data: Agent.Info | undefined }
+export type AgentDefaultOperation<E = never> = (input?: AgentDefaultInput) => Effect.Effect<AgentDefaultOutput, E>
+
 export type AgentGetInput = {
   readonly agentID: Agent.ID
   readonly location?: { readonly directory?: string | undefined } | undefined
@@ -85,6 +89,7 @@ export type AgentGetOperation<E = never> = (input: AgentGetInput) => Effect.Effe
 
 export interface AgentApi<E = never> {
   readonly list: AgentListOperation<E>
+  readonly default: AgentDefaultOperation<E>
   readonly get: AgentGetOperation<E>
 }
 

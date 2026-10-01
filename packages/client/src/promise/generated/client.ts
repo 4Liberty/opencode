@@ -8,6 +8,8 @@ import type {
   LocationReloadOutput,
   AgentListInput,
   AgentListOutput,
+  AgentDefaultInput,
+  AgentDefaultOutput,
   AgentGetInput,
   AgentGetOutput,
   PluginListInput,
@@ -470,6 +472,18 @@ export function make(options: ClientOptions) {
           {
             method: "GET",
             path: `/api/agent`,
+            query: { location: input?.["location"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      default: (input?: AgentDefaultInput, requestOptions?: RequestOptions) =>
+        request<AgentDefaultOutput>(
+          {
+            method: "GET",
+            path: `/api/agent/default`,
             query: { location: input?.["location"] },
             successStatus: 200,
             declaredStatuses: [400, 401],

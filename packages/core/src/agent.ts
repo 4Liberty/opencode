@@ -46,6 +46,7 @@ export interface Interface extends State.Transformable<Editor> {
   readonly get: (id: ID) => Effect.Effect<Info | undefined>
   readonly resolve: (id?: ID | string) => Effect.Effect<Info | undefined>
   readonly select: (id?: ID | string) => Effect.Effect<Selection>
+  readonly default: () => Effect.Effect<Info | undefined>
   readonly list: () => Effect.Effect<Info[]>
 }
 
@@ -120,6 +121,9 @@ const layer = Layer.effect(
         }
         const info = selectedDefault()
         return { id: info?.id ?? defaultID, info }
+      }),
+      default: Effect.fn("Agent.default")(function* () {
+        return selectedDefault()
       }),
       list: Effect.fn("Agent.list")(function* () {
         const agents = Array.fromIterable(state.get().agents.values())
