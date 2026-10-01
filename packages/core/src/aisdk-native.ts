@@ -93,7 +93,7 @@ const HOSTS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   },
   "cloudflare-workers-ai": { "@ai-sdk/openai-compatible": "@opencode/ai/providers/cloudflare-workers-ai" },
   deepseek: { "@ai-sdk/openai-compatible": "@opencode/ai/providers/deepseek" },
-  digitalocean: { "@ai-sdk/openai-compatible": "@opencode/ai/providers/digitalocean" },
+  digitalocean: { ...protocols("digitalocean"), "@ai-sdk/openai-compatible": "@opencode/ai/providers/digitalocean" },
   "fireworks-ai": { "@ai-sdk/openai-compatible": "@opencode/ai/providers/fireworks" },
   "google-vertex": { "@ai-sdk/openai-compatible": "@opencode/ai/providers/google-vertex/chat" },
   "kimi-for-coding": protocols("moonshot"),
@@ -114,6 +114,7 @@ const NATIVE = new Set([
   ...Object.values(PACKAGES),
   ...Object.values(HOSTS).flatMap((host) => Object.values(host)),
   "@opencode/ai/providers/azure/chat",
+  "@opencode/ai/providers/digitalocean/chat",
   "@opencode/ai/providers/amazon-bedrock/mantle",
   "@opencode/ai/providers/amazon-bedrock/mantle/chat",
   "@opencode/ai/providers/amazon-bedrock/mantle/responses",
@@ -121,6 +122,7 @@ const NATIVE = new Set([
 
 export function native(npm: string, context: Context & { readonly settings?: Provider.Settings }): string | undefined {
   const host = HOSTS[context.providerID]?.[npm]
+  if (host === "@opencode/ai/providers/digitalocean") return digitalocean(context.modelID)
   if (host) return host
   if (npm === "@ai-sdk/amazon-bedrock/mantle") return mantle(context.modelID)
   if (npm === "@ai-sdk/azure" && context.settings?.useCompletionUrls === true)
@@ -133,11 +135,17 @@ const mantle = (modelID: string | undefined) => {
   return `@opencode/ai/providers/amazon-bedrock/mantle/${modelID.includes("gpt-oss") ? "chat" : "responses"}`
 }
 
+const digitalocean = (modelID: string | undefined) =>
+  modelID === undefined
+    ? "@opencode/ai/providers/digitalocean"
+    : `@opencode/ai/providers/digitalocean/${/^(?:anthropic[-/]|claude-)/i.test(modelID) ? "messages" : "responses"}`
+
 function resolve(specifier: string, context: Context & { readonly settings?: Provider.Settings }): string | undefined {
   const npm = Provider.packageName(specifier)
   if (Provider.isAISDK(specifier) || npm in PACKAGES || npm in (HOSTS[context.providerID] ?? {}))
     return native(npm, context)
   if (npm === "@opencode/ai/providers/amazon-bedrock/mantle") return mantle(context.modelID)
+  if (npm === "@opencode/ai/providers/digitalocean") return digitalocean(context.modelID)
   if (npm === "@opencode/ai/providers/azure/responses" && context.settings?.useCompletionUrls === true)
     return "@opencode/ai/providers/azure/chat"
   return NATIVE.has(npm) ? npm : undefined

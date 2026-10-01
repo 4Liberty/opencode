@@ -191,6 +191,8 @@ export class LanguageModelCompatibility extends Schema.Class<LanguageModelCompat
   supportsThinkingBlockBinding: Schema.optional(Schema.Boolean),
   /** Supports per-message effort updates. Overrides model-ID detection. */
   supportsEffortUpdates: Schema.optional(Schema.Boolean),
+  /** Supports native chronological system messages. Overrides model-ID detection. */
+  supportsSystemUpdates: Schema.optional(Schema.Boolean),
 }) {}
 
 export namespace LanguageModelCompatibility {

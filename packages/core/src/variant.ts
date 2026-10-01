@@ -574,7 +574,13 @@ const PROTOCOLS: Readonly<Record<string, Protocol>> = {
   "@opencode/ai/providers/cloudflare-workers-ai": workersAIChat,
   "@opencode/ai/providers/deepinfra": deepinfraChat,
   "@opencode/ai/providers/deepseek": deepseekChat,
-  "@opencode/ai/providers/digitalocean": openaiChat,
+  "@opencode/ai/providers/digitalocean": (model, support) =>
+    /^(?:anthropic[-/]|claude-)/i.test(modelID(model))
+      ? anthropicMessages(model, support)
+      : openaiResponses(model, support),
+  "@opencode/ai/providers/digitalocean/chat": openaiChat,
+  "@opencode/ai/providers/digitalocean/messages": anthropicMessages,
+  "@opencode/ai/providers/digitalocean/responses": openaiResponses,
   "@opencode/ai/providers/fireworks": openaiChat,
   "@opencode/ai/providers/groq": openaiChat,
   "@opencode/ai/providers/meta/chat": openaiChat,

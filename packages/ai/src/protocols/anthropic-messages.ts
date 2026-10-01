@@ -808,6 +808,8 @@ const requireThinkingSignature = (request: LLMRequest) => {
 // 5 of the other supported Claude families. Treat later family versions as
 // compatible without assuming that every Anthropic Messages model is Claude.
 const supportsNativeSystemUpdates = (request: LLMRequest) => {
+  const override = request.model.compatibility?.supportsSystemUpdates
+  if (override !== undefined) return override
   const match = /(?:^|[./])claude-(fable|haiku|mythos|opus|sonnet)-(\d+)(?:[.-](\d+))?/.exec(
     String(request.model.id).toLowerCase(),
   )
