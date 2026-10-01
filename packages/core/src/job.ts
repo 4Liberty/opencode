@@ -4,6 +4,7 @@ import { Array, Cause, Clock, Context, Deferred, Effect, Exit, Layer, Schema, Sc
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { Identifier } from "./id/id.js"
 import { KV } from "./kv.js"
+import { Location } from "./location.js"
 import { SessionMessage } from "./session/message.js"
 import { SessionSchema } from "./session/schema.js"
 
@@ -53,6 +54,7 @@ export type Info = {
 
 type Active = {
   info: Info
+  location?: Location.Ref
   done: Deferred.Deferred<Info>
   backgrounded: Deferred.Deferred<Info>
   scope: Scope.Closeable
@@ -98,6 +100,7 @@ export type StartInput = {
   type: string
   title?: string
   metadata?: Record<string, unknown>
+  location?: Location.Ref
   recovery?: Recovery
   notificationID?: SessionMessage.ID
   run: Effect.Effect<string, unknown>
@@ -133,6 +136,8 @@ export interface Interface {
   readonly background: (id: string) => Effect.Effect<Info | undefined>
   readonly backgroundAll: (input: BackgroundAllInput) => Effect.Effect<Info[]>
   readonly cancel: (id: string) => Effect.Effect<Info | undefined>
+  /** Locations owning process-local background shells that are still running. */
+  readonly runningBackgroundShellLocations: Effect.Effect<readonly Location.Ref[]>
   readonly pendingBackground: Effect.Effect<readonly Background[]>
   readonly completeBackground: (notificationID: SessionMessage.ID) => Effect.Effect<void>
 }
@@ -275,6 +280,7 @@ export const make = Effect.gen(function* () {
                 metadata: input.metadata,
                 ...(input.notificationID ? { notificationID: input.notificationID } : {}),
               },
+              location: input.location,
               done,
               backgrounded,
               scope,
@@ -451,6 +457,18 @@ export const make = Effect.gen(function* () {
     return recovered
   }).pipe(Effect.withSpan("Job.pendingBackground"))
 
+  const runningBackgroundShellLocations: Interface["runningBackgroundShellLocations"] = SynchronizedRef.get(
+    state.jobs,
+  ).pipe(
+    Effect.map((jobs) =>
+      [...jobs.values()].flatMap((job) =>
+        job.info.status === "running" && job.isBackgrounded && job.recovery?.kind === "shell" && job.location
+          ? [job.location]
+          : [],
+      ),
+    ),
+  )
+
   const completeBackground: Interface["completeBackground"] = Effect.fn("Job.completeBackground")((notificationID) =>
     SynchronizedRef.updateEffect(state.jobs, (jobs) =>
       Effect.gen(function* () {
@@ -472,6 +490,7 @@ export const make = Effect.gen(function* () {
     background,
     backgroundAll,
     cancel,
+    runningBackgroundShellLocations,
     pendingBackground,
     completeBackground,
   })
