@@ -9,6 +9,8 @@ export interface BridgeLayout {
   readonly bounds?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
   readonly background?: readonly [number, number, number, number]
   readonly radius?: number
+  /** The rounded card's hairline ring, which the corner masks would otherwise paint over. */
+  readonly border?: { readonly color: readonly [number, number, number, number]; readonly width: number }
 }
 
 export interface Installed {
