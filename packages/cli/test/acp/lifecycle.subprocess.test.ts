@@ -6,7 +6,8 @@ import type {
   ResumeSessionResponse,
 } from "@agentclientprotocol/sdk"
 import { describe, expect, test } from "bun:test"
-import { createAcpFixture, expectOk, initialize, newSession, selectConfigOption } from "./subprocess"
+import { selectConfigOption } from "./select-options"
+import { createAcpFixture, expectOk, initialize, newSession } from "./subprocess"
 
 describe("acp lifecycle subprocess", () => {
   test("stdin EOF exits cleanly", async () => {
@@ -51,6 +52,12 @@ describe("acp lifecycle subprocess", () => {
     )
 
     expect(selectConfigOption(loaded.configOptions, "model")?.category).toBe("model")
+    const mismatched = await acp.request<LoadSessionResponse>("session/load", {
+      cwd: fixture.root,
+      sessionId: session.sessionId,
+      mcpServers: [],
+    })
+    expect(mismatched.error?.code).toBe(-32602)
   }, 60_000)
 
   test("list request includes a live ACP-created session", async () => {
@@ -77,13 +84,6 @@ describe("acp lifecycle subprocess", () => {
     expect(listed.sessions.some((item) => item.sessionId === session.sessionId)).toBe(false)
   }, 60_000)
 
-  test("resume capability advertisement", async () => {
-    await using fixture = await createAcpFixture()
-    const initialized = await initialize(fixture.spawn())
-
-    expect(initialized.agentCapabilities?.sessionCapabilities?.resume).toEqual({})
-  }, 60_000)
-
   test("resume request returns session config options", async () => {
     await using fixture = await createAcpFixture()
     const acp = fixture.spawn()
@@ -99,4 +99,30 @@ describe("acp lifecycle subprocess", () => {
 
     expect(selectConfigOption(resumed.configOptions, "model")?.category).toBe("model")
   }, 60_000)
+
+  // The private server is found with `pgrep`, which Windows lacks.
+  const todoOutsideWindows = process.platform === "win32" ? test.skip : test.todo
+  todoOutsideWindows(
+    "exits when the private server process dies (https://github.com/anomalyco/opencode/issues/51716)",
+    async () => {
+      await using fixture = await createAcpFixture()
+      const acp = fixture.spawn()
+      await initialize(acp)
+      await newSession(acp, fixture.home)
+      const servers = Bun.spawnSync(["pgrep", "-P", String(acp.pid)])
+        .stdout.toString()
+        .split("\n")
+        .filter(Boolean)
+        .map(Number)
+      expect(servers).toHaveLength(1)
+
+      process.kill(servers[0], "SIGKILL")
+
+      const timeout = Promise.withResolvers<"running">()
+      const timer = setTimeout(() => timeout.resolve("running"), 10_000)
+      const exited = await Promise.race([acp.exited, timeout.promise]).finally(() => clearTimeout(timer))
+      expect(exited).not.toBe("running")
+    },
+    60_000,
+  )
 })

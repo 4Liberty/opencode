@@ -1,11 +1,11 @@
 export * as QuestionTool from "./question.js"
 
-import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin"
-import { ToolFailure } from "@opencode-ai/ai"
+import type { Context } from "@opencode/plugin/effect/plugin"
+import { ToolFailure } from "@opencode/ai"
 import { Effect, Schema } from "effect"
 import { Form } from "../../form.js"
 import { Permission } from "../../permission.js"
-import { Question } from "@opencode-ai/schema/question"
+import { Question } from "@opencode/schema/question"
 
 export const name = "question"
 
@@ -29,13 +29,13 @@ export const Output = Schema.Struct({
 })
 export type Output = typeof Output.Type
 
-export class CancelledError extends Schema.TaggedErrorClass<CancelledError>()("QuestionTool.CancelledError", {}) {
+export class CancelledError extends Schema.TaggedError<CancelledError>()("QuestionTool.CancelledError", {}) {
   override get message() {
     return "The user dismissed this question"
   }
 }
 
-export const toModelOutput = (questions: ReadonlyArray<Question.Prompt>, answers: ReadonlyArray<Question.Answer>) => {
+export const toModelContent = (questions: ReadonlyArray<Question.Prompt>, answers: ReadonlyArray<Question.Answer>) => {
   const formatted = questions
     .map(
       (question, index) =>
@@ -47,13 +47,13 @@ export const toModelOutput = (questions: ReadonlyArray<Question.Prompt>, answers
 
 export const Plugin = {
   id: "opencode.tool.question",
-  effect: Effect.fn("QuestionTool.Plugin")(function* (ctx: PluginContext) {
+  effect: Effect.fn("QuestionTool.Plugin")(function* (ctx: Context) {
     const forms = yield* Form.Service
     const permission = yield* Permission.Service
 
     yield* ctx.tool
-      .transform((draft) =>
-        draft.add({
+      .transform((editor) =>
+        editor.add({
           name,
           options: { codemode: false },
           description,
@@ -90,6 +90,10 @@ export const Plugin = {
                   // Deliberate defect tunnel (see Permission.assert): a dismissal must dodge
                   // leaf `mapError` blankets so it never becomes model-facing tool output; it
                   // resurfaces as a typed failure at SessionModelRequest.executeTool.
+                  // A dismissal with a message (e.g. from a non-interactive client) is ordinary
+                  // model-facing feedback: the model continues instead of the step ending.
+                  if (state.status === "cancelled" && state.message !== undefined)
+                    return Effect.fail(new ToolFailure({ message: state.message }))
                   if (state.status === "cancelled") return Effect.die(new CancelledError())
                   const output = {
                     answers: input.questions.map((_, index): Question.Answer => {
@@ -101,7 +105,7 @@ export const Plugin = {
                   }
                   return Effect.succeed({
                     output,
-                    content: toModelOutput(input.questions, output.answers),
+                    content: toModelContent(input.questions, output.answers),
                     metadata: { answers: output.answers },
                   })
                 }),

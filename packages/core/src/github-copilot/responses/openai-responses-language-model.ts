@@ -4,7 +4,6 @@ import {
   type LanguageModelV3,
   type LanguageModelV3CallOptions,
   type LanguageModelV3Content,
-  type LanguageModelV3ProviderTool,
   type LanguageModelV3StreamPart,
   type SharedV3ProviderMetadata,
   type SharedV3Warning,
@@ -27,9 +26,8 @@ import { imageGenerationOutputSchema } from "./tool/image-generation.js"
 import { convertToOpenAIResponsesInput } from "./convert-to-openai-responses-input.js"
 import { mapOpenAIResponseFinishReason } from "./map-openai-responses-finish-reason.js"
 import type { OpenAIResponsesIncludeOptions, OpenAIResponsesIncludeValue } from "./openai-responses-api-types.js"
-import { prepareResponsesTools } from "./openai-responses-prepare-tools.js"
+import { prepareResponsesTools, type ResponsesHostedTool } from "./openai-responses-prepare-tools.js"
 import type { OpenAIResponsesModelId } from "./openai-responses-settings.js"
-import { localShellInputSchema } from "./tool/local-shell.js"
 
 const webSearchCallItem = z.object({
   type: z.literal("web_search_call"),
@@ -84,20 +82,6 @@ const codeInterpreterCallItem = z.object({
       ]),
     )
     .nullable(),
-})
-
-const localShellCallItem = z.object({
-  type: z.literal("local_shell_call"),
-  id: z.string(),
-  call_id: z.string(),
-  action: z.object({
-    type: z.literal("exec"),
-    command: z.array(z.string()),
-    timeout_ms: z.number().optional(),
-    user: z.string().optional(),
-    working_directory: z.string().optional(),
-    env: z.record(z.string(), z.string()).optional(),
-  }),
 })
 
 const imageGenerationCallItem = z.object({
@@ -165,7 +149,6 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
     responseFormat,
   }: LanguageModelV3CallOptions) {
     const warnings: SharedV3Warning[] = []
-    const modelConfig = getResponsesModelConfig(this.modelId)
 
     if (topK != null) {
       warnings.push({ type: "unsupported", feature: "topK" })
@@ -202,10 +185,9 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
 
     const { input, warnings: inputWarnings } = await convertToOpenAIResponsesInput({
       prompt,
-      systemMessageMode: modelConfig.systemMessageMode,
+      systemMessageMode: "system",
       fileIdPrefixes: this.config.fileIdPrefixes,
       store,
-      hasLocalShellTool: hasOpenAITool("openai.local_shell"),
     })
 
     warnings.push(...inputWarnings)
@@ -237,15 +219,23 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
       addInclude("message.output_text.logprobs")
     }
 
-    // when a web search tool is present, automatically include the sources:
-    const webSearchToolName = (
-      tools?.find(
-        (tool) =>
-          tool.type === "provider" && (tool.id === "openai.web_search" || tool.id === "openai.web_search_preview"),
-      ) as LanguageModelV3ProviderTool | undefined
-    )?.name
+    const {
+      tools: openaiTools,
+      toolChoice: openaiToolChoice,
+      hostedTools,
+      selectedHostedTool,
+      toolWarnings,
+    } = prepareResponsesTools({
+      tools,
+      toolChoice,
+      strictJsonSchema,
+    })
+    const getHostedToolName = (responseType: ResponsesHostedTool["responseType"]) => {
+      if (selectedHostedTool?.responseType === responseType) return selectedHostedTool.name
+      return hostedTools.find((tool) => tool.responseType === responseType)?.name ?? responseType
+    }
 
-    if (webSearchToolName) {
+    if (hostedTools.some((tool) => tool.responseType === "web_search")) {
       addInclude("web_search_call.action.sources")
     }
 
@@ -295,96 +285,20 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
       safety_identifier: openaiOptions?.safetyIdentifier,
       top_logprobs: topLogprobs,
 
-      // model-specific settings:
-      ...(modelConfig.isReasoningModel &&
-        (openaiOptions?.reasoningEffort != null || openaiOptions?.reasoningSummary != null) && {
-          reasoning: {
-            ...(openaiOptions?.reasoningEffort != null && {
-              effort: openaiOptions.reasoningEffort,
-            }),
-            ...(openaiOptions?.reasoningSummary != null && {
-              summary: openaiOptions.reasoningSummary,
-            }),
-          },
-        }),
-      ...(modelConfig.requiredAutoTruncation && {
-        truncation: "auto",
+      ...((openaiOptions?.reasoningEffort != null || openaiOptions?.reasoningSummary != null) && {
+        reasoning: {
+          ...(openaiOptions?.reasoningEffort != null && {
+            effort: openaiOptions.reasoningEffort,
+          }),
+          ...(openaiOptions?.reasoningSummary != null && {
+            summary: openaiOptions.reasoningSummary,
+          }),
+        },
       }),
     }
 
-    if (modelConfig.isReasoningModel) {
-      // remove unsupported settings for reasoning models
-      // see https://platform.openai.com/docs/guides/reasoning#limitations
-      if (baseArgs.temperature != null) {
-        baseArgs.temperature = undefined
-        warnings.push({
-          type: "unsupported",
-          feature: "temperature",
-          details: "temperature is not supported for reasoning models",
-        })
-      }
-
-      if (baseArgs.top_p != null) {
-        baseArgs.top_p = undefined
-        warnings.push({
-          type: "unsupported",
-          feature: "topP",
-          details: "topP is not supported for reasoning models",
-        })
-      }
-    } else {
-      if (openaiOptions?.reasoningEffort != null) {
-        warnings.push({
-          type: "unsupported",
-          feature: "reasoningEffort",
-          details: "reasoningEffort is not supported for non-reasoning models",
-        })
-      }
-
-      if (openaiOptions?.reasoningSummary != null) {
-        warnings.push({
-          type: "unsupported",
-          feature: "reasoningSummary",
-          details: "reasoningSummary is not supported for non-reasoning models",
-        })
-      }
-    }
-
-    // Validate flex processing support
-    if (openaiOptions?.serviceTier === "flex" && !modelConfig.supportsFlexProcessing) {
-      warnings.push({
-        type: "unsupported",
-        feature: "serviceTier",
-        details: "flex processing is only available for o3, o4-mini, and gpt-5 models",
-      })
-      // Remove from args if not supported
-      baseArgs.service_tier = undefined
-    }
-
-    // Validate priority processing support
-    if (openaiOptions?.serviceTier === "priority" && !modelConfig.supportsPriorityProcessing) {
-      warnings.push({
-        type: "unsupported",
-        feature: "serviceTier",
-        details:
-          "priority processing is only available for supported models (gpt-4, gpt-5, gpt-5-mini, o3, o4-mini) and requires Enterprise access. gpt-5-nano is not supported",
-      })
-      // Remove from args if not supported
-      baseArgs.service_tier = undefined
-    }
-
-    const {
-      tools: openaiTools,
-      toolChoice: openaiToolChoice,
-      toolWarnings,
-    } = prepareResponsesTools({
-      tools,
-      toolChoice,
-      strictJsonSchema,
-    })
-
     return {
-      webSearchToolName,
+      getHostedToolName,
       args: {
         ...baseArgs,
         tools: openaiTools,
@@ -395,7 +309,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
   }
 
   async doGenerate(options: LanguageModelV3CallOptions) {
-    const { args: body, warnings, webSearchToolName } = await this.getArgs(options)
+    const { args: body, warnings, getHostedToolName } = await this.getArgs(options)
     const url = this.config.url({
       path: "/responses",
       modelId: this.modelId,
@@ -462,7 +376,6 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
               fileSearchCallItem,
               codeInterpreterCallItem,
               imageGenerationCallItem,
-              localShellCallItem,
               z.object({
                 type: z.literal("function_call"),
                 call_id: z.string(),
@@ -543,7 +456,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
           content.push({
             type: "tool-call",
             toolCallId: part.id,
-            toolName: "image_generation",
+            toolName: getHostedToolName("image_generation"),
             input: "{}",
             providerExecuted: true,
           })
@@ -551,26 +464,10 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
           content.push({
             type: "tool-result",
             toolCallId: part.id,
-            toolName: "image_generation",
+            toolName: getHostedToolName("image_generation"),
             result: {
               result: part.result,
             } satisfies z.infer<typeof imageGenerationOutputSchema>,
-          })
-
-          break
-        }
-
-        case "local_shell_call": {
-          content.push({
-            type: "tool-call",
-            toolCallId: part.call_id,
-            toolName: "local_shell",
-            input: JSON.stringify({ action: part.action } satisfies z.infer<typeof localShellInputSchema>),
-            providerMetadata: {
-              copilot: {
-                itemId: part.id,
-              },
-            },
           })
 
           break
@@ -638,7 +535,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
           content.push({
             type: "tool-call",
             toolCallId: part.id,
-            toolName: webSearchToolName ?? "web_search",
+            toolName: getHostedToolName("web_search"),
             input: JSON.stringify({ action: part.action }),
             providerExecuted: true,
           })
@@ -646,7 +543,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
           content.push({
             type: "tool-result",
             toolCallId: part.id,
-            toolName: webSearchToolName ?? "web_search",
+            toolName: getHostedToolName("web_search"),
             result: { status: part.status },
           })
 
@@ -678,7 +575,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
           content.push({
             type: "tool-call",
             toolCallId: part.id,
-            toolName: "file_search",
+            toolName: getHostedToolName("file_search"),
             input: "{}",
             providerExecuted: true,
           })
@@ -686,7 +583,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
           content.push({
             type: "tool-result",
             toolCallId: part.id,
-            toolName: "file_search",
+            toolName: getHostedToolName("file_search"),
             result: {
               queries: part.queries,
               results:
@@ -706,7 +603,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
           content.push({
             type: "tool-call",
             toolCallId: part.id,
-            toolName: "code_interpreter",
+            toolName: getHostedToolName("code_interpreter"),
             input: JSON.stringify({
               code: part.code,
               containerId: part.container_id,
@@ -717,7 +614,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
           content.push({
             type: "tool-result",
             toolCallId: part.id,
-            toolName: "code_interpreter",
+            toolName: getHostedToolName("code_interpreter"),
             result: {
               outputs: part.outputs,
             } satisfies z.infer<typeof codeInterpreterOutputSchema>,
@@ -779,7 +676,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
   }
 
   async doStream(options: LanguageModelV3CallOptions) {
-    const { args: body, warnings, webSearchToolName } = await this.getArgs(options)
+    const { args: body, warnings, getHostedToolName } = await this.getArgs(options)
 
     const { responseHeaders, value: response } = await postJsonToApi({
       url: this.config.url({
@@ -825,7 +722,6 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
     const ongoingToolCalls: Record<
       number,
       | {
-          toolName: string
           toolCallId: string
           codeInterpreter?: {
             containerId: string
@@ -884,7 +780,6 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
             if (isResponseOutputItemAddedChunk(value)) {
               if (value.item.type === "function_call") {
                 ongoingToolCalls[value.output_index] = {
-                  toolName: value.item.name,
                   toolCallId: value.item.call_id,
                 }
 
@@ -895,18 +790,16 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
                 })
               } else if (value.item.type === "web_search_call") {
                 ongoingToolCalls[value.output_index] = {
-                  toolName: webSearchToolName ?? "web_search",
                   toolCallId: value.item.id,
                 }
 
                 controller.enqueue({
                   type: "tool-input-start",
                   id: value.item.id,
-                  toolName: webSearchToolName ?? "web_search",
+                  toolName: getHostedToolName("web_search"),
                 })
               } else if (value.item.type === "computer_call") {
                 ongoingToolCalls[value.output_index] = {
-                  toolName: "computer_use",
                   toolCallId: value.item.id,
                 }
 
@@ -917,7 +810,6 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
                 })
               } else if (value.item.type === "code_interpreter_call") {
                 ongoingToolCalls[value.output_index] = {
-                  toolName: "code_interpreter",
                   toolCallId: value.item.id,
                   codeInterpreter: {
                     containerId: value.item.container_id,
@@ -927,7 +819,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
                 controller.enqueue({
                   type: "tool-input-start",
                   id: value.item.id,
-                  toolName: "code_interpreter",
+                  toolName: getHostedToolName("code_interpreter"),
                 })
 
                 controller.enqueue({
@@ -939,7 +831,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
                 controller.enqueue({
                   type: "tool-call",
                   toolCallId: value.item.id,
-                  toolName: "file_search",
+                  toolName: getHostedToolName("file_search"),
                   input: "{}",
                   providerExecuted: true,
                 })
@@ -947,7 +839,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
                 controller.enqueue({
                   type: "tool-call",
                   toolCallId: value.item.id,
-                  toolName: "image_generation",
+                  toolName: getHostedToolName("image_generation"),
                   input: "{}",
                   providerExecuted: true,
                 })
@@ -1018,7 +910,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
                 controller.enqueue({
                   type: "tool-call",
                   toolCallId: value.item.id,
-                  toolName: "web_search",
+                  toolName: getHostedToolName("web_search"),
                   input: JSON.stringify({ action: value.item.action }),
                   providerExecuted: true,
                 })
@@ -1026,7 +918,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
                 controller.enqueue({
                   type: "tool-result",
                   toolCallId: value.item.id,
-                  toolName: "web_search",
+                  toolName: getHostedToolName("web_search"),
                   result: { status: value.item.status },
                 })
               } else if (value.item.type === "computer_call") {
@@ -1060,7 +952,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
                 controller.enqueue({
                   type: "tool-result",
                   toolCallId: value.item.id,
-                  toolName: "file_search",
+                  toolName: getHostedToolName("file_search"),
                   result: {
                     queries: value.item.queries,
                     results:
@@ -1079,7 +971,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
                 controller.enqueue({
                   type: "tool-result",
                   toolCallId: value.item.id,
-                  toolName: "code_interpreter",
+                  toolName: getHostedToolName("code_interpreter"),
                   result: {
                     outputs: value.item.outputs,
                   } satisfies z.infer<typeof codeInterpreterOutputSchema>,
@@ -1088,31 +980,10 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
                 controller.enqueue({
                   type: "tool-result",
                   toolCallId: value.item.id,
-                  toolName: "image_generation",
+                  toolName: getHostedToolName("image_generation"),
                   result: {
                     result: value.item.result,
                   } satisfies z.infer<typeof imageGenerationOutputSchema>,
-                })
-              } else if (value.item.type === "local_shell_call") {
-                ongoingToolCalls[value.output_index] = undefined
-
-                controller.enqueue({
-                  type: "tool-call",
-                  toolCallId: value.item.call_id,
-                  toolName: "local_shell",
-                  input: JSON.stringify({
-                    action: {
-                      type: "exec",
-                      command: value.item.action.command,
-                      timeoutMs: value.item.action.timeout_ms,
-                      user: value.item.action.user,
-                      workingDirectory: value.item.action.working_directory,
-                      env: value.item.action.env,
-                    },
-                  } satisfies z.infer<typeof localShellInputSchema>),
-                  providerMetadata: {
-                    copilot: { itemId: value.item.id },
-                  },
                 })
               } else if (value.item.type === "message") {
                 if (currentTextId) {
@@ -1158,7 +1029,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
               controller.enqueue({
                 type: "tool-result",
                 toolCallId: value.item_id,
-                toolName: "image_generation",
+                toolName: getHostedToolName("image_generation"),
                 result: {
                   result: value.partial_image_b64,
                 } satisfies z.infer<typeof imageGenerationOutputSchema>,
@@ -1194,7 +1065,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
                 controller.enqueue({
                   type: "tool-call",
                   toolCallId: toolCall.toolCallId,
-                  toolName: "code_interpreter",
+                  toolName: getHostedToolName("code_interpreter"),
                   input: JSON.stringify({
                     code: value.code,
                     containerId: toolCall.codeInterpreter!.containerId,
@@ -1528,7 +1399,6 @@ const responseOutputItemDoneSchema = z.object({
     imageGenerationCallItem,
     webSearchCallItem,
     fileSearchCallItem,
-    localShellCallItem,
     z.object({
       type: z.literal("computer_call"),
       id: z.string(),
@@ -1719,69 +1589,6 @@ function isResponseReasoningSummaryTextDeltaChunk(
 
 function isErrorChunk(chunk: z.infer<typeof openaiResponsesChunkSchema>): chunk is z.infer<typeof errorChunkSchema> {
   return chunk.type === "error"
-}
-
-type ResponsesModelConfig = {
-  isReasoningModel: boolean
-  systemMessageMode: "remove" | "system" | "developer"
-  requiredAutoTruncation: boolean
-  supportsFlexProcessing: boolean
-  supportsPriorityProcessing: boolean
-}
-
-function getResponsesModelConfig(modelId: string): ResponsesModelConfig {
-  const supportsFlexProcessing =
-    modelId.startsWith("o3") ||
-    modelId.startsWith("o4-mini") ||
-    (modelId.startsWith("gpt-5") && !modelId.startsWith("gpt-5-chat"))
-  const supportsPriorityProcessing =
-    modelId.startsWith("gpt-4") ||
-    modelId.startsWith("gpt-5-mini") ||
-    (modelId.startsWith("gpt-5") && !modelId.startsWith("gpt-5-nano") && !modelId.startsWith("gpt-5-chat")) ||
-    modelId.startsWith("o3") ||
-    modelId.startsWith("o4-mini")
-  const defaults = {
-    requiredAutoTruncation: false,
-    systemMessageMode: "system" as const,
-    supportsFlexProcessing,
-    supportsPriorityProcessing,
-  }
-
-  // gpt-5-chat models are non-reasoning
-  if (modelId.startsWith("gpt-5-chat")) {
-    return {
-      ...defaults,
-      isReasoningModel: false,
-    }
-  }
-
-  // o series reasoning models:
-  if (
-    modelId.startsWith("o") ||
-    modelId.startsWith("gpt-5") ||
-    modelId.startsWith("codex-") ||
-    modelId.startsWith("computer-use")
-  ) {
-    if (modelId.startsWith("o1-mini") || modelId.startsWith("o1-preview")) {
-      return {
-        ...defaults,
-        isReasoningModel: true,
-        systemMessageMode: "remove",
-      }
-    }
-
-    return {
-      ...defaults,
-      isReasoningModel: true,
-      systemMessageMode: "developer",
-    }
-  }
-
-  // gpt models:
-  return {
-    ...defaults,
-    isReasoningModel: false,
-  }
 }
 
 // TODO AI SDK 6: use optional here instead of nullish

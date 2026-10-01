@@ -1,8 +1,9 @@
 export * as Generate from "./generate.js"
 
-import { LLM, LLMClient, AIError } from "@opencode-ai/ai"
+import { LLM, LLMClient, AIError } from "@opencode/ai"
+import { SessionID } from "@opencode/schema/session-id"
 import { Context, Effect, Layer, Schema } from "effect"
-import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
+import { makeLocationNode } from "@opencode/util/effect/app-node"
 import { llmClient } from "./effect/app-node-platform.js"
 import { ModelResolver } from "./model-resolver.js"
 import { Model } from "./model.js"
@@ -12,12 +13,11 @@ export interface TextInput {
   readonly model?: Model.Ref
 }
 
-export class ModelSelectionError extends Schema.TaggedErrorClass<ModelSelectionError>()(
-  "Generate.ModelSelectionError",
-  { message: Schema.String },
-) {}
+export class ModelSelectionError extends Schema.TaggedError<ModelSelectionError>()("Generate.ModelSelectionError", {
+  message: Schema.String,
+}) {}
 
-export class UnavailableError extends Schema.TaggedErrorClass<UnavailableError>()("Generate.UnavailableError", {
+export class UnavailableError extends Schema.TaggedError<UnavailableError>()("Generate.UnavailableError", {
   message: Schema.String,
   service: Schema.optional(Schema.String),
 }) {}
@@ -38,20 +38,22 @@ export const layer = Layer.effect(
 
     const runText = Effect.fn("Generate.text")(function* (input: TextInput) {
       const resolved = yield* resolver.resolve(input.model).pipe(
-        Effect.catchTags({
-          "SessionRunnerModel.VariantUnavailableError": (error) =>
-            input.model
+        Effect.catchTag(
+          [
+            "SessionRunnerModel.VariantUnavailableError",
+            "SessionRunnerModel.UnsupportedPackageError",
+            "SessionRunnerModel.ModelConfigurationError",
+            "SessionRunnerModel.ModelInitializationError",
+            "SessionRunnerModel.UnresolvedProviderVariablesError",
+            "SessionRunnerModel.UnsupportedCompactionError",
+          ],
+          (error) => {
+            const mapped: Error = input.model
               ? new ModelSelectionError({ message: error.message })
-              : new UnavailableError({ message: error.message, service: error.providerID }),
-          "SessionRunnerModel.UnsupportedPackageError": (error) =>
-            input.model
-              ? new ModelSelectionError({ message: error.message })
-              : new UnavailableError({ message: error.message, service: error.providerID }),
-          "SessionRunnerModel.UnresolvedProviderVariablesError": (error) =>
-            input.model
-              ? new ModelSelectionError({ message: error.message })
-              : new UnavailableError({ message: error.message, service: error.providerID }),
-        }),
+              : new UnavailableError({ message: error.message, service: error.providerID })
+            return Effect.fail(mapped)
+          },
+        ),
       )
       if (!resolved)
         return yield* new ModelSelectionError({
@@ -59,15 +61,24 @@ export const layer = Layer.effect(
             ? `Model unavailable: ${input.model.providerID}/${input.model.id}`
             : "No model specified and no supported model is available",
         })
-      const response = yield* llm.generate(LLM.request({ model: resolved.model, prompt: input.prompt })).pipe(
-        Effect.mapError(
-          (error: AIError) =>
-            new UnavailableError({
-              message: error.message,
-              service: resolved.ref.providerID,
-            }),
-        ),
-      )
+      const response = yield* llm
+        .generate(
+          LLM.request({
+            model: resolved.model,
+            prompt: input.prompt,
+            // Gateways require session attribution even for a stateless call; no Session is stored.
+            http: { headers: { "x-opencode-session": SessionID.create() } },
+          }),
+        )
+        .pipe(
+          Effect.mapError(
+            (error: AIError) =>
+              new UnavailableError({
+                message: error.message,
+                service: resolved.ref.providerID,
+              }),
+          ),
+        )
       return response.text
     })
 

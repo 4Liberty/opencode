@@ -16,4 +16,13 @@ export const password = Config.redacted("OPENCODE_PASSWORD").pipe(
 // variable so deployments can opt out with an explicit `false`.
 export const auth = Config.boolean("OPENCODE_AUTH").pipe(Config.withDefault(true))
 
+export function session() {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] =>
+        entry[1] !== undefined && entry[0] !== "OPENCODE_PASSWORD" && entry[0] !== "OPENCODE_SERVER_PASSWORD",
+    ),
+  )
+}
+
 export * as Env from "./env"

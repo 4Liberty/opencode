@@ -1,4 +1,4 @@
-import { sampledChecksum } from "@opencode-ai/core/util/encode"
+import { sampledChecksum } from "@opencode/util/encode"
 import {
   areFilesEqual,
   areOptionsEqual,
@@ -75,17 +75,17 @@ export type FileSearchControl = {
   register: (handle: FileSearchHandle | null) => void
 }
 
-export type TextFileProps<T = {}> = FileOptions<T> &
+export type TextFileProps<T = {}> = FileOptions<T, undefined> &
   SharedProps<T> & {
     mode: "text"
     file: FileContents
     annotations?: LineAnnotation<T>[]
-    preloadedDiff?: PreloadMultiFileDiffResult<T>
+    preloadedDiff?: PreloadMultiFileDiffResult<T, undefined>
   }
 
-type DiffPreload<T> = PreloadMultiFileDiffResult<T> | PreloadFileDiffResult<T>
+type DiffPreload<T> = PreloadMultiFileDiffResult<T, undefined> | PreloadFileDiffResult<T, undefined>
 
-type DiffBaseProps<T> = FileDiffOptions<T> &
+type DiffBaseProps<T> = FileDiffOptions<T, undefined> &
   SharedProps<T> & {
     mode: "diff"
     annotations?: DiffLineAnnotation<T>[]
@@ -702,7 +702,7 @@ function ViewerShell(props: {
       data-mode={props.mode}
       dir="ltr"
       style={styleVariables}
-      class="relative outline-none"
+      class="relative select-text outline-none"
       classList={{
         ...props.classList,
         [props.class ?? ""]: !!props.class,
@@ -906,7 +906,7 @@ function TextViewer<T>(props: TextFileProps<T>) {
 
   createEffect(() => {
     const opts = options()
-    const workerPool = getWorkerPool("unified")
+    const workerPool = getWorkerPool()
     const virtualizer = virtuals.get()
 
     renderViewer({
@@ -957,7 +957,7 @@ function DiffViewer<T>(props: DiffFileProps<T>) {
   let instance: FileDiff<T> | undefined
   let instanceVirtualizer: Virtualizer | undefined
   let instanceWorkerPool: ReturnType<typeof getWorkerPool>
-  let instanceVirtualHunkSeparators: FileDiffOptions<T>["hunkSeparators"] | undefined
+  let instanceVirtualHunkSeparators: FileDiffOptions<T, undefined>["hunkSeparators"] | undefined
   let instanceFileDiff: FileDiffMetadata | undefined
   let instanceBefore: FileContents | undefined
   let instanceAfter: FileContents | undefined
@@ -1066,7 +1066,7 @@ function DiffViewer<T>(props: DiffFileProps<T>) {
     lineDiffType: "none",
     maxLineDiffLength: 0,
     tokenizeMaxLineLength: 1,
-  } satisfies Pick<FileDiffOptions<T>, "lineDiffType" | "maxLineDiffLength" | "tokenizeMaxLineLength">
+  } satisfies Pick<FileDiffOptions<T, undefined>, "lineDiffType" | "maxLineDiffLength" | "tokenizeMaxLineLength">
 
   const lineCallbacks = createLineCallbacks({
     viewer,
@@ -1076,7 +1076,7 @@ function DiffViewer<T>(props: DiffFileProps<T>) {
     onLineNumberSelectionEnd: (range) => local.onLineNumberSelectionEnd?.(range),
   })
 
-  const options = createMemo<FileDiffOptions<T>>(() => {
+  const options = createMemo<FileDiffOptions<T, undefined>>(() => {
     const base = {
       ...createDefaultOptions(props.diffStyle),
       ...others,
@@ -1085,7 +1085,7 @@ function DiffViewer<T>(props: DiffFileProps<T>) {
 
     const perf = large() ? { ...base, ...largeOptions } : base
     if (!mobile()) return perf
-    return { ...perf, disableLineNumbers: true }
+    return { ...perf, disableLineNumbers: props.disableLineNumbers ?? true }
   })
 
   const notify = (done?: VoidFunction) => {
@@ -1111,7 +1111,8 @@ function DiffViewer<T>(props: DiffFileProps<T>) {
 
   createEffect(() => {
     const opts = options()
-    const workerPool = large() ? getWorkerPool("unified") : getWorkerPool(props.diffStyle)
+    // Worker render options override per-viewer options, including the large-file fallback.
+    const workerPool = getWorkerPool(large() ? "none" : "word-line")
     const virtualizer = virtuals.get()
     const beforeContents = typeof local.before?.contents === "string" ? local.before.contents : ""
     const afterContents = typeof local.after?.contents === "string" ? local.after.contents : ""

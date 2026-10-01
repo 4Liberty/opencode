@@ -1,18 +1,18 @@
 export * as EventFeed from "./event-feed"
 
-import { Bus } from "@opencode-ai/core/bus"
-import { Event } from "@opencode-ai/schema/event"
-import { isOpenCodeEvent, type OpenCodeEvent } from "@opencode-ai/protocol/groups/event"
+import { Bus } from "@opencode/core/bus"
+import { Event } from "@opencode/schema/event"
+import { isOpenCodeEvent, type OpenCodeEvent } from "@opencode/protocol/groups/event"
 import { Cause, Context, Effect, Layer, Queue, Schema, Scope, Stream } from "effect"
 
 export const SubscriberCapacity = 4_096
 
-export class SubscriberOverflowError extends Schema.TaggedErrorClass<SubscriberOverflowError>()(
+export class SubscriberOverflowError extends Schema.TaggedError<SubscriberOverflowError>()(
   "EventFeed.SubscriberOverflow",
   { capacity: Schema.Int },
 ) {}
 
-export class EncodingError extends Schema.TaggedErrorClass<EncodingError>()("EventFeed.EncodingError", {
+export class EncodingError extends Schema.TaggedError<EncodingError>()("EventFeed.EncodingError", {
   eventID: Event.ID,
   eventType: Schema.String,
   cause: Schema.Defect(),

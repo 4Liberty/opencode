@@ -1,7 +1,8 @@
-import type { ConnectionInfo } from "@opencode-ai/client"
-import type { IntegrationApi } from "@opencode-ai/client/effect/api"
-import { Credential } from "@opencode-ai/schema/credential"
-import { Form } from "@opencode-ai/schema/form"
+import type { ConnectionInfo } from "@opencode/client"
+import type { IntegrationApi } from "@opencode/client/effect/api"
+import { Connection } from "@opencode/schema/connection"
+import { Credential } from "@opencode/schema/credential"
+import { Form } from "@opencode/schema/form"
 import type { Effect, Scope } from "effect"
 import type { Transform } from "./registration.js"
 
@@ -74,7 +75,7 @@ export type IntegrationMethodRegistration =
       readonly method: IntegrationEnvMethod
     }
 
-export interface IntegrationDraft {
+export interface IntegrationEditor {
   list(): readonly IntegrationRef[]
   get(id: string): IntegrationRef | undefined
   update(id: string, update: (integration: IntegrationRef) => void): void
@@ -87,10 +88,16 @@ export interface IntegrationDraft {
 }
 
 export interface IntegrationDomain extends Omit<IntegrationApi<unknown>, "wellknown"> {
-  readonly transform: Transform<IntegrationDraft>
+  readonly transform: Transform<IntegrationEditor>
   readonly reload: () => Effect.Effect<void>
   readonly connection: {
     readonly active: (integrationID: string) => Effect.Effect<ConnectionInfo | undefined>
     readonly resolve: (connection: ConnectionInfo) => Effect.Effect<Credential.Value | undefined, unknown>
+    /** Reports a problem with a connection, such as a required sign-in; `undefined` clears it. */
+    readonly status: (input: {
+      readonly integrationID: string
+      readonly connection: ConnectionInfo
+      readonly status: Connection.Status | undefined
+    }) => Effect.Effect<void>
   }
 }

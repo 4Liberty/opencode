@@ -11,6 +11,7 @@ describe("SessionError", () => {
   test("round trips current and future error types through JSON", () => {
     const values: SessionError.Error[] = [
       { type: "provider.rate-limit", message: "Slow down" },
+      { type: "provider.rate-limit", message: "Slow down", status: 429, response: { body: '{"error":{}}' } },
       { type: "provider.auth", message: "Authentication failed" },
       { type: "provider.future-condition", message: "A future provider failure" },
       { type: "unknown", message: "Unexpected" },
@@ -36,10 +37,13 @@ describe("SessionError", () => {
   test("rejects missing envelope fields", () => {
     expect(() => Schema.decodeUnknownSync(SessionError.Error)({ type: "provider.auth" })).toThrow()
     expect(() => Schema.decodeUnknownSync(SessionError.Error)({ message: "Missing type" })).toThrow()
+    expect(() =>
+      Schema.decodeUnknownSync(SessionError.Error)({ type: "provider.auth", message: "Failed", response: {} }),
+    ).toThrow()
   })
 })
 
-test("FinishReason is the closed browser-safe provider set", () => {
+test("FinishReason is the closed normalized provider set", () => {
   const reasons = ["stop", "length", "tool-calls", "content-filter", "error", "unknown"] as const
   expect(reasons.map((reason) => Schema.decodeUnknownSync(LLM.FinishReason)(reason))).toEqual([...reasons])
   expect(() => Schema.decodeUnknownSync(LLM.FinishReason)("other")).toThrow()

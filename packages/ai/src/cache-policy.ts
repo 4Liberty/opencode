@@ -5,13 +5,14 @@
 // The default `"auto"` shape places breakpoints at the last tool definition,
 // the first and last distinct system parts, and the conversation tail. This
 // exposes reusable tool, base-agent, project, and session prefixes while
-// advancing the tail after each tool result keeps the previous cache entry
-// within Anthropic's 20-block lookback during long agent turns.
+// advancing the tail after each tool result keeps recent conversation prefixes
+// reusable during long agent runs.
 //
 // Manual `cache: CacheHint` placements on individual parts are preserved and
 // count against the four-breakpoint budget; auto only fills remaining slots.
 import { CacheHint, type CachePolicy, type CachePolicyObject } from "./schema/options.js"
-import { LLMRequest, Message, ToolDefinition, type ContentPart } from "./schema/messages.js"
+import { LLMRequest, Message, ToolDefinition, type ContentPart, type ToolEntry } from "./schema/messages.js"
+import { effortUpdate } from "./effort-updates.js"
 
 const AUTO: CachePolicyObject = {
   tools: true,
@@ -23,9 +24,7 @@ const NONE: CachePolicyObject = {}
 const BREAKPOINT_CAP = 4
 
 // Resolution rules:
-//   - undefined   → "auto" — caching is on by default. The math favors it:
-//                   Anthropic 5m-cache write is 1.25x base, read is 0.1x,
-//                   so a single reuse within 5 minutes already wins.
+//   - undefined   → "auto" — caching is on by default.
 //   - "auto"      → tools + first/last system + final message boundary.
 //   - "none"      → no auto placement; manual `CacheHint`s still flow.
 //   - object form → exactly what the caller asked for.
@@ -38,7 +37,30 @@ const resolve = (policy: CachePolicy | undefined): CachePolicyObject => {
 // Protocols whose wire format ignores inline cache markers (OpenAI's implicit
 // prefix caching, Gemini's implicit + out-of-band CachedContent). Skip the
 // whole policy pass for these — emitting hints would be harmless but pointless.
-const RESPECTS_INLINE_HINTS = new Set(["anthropic-messages", "bedrock-converse", "openrouter"])
+const RESPECTS_INLINE_HINTS = new Set([
+  "alibaba-messages",
+  "anthropic-messages",
+  "anthropic-compatible-messages",
+  "cloudflare-ai-gateway-messages",
+  "google-vertex-messages",
+  "meta-messages",
+  "minimax-messages",
+  "moonshot-messages",
+  "zai-coding-messages",
+  "bedrock-converse",
+  "openrouter",
+])
+
+// OpenRouter upstreams other than Anthropic and Alibaba Qwen cache without breakpoints. Gemini uses only the last
+// breakpoint, so a conversation-tail breakpoint writes a new cache every step and costs more than none. Qwen ignores
+// breakpoints on tool definitions and caches tools with the system prompt.
+const openRouterPolicy = (modelID: string): CachePolicyObject => {
+  // `~anthropic/claude-sonnet-latest` style IDs are OpenRouter aliases for the latest model in a family.
+  const id = modelID.replace(/^~/, "")
+  if (id.startsWith("anthropic/")) return AUTO
+  if (id.startsWith("qwen/")) return { system: true, messages: { tail: 1 } }
+  return NONE
+}
 
 const makeHint = (ttlSeconds: number | undefined): CacheHint =>
   ttlSeconds !== undefined ? new CacheHint({ type: "ephemeral", ttlSeconds }) : new CacheHint({ type: "ephemeral" })
@@ -47,17 +69,23 @@ interface Budget {
   remaining: number
 }
 
-const markLastTool = (
-  tools: ReadonlyArray<ToolDefinition>,
-  hint: CacheHint,
-  budget: Budget,
-): ReadonlyArray<ToolDefinition> => {
-  if (tools.length === 0) return tools
-  const last = tools.length - 1
-  if (tools[last]!.cache || budget.remaining === 0) return tools
+const markLastTool = (tools: ReadonlyArray<ToolEntry>, hint: CacheHint, budget: Budget): ReadonlyArray<ToolEntry> => {
+  const target = tools.at(-1)
+  if (target === undefined) return tools
+  if (target.type === "namespace") {
+    const nested = markLastTool(target.tools, hint, budget)
+    return nested === target.tools ? tools : [...tools.slice(0, -1), { ...target, tools: nested }]
+  }
+  if (target.cache || budget.remaining === 0) return tools
   budget.remaining -= 1
-  return tools.map((tool, i) => (i === last ? new ToolDefinition({ ...tool, cache: hint }) : tool))
+  return [...tools.slice(0, -1), new ToolDefinition({ ...target, cache: hint })]
 }
+
+const countToolHints = (tools: ReadonlyArray<ToolEntry>): number =>
+  tools.reduce(
+    (count, tool) => count + (tool.type === "tool" ? (tool.cache === undefined ? 0 : 1) : countToolHints(tool.tools)),
+    0,
+  )
 
 const markSystemBoundaries = (system: LLMRequest["system"], hint: CacheHint, budget: Budget): LLMRequest["system"] => {
   if (system.length === 0) return system
@@ -112,14 +140,20 @@ const markMessages = (
     return markMessageAt(messages, lastIndexOfRole(messages, "user"), hint, budget)
   if (strategy === "latest-assistant")
     return markMessageAt(messages, lastIndexOfRole(messages, "assistant"), hint, budget)
-  const start = Math.max(0, messages.length - strategy.tail)
+  let start = messages.length
+  let remaining = strategy.tail
+  while (remaining > 0 && start > 0) {
+    start -= 1
+    if (effortUpdate(messages[start]!) === undefined) remaining -= 1
+  }
   let next = messages
-  for (let i = start; i < messages.length; i++) next = markMessageAt(next, i, hint, budget)
+  for (let i = start; i < messages.length; i++)
+    if (effortUpdate(messages[i]!) === undefined) next = markMessageAt(next, i, hint, budget)
   return next
 }
 
 const countHints = (request: LLMRequest) =>
-  request.tools.reduce((count, tool) => count + (tool.cache === undefined ? 0 : 1), 0) +
+  countToolHints(request.tools) +
   request.system.reduce((count, part) => count + (part.cache === undefined ? 0 : 1), 0) +
   request.messages.reduce(
     (count, message) =>
@@ -133,9 +167,10 @@ const countHints = (request: LLMRequest) =>
 
 export const applyCachePolicy = (request: LLMRequest): LLMRequest => {
   if (!RESPECTS_INLINE_HINTS.has(request.model.route.id)) return request
-  if (request.model.route.id === "openrouter" && (request.cache === undefined || request.cache === "auto"))
-    return request
-  const policy = resolve(request.cache)
+  const policy =
+    request.model.route.id === "openrouter" && (request.cache === undefined || request.cache === "auto")
+      ? openRouterPolicy(request.model.id)
+      : resolve(request.cache)
   if (!policy.tools && !policy.system && !policy.messages) return request
 
   const hint = makeHint(policy.ttlSeconds)

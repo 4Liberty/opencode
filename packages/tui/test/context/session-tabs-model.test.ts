@@ -13,7 +13,7 @@ import {
   sessionTabComplete,
   sessionTabDetail,
   sessionTabOverflowWidth,
-  sessionTabShortcutLabel,
+  sessionTabNumberLabel,
 } from "../../src/context/session-tabs-model"
 
 describe("session tabs", () => {
@@ -25,8 +25,8 @@ describe("session tabs", () => {
     expect(sessionTabDetail("opencode", undefined, "main", true)).toBe("opencode")
   })
 
-  test("labels direct shortcut tabs and marks unbound tabs with a dot", () => {
-    expect(Array.from({ length: 12 }, (_, index) => sessionTabShortcutLabel(index))).toEqual([
+  test("labels tabs by ordinal", () => {
+    expect(Array.from({ length: 12 }, (_, index) => sessionTabNumberLabel(index))).toEqual([
       "1",
       "2",
       "3",
@@ -36,9 +36,9 @@ describe("session tabs", () => {
       "7",
       "8",
       "9",
-      "0",
-      "·",
-      "·",
+      "10",
+      "11",
+      "12",
     ])
   })
 
@@ -201,6 +201,20 @@ describe("session tabs", () => {
     expect(reopenSessionTab([], tabs)).toEqual({ stack: [], tabs: undefined, sessionID: undefined })
   })
 
+  test("reopens a selected closed tab without consuming newer entries", () => {
+    const stack = recordClosedSessionTab(recordClosedSessionTab([], { sessionID: "b" }, 1), { sessionID: "c" }, 2)
+    const result = reopenSessionTab(stack, [{ sessionID: "a" }], "b")
+    expect(result.sessionID).toBe("b")
+    expect(result.tabs).toEqual([{ sessionID: "a" }, { sessionID: "b" }])
+    expect(result.stack).toEqual([{ tab: { sessionID: "c" }, index: 2 }])
+    expect(reopenSessionTab(stack, [], "missing")).toEqual({ stack, tabs: undefined, sessionID: undefined })
+    expect(reopenSessionTab(stack, [{ sessionID: "b" }], "b")).toEqual({
+      stack: [{ tab: { sessionID: "c" }, index: 2 }],
+      tabs: undefined,
+      sessionID: undefined,
+    })
+  })
+
   test("skips and consumes closed entries that are already open", () => {
     const stack = [
       { tab: { sessionID: "a" }, index: 0 },
@@ -220,12 +234,12 @@ describe("session tabs", () => {
     const reopened = reopenSessionTab(twice, [{ sessionID: "b" }])
     expect(reopened.tabs).toEqual([{ sessionID: "b" }, { sessionID: "a" }])
 
-    const overflow = Array.from({ length: 12 }, (_, index) => ({ sessionID: String(index) })).reduce(
+    const overflow = Array.from({ length: 27 }, (_, index) => ({ sessionID: String(index) })).reduce(
       (stack, tab, index) => recordClosedSessionTab(stack, tab, index),
       twice,
     )
-    expect(overflow).toHaveLength(10)
-    expect(overflow.at(-1)?.tab.sessionID).toBe("11")
+    expect(overflow).toHaveLength(25)
+    expect(overflow.at(-1)?.tab.sessionID).toBe("26")
     expect(overflow[0]?.tab.sessionID).toBe("2")
   })
 

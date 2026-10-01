@@ -23,7 +23,7 @@ export type FileReference = BaseReference & {
 
 export type Reference = RemoteReference | FileReference
 
-export class InvalidReferenceError extends Schema.TaggedErrorClass<InvalidReferenceError>()(
+export class InvalidReferenceError extends Schema.TaggedError<InvalidReferenceError>()(
   "RepositoryInvalidReferenceError",
   {
     repository: Schema.String,
@@ -31,7 +31,7 @@ export class InvalidReferenceError extends Schema.TaggedErrorClass<InvalidRefere
   },
 ) {}
 
-export class UnsupportedLocalRepositoryError extends Schema.TaggedErrorClass<UnsupportedLocalRepositoryError>()(
+export class UnsupportedLocalRepositoryError extends Schema.TaggedError<UnsupportedLocalRepositoryError>()(
   "RepositoryUnsupportedLocalRepositoryError",
   {
     repository: Schema.String,
@@ -39,7 +39,7 @@ export class UnsupportedLocalRepositoryError extends Schema.TaggedErrorClass<Uns
   },
 ) {}
 
-export class InvalidBranchError extends Schema.TaggedErrorClass<InvalidBranchError>()("RepositoryInvalidBranchError", {
+export class InvalidBranchError extends Schema.TaggedError<InvalidBranchError>()("RepositoryInvalidBranchError", {
   branch: Schema.String,
   message: Schema.String,
 }) {}
@@ -145,8 +145,9 @@ function parts(input: string) {
     .filter(Boolean)
 }
 
+// cachePath makes each `:`-separated host part a directory.
 function safeHost(input: string) {
-  return Boolean(input) && !input.startsWith("-") && !/[\s/\\]/.test(input)
+  return Boolean(input) && !input.startsWith("-") && input.split(":").every(safeSegment)
 }
 
 function safeSegment(input: string) {

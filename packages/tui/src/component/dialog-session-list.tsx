@@ -1,7 +1,7 @@
 import { createMemo, createResource, createSignal, onMount, Show } from "solid-js"
 import path from "path"
-import type { SessionInfo } from "@opencode-ai/client"
-import { Project } from "@opencode-ai/schema/project"
+import type { SessionInfo } from "@opencode/client"
+import { Project } from "@opencode/schema/project"
 import { TextAttributes } from "@opentui/core"
 import type { RGBA } from "@opentui/core"
 import { useDialog } from "../ui/dialog"
@@ -10,7 +10,7 @@ import { useRoute } from "../context/route"
 import { useData } from "../context/data"
 import { Keymap } from "../context/keymap"
 import { Locale } from "../util/locale"
-import { useTheme, useThemes } from "../context/theme"
+import { useTheme } from "../context/theme"
 import { useClient } from "../context/client"
 import { useLocal } from "../context/local"
 import { createDebouncedSignal } from "../util/signal"
@@ -21,21 +21,21 @@ import { errorMessage } from "../util/error"
 import { useSessionTabs } from "../context/session-tabs"
 import { useStorage } from "../context/storage"
 import { useConfig } from "../config"
-import { withTimestampedFallback } from "@opencode-ai/util/session-title-fallback"
+import { withTimestampedFallback } from "@opencode/util/session-title-fallback"
 import { projectName } from "../util/project"
+import { useLocation } from "../context/location"
 
 export function DialogSessionList() {
   const dialog = useDialog()
   const route = useRoute()
   const data = useData()
-  const themes = useThemes()
-  const theme = useTheme("elevated")
-  const mode = themes.mode
+  const theme = useTheme().surface("dialog")
   const client = useClient()
   const local = useLocal()
   const sessionTabs = useSessionTabs()
   const config = useConfig().data
   const toast = useToast()
+  const activeLocation = useLocation()
   const [filter, setFilter] = createSignal("")
   const shortcuts = Keymap.useShortcuts()
   const [search, setSearch] = createDebouncedSignal("", 150)
@@ -44,13 +44,21 @@ export function DialogSessionList() {
     initial: { allProjects: config.tabs?.scope !== "cwd" },
   })
   const allProjects = () => prefs.allProjects
+  const pickerLocation = () =>
+    (route.data.type === "session" ? data.session.get(route.data.sessionID)?.location : undefined) ??
+    activeLocation.ref ??
+    data.location.default()
 
   const [searchResults, { mutate: setSearchResults }] = createResource(
-    () => ({ query: search().trim(), allProjects: allProjects() }),
-    async ({ query, allProjects }) => {
+    () => ({
+      query: search().trim(),
+      allProjects: allProjects(),
+      location: pickerLocation(),
+    }),
+    async ({ query, allProjects, location }) => {
       try {
-        if (!data.location.info()) await data.location.sync()
-        const current = data.location.info()
+        if (!data.location.info(location)) await data.location.sync(location)
+        const current = data.location.info(location)
         if (!current) throw new Error("Location unavailable")
         const response = await client.api.session.list({
           ...(allProjects
@@ -78,7 +86,7 @@ export function DialogSessionList() {
   const currentSessionID = createMemo(() => (route.data.type === "session" ? route.data.sessionID : undefined))
   const localSessions = createMemo(() => {
     const query = filter().trim().toLowerCase()
-    const current = data.location.info()
+    const current = data.location.info(pickerLocation())
     const sessions = data.session
       .list()
       .filter(
@@ -125,7 +133,7 @@ export function DialogSessionList() {
     return hint && local.session.slots().length > 0 ? [{ title: "switch", label: hint }] : []
   })
   const currentProjectName = createMemo(() => {
-    const current = data.location.info()
+    const current = data.location.info(pickerLocation())
     if (!current) return ""
     const project = data.project.get(current.project.id)
     return projectName(project) ?? ""
@@ -168,7 +176,7 @@ export function DialogSessionList() {
             ? (color: RGBA) => <Spinner color={color} />
             : slot === undefined
               ? undefined
-              : () => <text fg={theme.hue.accent[mode() === "light" ? 800 : 200]}>{slot}</text>,
+              : () => <text fg={theme.hue.accent[200]}>{slot}</text>,
       }
     }
 
@@ -189,11 +197,11 @@ export function DialogSessionList() {
       title="Sessions"
       titleView={
         <box flexDirection="row">
-          <text fg={theme.text.default} attributes={TextAttributes.BOLD}>
+          <text fg={theme.text.base} attributes={TextAttributes.BOLD}>
             Sessions
           </text>
           <Show when={!allProjects() && currentProjectName()}>
-            <text fg={theme.text.subdued}> for {currentProjectName()}</text>
+            <text fg={theme.text.muted}> for {currentProjectName()}</text>
           </Show>
         </box>
       }
@@ -218,14 +226,14 @@ export function DialogSessionList() {
       ]}
       emptyView={
         <box paddingLeft={4} paddingRight={4}>
-          <text fg={searchState().error ? theme.text.feedback.error.default : theme.text.subdued}>
+          <text fg={searchState().error ? theme.text.feedback.error.base : theme.text.muted}>
             {searchState().message}
           </text>
         </box>
       }
       noMatchView={
         <box paddingLeft={4} paddingRight={4}>
-          <text fg={searchState().error ? theme.text.feedback.error.default : theme.text.subdued}>
+          <text fg={searchState().error ? theme.text.feedback.error.base : theme.text.muted}>
             {searchState().message}
           </text>
         </box>
