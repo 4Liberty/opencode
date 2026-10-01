@@ -55,6 +55,22 @@ export const AppSetNativeTranslations = Rpc.make("AppSetNativeTranslations", {
   payload: { value: Schema.Unknown },
 })
 export const AppRelaunch = Rpc.make("AppRelaunch")
+export const AppGetQuickPromptShortcut = Rpc.make("AppGetQuickPromptShortcut", { success: Schema.String })
+export const AppSetQuickPromptShortcut = Rpc.make("AppSetQuickPromptShortcut", {
+  payload: { keybind: Schema.String },
+  success: Schema.Boolean,
+})
+const QuickPromptContext = Schema.Struct({
+  server: Schema.String,
+  directory: Schema.optionalKey(Schema.String),
+  sessionID: Schema.optionalKey(Schema.String),
+})
+export const AppGetQuickPromptContext = Rpc.make("AppGetQuickPromptContext", {
+  success: Schema.NullOr(QuickPromptContext),
+})
+export const AppSetQuickPromptContext = Rpc.make("AppSetQuickPromptContext", {
+  payload: { context: QuickPromptContext },
+})
 export const AppRpcs = RpcGroup.make(
   AppAwaitInitialization,
   AppReconnectService,
@@ -71,4 +87,8 @@ export const AppRpcs = RpcGroup.make(
   AppRecordFatalRendererError,
   AppSetNativeTranslations,
   AppRelaunch,
+  AppGetQuickPromptShortcut,
+  AppSetQuickPromptShortcut,
+  AppGetQuickPromptContext,
+  AppSetQuickPromptContext,
 )

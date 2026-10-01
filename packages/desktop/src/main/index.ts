@@ -9,10 +9,12 @@ import { ApplicationLifecycle } from "./lifecycle"
 import { BackgroundService } from "./service/background-service"
 import { DesktopCli } from "./service/desktop-cli"
 import { UpdaterLive } from "./updater/live"
+import { makeQuickPromptWindow } from "./windows/quick-prompt"
 
 const runIpc = Effect.fn("Desktop.runIpc")(function* () {
   const lifecycle = yield* ApplicationLifecycle.Service
   const ipc = yield* Ipc.registerIpcHandlers
+  yield* makeQuickPromptWindow()
   if (lifecycle.restoreWindows().length) ipc.installMenu()
   yield* Effect.callback<void>((resume) => {
     const quit = () => resume(Effect.void)

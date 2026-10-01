@@ -7,7 +7,7 @@ import { scoped } from "../native/logging"
 import { DesktopPaths } from "../paths"
 import { forgetStore, getStore } from "../storage/store"
 import { WINDOW_IDS_KEY } from "../storage/keys"
-import { windowIDArgument } from "../../shared/window-bootstrap"
+import { windowIDArgument, windowKindArgument } from "../../shared/window-bootstrap"
 import {
   getBackgroundColor,
   getPinchZoomEnabled,
@@ -61,10 +61,14 @@ export function setAppQuitting(quitting = true) {
 
 export function getLastFocusedWindow() {
   const focused = BrowserWindow.getFocusedWindow()
-  if (focused) return focused
+  if (focused && registry.has(focused)) return focused
   const win = registry.lastFocused()
   if (!win || win.isDestroyed()) return null
   return win
+}
+
+export function hasMainWindows() {
+  return registry.size() > 0
 }
 
 export function setWindowThemeReady(win: BrowserWindow) {
@@ -96,7 +100,7 @@ export const makeMainWindows = Effect.fn("Window.make")(function* () {
       ...appearance,
       webPreferences: {
         ...appearance.webPreferences,
-        additionalArguments: [windowIDArgument(id)],
+        additionalArguments: [windowIDArgument(id), windowKindArgument("main")],
       },
     })
 

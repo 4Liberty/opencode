@@ -42,3 +42,9 @@ export type ClipboardImage = {
   width: number
   height: number
 }
+
+export type QuickPromptContext = {
+  server: string
+  directory?: string
+  sessionID?: string
+}

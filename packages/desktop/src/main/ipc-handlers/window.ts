@@ -23,6 +23,8 @@ export const windowHandlers = WindowRpcs.toLayer(
         Effect.sync(() => BrowserWindow.fromWebContents(sender(handoff, context))?.focus()),
       WindowShow: (_args, context) =>
         Effect.sync(() => BrowserWindow.fromWebContents(sender(handoff, context))?.show()),
+      WindowHide: (_args, context) =>
+        Effect.sync(() => BrowserWindow.fromWebContents(sender(handoff, context))?.hide()),
       WindowGetZoomFactor: (_args, context) => Effect.sync(() => sender(handoff, context).getZoomFactor()),
       WindowSetZoomFactor: ({ factor }, context) =>
         Effect.sync(() => {

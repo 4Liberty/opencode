@@ -17,6 +17,8 @@ import { DesktopCli } from "../service/desktop-cli"
 import { getDefaultServerUrl, setDefaultServerUrl } from "../service/server-settings"
 import { Updater } from "../updater"
 import { getLastFocusedWindow, setBackgroundColor } from "../windows"
+import { getQuickPromptShortcut, setQuickPromptShortcut } from "../windows/quick-prompt-shortcut"
+import { getQuickPromptContext, setQuickPromptContext } from "../windows/quick-prompt-context"
 import { sender } from "./context"
 
 export const appHandlers = AppRpcs.toLayer(
@@ -67,6 +69,10 @@ export const appHandlers = AppRpcs.toLayer(
           })
         }),
       AppRelaunch: () => Effect.sync(lifecycle.relaunch),
+      AppGetQuickPromptShortcut: () => Effect.sync(getQuickPromptShortcut),
+      AppSetQuickPromptShortcut: ({ keybind }) => Effect.sync(() => setQuickPromptShortcut(keybind)),
+      AppGetQuickPromptContext: () => Effect.sync(getQuickPromptContext),
+      AppSetQuickPromptContext: ({ context }) => Effect.sync(() => setQuickPromptContext(context)),
     })
   }),
 )

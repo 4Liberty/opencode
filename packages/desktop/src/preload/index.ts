@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron"
 import { IpcTransportPort } from "../shared/ipc-transport"
-import { windowIDFromArguments } from "../shared/window-bootstrap"
+import { windowIDFromArguments, windowKindFromArguments } from "../shared/window-bootstrap"
 
 ipcRenderer.on(IpcTransportPort, (event) => {
   const port = event.ports[0]
@@ -9,5 +9,6 @@ ipcRenderer.on(IpcTransportPort, (event) => {
 
 contextBridge.exposeInMainWorld("electron", {
   windowID: windowIDFromArguments(process.argv),
+  windowKind: windowKindFromArguments(process.argv),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
 })

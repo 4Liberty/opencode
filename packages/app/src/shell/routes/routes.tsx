@@ -1,4 +1,4 @@
-import { Route, useParams } from "@solidjs/router"
+import { Route, useLocation, useParams } from "@solidjs/router"
 import { createMemo, lazy, Show, Suspense, type ParentProps } from "solid-js"
 import { Home } from "@/home/route"
 import { ServerProvider } from "@/runtime/server/current"
@@ -17,6 +17,7 @@ const DraftRoute = lazy(() => loadDraftRoute().then((module) => ({ default: modu
 const TargetSessionRouteContent = lazy(() =>
   loadSessionRoute().then((module) => ({ default: module.TargetSessionRouteContent })),
 )
+const QuickPromptRoute = lazy(() => import("@/quick-prompt/route"))
 
 export function preloadRoute(url: string) {
   const pathname = url.split(/[?#]/, 1)[0]
@@ -49,6 +50,7 @@ export function AppRoutes() {
         )}
       />
       <Route path="/new-session" component={DraftRoute} />
+      <Route path="/quick-prompt" component={QuickPromptRoute} />
     </Route>
   )
 }
@@ -68,10 +70,13 @@ function TargetServerRoute(props: ParentProps) {
 }
 
 function AppLayout(props: ParentProps) {
+  const location = useLocation()
   return (
     <LayoutProvider>
       <SettingsSurfaceProvider>
-        <Shell>{props.children}</Shell>
+        <Show when={location.pathname === "/quick-prompt"} fallback={<Shell>{props.children}</Shell>}>
+          {props.children}
+        </Show>
       </SettingsSurfaceProvider>
     </LayoutProvider>
   )

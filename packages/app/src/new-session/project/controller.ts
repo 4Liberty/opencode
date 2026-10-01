@@ -9,13 +9,29 @@ import { useTabs } from "@/shell/tabs/tabs"
 import type { PromptProjectControls } from "./selector"
 
 export function createComposerProjectControls(props: { draftId: string; worktree: () => string }) {
-  const servers = useServers()
   const serverSDK = useServerSDK()
   const location = useWorkspaceLocation()
   const tabs = useTabs()
+  return createProjectControls({
+    directory: () => location().directory,
+    server: () => ServerConnection.key(serverSDK.server),
+    worktree: props.worktree,
+    select: ({ server, directory, worktree }) =>
+      tabs.updateDraft(props.draftId, { server, directory, worktree, branch: undefined }),
+  })
+}
+
+export function createProjectControls(props: {
+  directory: () => string
+  server: () => string
+  worktree: () => string
+  select: (selection: { server: ServerConnection.Key; directory: string; worktree: string }) => void
+}) {
+  const servers = useServers()
   const global = useGlobal()
   const pickDirectory = useDirectoryPicker()
-  const projectServer = () => serverSDK.server
+  const projectServer = () =>
+    servers.list.find((connection) => ServerConnection.key(connection) === props.server()) ?? servers.list[0]
   const projectServerCtx = useServerCtx(projectServer)
   const projects = createMemo(() => {
     if (servers.list.length <= 1) return projectServerCtx().projects.list()
@@ -29,23 +45,22 @@ export function createComposerProjectControls(props: { draftId: string; worktree
   })
   const selectProject = (worktree: string, serverKey?: string) => {
     const connection = serverKey
-      ? servers.list.find((connection) => ServerConnection.key(connection) === serverKey)
+      ? servers.list.find((item) => ServerConnection.key(item) === serverKey)
       : projectServer()
     if (!connection) return
 
     const target = global.ensureServerCtx(connection)
     target.projects.open(worktree)
     target.projects.touch(worktree)
-    tabs.updateDraft(props.draftId, {
+    props.select({
       server: ServerConnection.key(connection),
       directory: worktree,
-      worktree: workspaceSelectionDestination(props.worktree(), location().directory),
-      branch: undefined,
+      worktree: workspaceSelectionDestination(props.worktree(), props.directory()),
     })
   }
   const addProject = (title: string, serverKey?: string) => {
     const connection = serverKey
-      ? servers.list.find((connection) => ServerConnection.key(connection) === serverKey)
+      ? servers.list.find((item) => ServerConnection.key(item) === serverKey)
       : projectServer()
     if (!connection) return
     pickDirectory({
@@ -60,8 +75,8 @@ export function createComposerProjectControls(props: { draftId: string; worktree
 
   return createMemo<PromptProjectControls>(() => ({
     available: projects(),
-    directory: location().directory,
-    server: servers.list.length > 1 ? ServerConnection.key(projectServer()) : undefined,
+    directory: props.directory(),
+    server: servers.list.length > 1 ? props.server() : undefined,
     select: selectProject,
     add: addProject,
   }))

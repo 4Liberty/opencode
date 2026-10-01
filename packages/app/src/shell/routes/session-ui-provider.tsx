@@ -15,6 +15,7 @@ export function SessionUIProvider(
   props: ParentProps<{
     directory: string
     server: ServerConnection.Key
+    sessionID?: string
   }>,
 ) {
   const navigate = useNavigate()
@@ -23,6 +24,7 @@ export function SessionUIProvider(
   const serverSDK = useServerSDK()
   const tabs = useTabs()
   const directory = () => props.directory
+  const activeSessionID = () => props.sessionID ?? params.id
   const readImage = createMemo<ReadMarkdownImage>(() => {
     const dir = directory()
     return (path, signal) => readLocalImage(serverSDK.api, dir, path, signal)
@@ -33,9 +35,9 @@ export function SessionUIProvider(
       (item) =>
         item.type === "session" &&
         item.server === props.server &&
-        (item.sessionId === params.id || item.routeSessionId === params.id),
+        (item.sessionId === activeSessionID() || item.routeSessionId === activeSessionID()),
     )
-    if (tab?.type === "session") tabs.rememberSessionRoute(tab, sessionID, params.id)
+    if (tab?.type === "session") tabs.rememberSessionRoute(tab, sessionID, activeSessionID())
     await data.session.sync(sessionID).catch(() => undefined)
     navigate(href(sessionID))
   }
@@ -60,14 +62,14 @@ export function SessionUIProvider(
     <DataProvider
       data={sessionUIData()}
       directory={directory()}
-      sessionID={params.id}
+      sessionID={activeSessionID()}
       shellRunning={(id) => !!data.shell.get(id)}
       shellOutput={(input) => serverSDK.api.shell.output(input)}
       onNavigateToSession={navigateToSession}
       onSessionHref={href}
     >
       <MarkdownProvider readImage={readImage()}>
-        <LocalProvider>{props.children}</LocalProvider>
+        <LocalProvider sessionID={activeSessionID()}>{props.children}</LocalProvider>
       </MarkdownProvider>
     </DataProvider>
   )

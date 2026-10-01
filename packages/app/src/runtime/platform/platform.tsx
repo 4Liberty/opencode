@@ -95,6 +95,12 @@ type PlatformBase = {
   /** Allow native pinch/Ctrl-scroll zoom gestures (desktop only) */
   setPinchZoomEnabled?(enabled: boolean): Promise<void> | void
 
+  /** Global quick-prompt shortcut (desktop only) */
+  getQuickPromptShortcut?(): Promise<string>
+  setQuickPromptShortcut?(keybind: string): Promise<boolean>
+  getQuickPromptContext?(): Promise<{ server: string; directory?: string; sessionID?: string } | null>
+  hideWindow?(): Promise<void>
+
   /** Run a desktop-only menu action from the app chrome */
   runDesktopMenuAction?(action: DesktopMenuAction): Promise<void> | void
 

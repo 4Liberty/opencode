@@ -30,6 +30,11 @@ export default function NewSessionPage(props: { draftId: string }) {
       if (search.draftId) tabs.updateDraft(search.draftId, { branch })
     },
     onViewAll: openWorkspaces,
+    initializeWorktrees: (fallback) => {
+      const draft = draftTab()
+      if (!draft) return
+      tabs.initializeDraftWorktrees(draft.server, draft.directory, fallback)
+    },
   })
   const composer = createNewSessionComposerAdapter({
     draftID: props.draftId,

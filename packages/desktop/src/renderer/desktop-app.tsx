@@ -11,6 +11,7 @@ import {
   useCommand,
   useCurrentRoute,
   useLanguage,
+  useLayout,
   useTabs,
   useWslServers,
   type LayoutRoute,
@@ -18,7 +19,7 @@ import {
 } from "@opencode-ai/app/desktop"
 import { useTheme } from "@opencode-ai/ui/theme/context"
 import type { BaseRouterProps } from "@solidjs/router"
-import { createEffect, createMemo, createResource, lazy, Show, Suspense } from "solid-js"
+import { createEffect, createMemo, createResource, lazy, onCleanup, onMount, Show, Suspense } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { ElectronAPI } from "./api-types"
 import { DesktopFirstLaunchOnboarding } from "./onboarding"
@@ -35,8 +36,10 @@ const MigrationStatus = lazy(() => import("./migration-status").then((module) =>
 
 export function DesktopApp(props: { api: ElectronAPI; updater: UpdaterPlatform; version: string }) {
   const windowState = { id: props.api.getWindowID(), version: props.version }
-  const url = new URL(getLastActiveUrl(windowState.id), "http://localhost")
-  const route = currentRoute(url.pathname, url.search)
+  const quickPrompt = props.api.getWindowKind() === "quick-prompt"
+  const initialUrl = quickPrompt ? "/quick-prompt" : getLastActiveUrl(windowState.id)
+  const url = new URL(initialUrl, "http://localhost")
+  const route = quickPrompt ? ({ type: "home" } as const) : currentRoute(url.pathname, url.search)
   const [startup, setStartup] = createStore<{ ready: boolean; visible: boolean; route: LayoutRoute }>({
     ready: false,
     visible: true,
@@ -48,6 +51,7 @@ export function DesktopApp(props: { api: ElectronAPI; updater: UpdaterPlatform; 
         api={props.api}
         updater={props.updater}
         windowState={windowState}
+        quickPrompt={quickPrompt}
         onReady={() => setStartup("ready", true)}
         onRoute={(route) => setStartup("route", route)}
       />
@@ -71,6 +75,7 @@ function DesktopWindow(props: {
   api: ElectronAPI
   updater: UpdaterPlatform
   windowState: DesktopWindowState
+  quickPrompt: boolean
   onReady: () => void
   onRoute: (route: LayoutRoute) => void
 }) {
@@ -78,9 +83,15 @@ function DesktopWindow(props: {
   const [sidecar, { mutate: setSidecar }] = createResource(() => props.api.awaitInitialization())
   const [defaultServer] = createResource(() => platform.getDefaultServer?.())
   const [locale] = createResource(() => preloadStoredLocale(platform))
-  const [initialRoute] = createResource(() => preloadRoute(getLastActiveUrl(props.windowState.id)))
+  const [initialRoute] = createResource(() =>
+    preloadRoute(props.quickPrompt ? "/quick-prompt" : getLastActiveUrl(props.windowState.id)),
+  )
   const router = (routerProps: BaseRouterProps) => (
-    <DesktopMemoryRouter {...routerProps} windowID={props.windowState.id} />
+    <DesktopMemoryRouter
+      {...routerProps}
+      windowID={props.windowState.id}
+      initialUrl={props.quickPrompt ? "/quick-prompt" : undefined}
+    />
   )
 
   function ReadyApp() {
@@ -113,20 +124,32 @@ function DesktopWindow(props: {
         <Show when={effectiveDefaultServer()} keyed>
           {(key) => (
             <AppInterface defaultServer={key} servers={servers()} router={router}>
-              <DesktopStartupReady
-                routeReady={() => !initialRoute.loading}
-                onReady={props.onReady}
-                onRoute={props.onRoute}
-              />
-              <DesktopFirstLaunchOnboarding
-                api={props.api}
-                initialUrl={getLastActiveUrl(props.windowState.id)}
-                serverKey={key}
-              />
+              <Show
+                when={props.quickPrompt}
+                fallback={
+                  <DesktopStartupReady
+                    api={props.api}
+                    routeReady={() => !initialRoute.loading}
+                    onReady={props.onReady}
+                    onRoute={props.onRoute}
+                  />
+                }
+              >
+                <QuickPromptStartupReady routeReady={() => !initialRoute.loading} onReady={props.onReady} />
+              </Show>
+              <Show when={!props.quickPrompt}>
+                <DesktopFirstLaunchOnboarding
+                  api={props.api}
+                  initialUrl={getLastActiveUrl(props.windowState.id)}
+                  serverKey={key}
+                />
+              </Show>
               <DesktopEffects api={props.api} />
               <Suspense fallback={null}>
-                <Show when={initializationData(sidecar)} keyed>
-                  {(server) => <MigrationStatus server={server} />}
+                <Show when={!props.quickPrompt}>
+                  <Show when={initializationData(sidecar)} keyed>
+                    {(server) => <MigrationStatus server={server} />}
+                  </Show>
                 </Show>
               </Suspense>
             </AppInterface>
@@ -152,14 +175,45 @@ function DesktopWindow(props: {
   )
 }
 
+function QuickPromptStartupReady(props: { routeReady: () => boolean; onReady: () => void }) {
+  const tabs = useTabs()
+  createEffect(() => {
+    if (!props.routeReady() || !tabs.ready() || !tabs.infoReady()) return
+    props.onReady()
+  })
+  return null
+}
+
 function DesktopStartupReady(props: {
+  api: ElectronAPI
   routeReady: () => boolean
   onReady: () => void
   onRoute: (route: LayoutRoute) => void
 }) {
   const tabs = useTabs()
+  const layout = useLayout()
   const route = useCurrentRoute()
   createEffect(() => props.onRoute(route()))
+  const reportQuickPromptContext = () => {
+    const current = route()
+    if (current.type === "session") {
+      void props.api.setQuickPromptContext({ server: current.server, sessionID: current.sessionId })
+      return
+    }
+    if (current.type === "draft") {
+      const draft = tabs.store.find((tab) => tab.type === "draft" && tab.draftID === current.draftID)
+      if (draft?.type === "draft")
+        void props.api.setQuickPromptContext({ server: draft.server, directory: draft.directory })
+      return
+    }
+    const selection = layout.home.selection()
+    void props.api.setQuickPromptContext({ server: selection.server, directory: selection.directory })
+  }
+  createEffect(reportQuickPromptContext)
+  onMount(() => {
+    window.addEventListener("focus", reportQuickPromptContext)
+    onCleanup(() => window.removeEventListener("focus", reportQuickPromptContext))
+  })
   createEffect(() => {
     if (!props.routeReady() || !tabs.ready() || !tabs.infoReady()) return
     props.onReady()

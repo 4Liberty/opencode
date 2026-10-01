@@ -53,6 +53,10 @@ export function createDesktopPlatform(
     windowFullscreen,
     getPinchZoomEnabled: () => api.getPinchZoomEnabled(),
     setPinchZoomEnabled,
+    getQuickPromptShortcut: () => api.getQuickPromptShortcut(),
+    setQuickPromptShortcut: (keybind) => api.setQuickPromptShortcut(keybind),
+    getQuickPromptContext: () => api.getQuickPromptContext(),
+    hideWindow: () => api.hideWindow(),
     runDesktopMenuAction: createDesktopMenuAction(api),
     checkAppExists: async (appName) => {
       return api.checkAppExists(appName)

@@ -58,7 +58,7 @@ const clone = (value: State | undefined) => {
 
 export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
   name: "Local",
-  init: () => {
+  init: (props: { sessionID?: string | (() => string | undefined) } = {}) => {
     const params = useParams()
     const sdk = useWorkspaceLocation()
     const data = useData()
@@ -67,7 +67,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const models = useModels()
     const settings = useSettings()
 
-    const id = createMemo(() => params.id || undefined)
+    const id = createMemo(() =>
+      typeof props.sessionID === "function" ? props.sessionID() : (props.sessionID ?? params.id ?? undefined),
+    )
     const list = createMemo(() =>
       normalizeAgentList(data.location.agent.list({ directory: sdk().directory }) ?? []).filter(
         (item) => item.mode !== "subagent" && !item.hidden,

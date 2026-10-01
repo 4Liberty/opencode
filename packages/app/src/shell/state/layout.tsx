@@ -100,6 +100,7 @@ const normalizeStoredSessionTabs = (key: string, tabs: SessionTabs) => {
 export const currentRoute = (pathname: string, search: string): LayoutRoute => {
   const parts = pathname.split("/").filter(Boolean)
   if (parts.length === 0) return { type: "home" }
+  if (parts[0] === "quick-prompt") return { type: "home" }
 
   if (parts[0] === "new-session") {
     const draftID = new URLSearchParams(search).get("draftId")

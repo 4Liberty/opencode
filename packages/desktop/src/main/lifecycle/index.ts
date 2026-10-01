@@ -1,13 +1,13 @@
 export * as ApplicationLifecycle from "./index"
 
-import { app, BrowserWindow } from "electron"
-import type { Event } from "electron"
+import { app } from "electron"
+import type { BrowserWindow, Event } from "electron"
 import { Context, Effect, Layer } from "effect"
 import { DeepLinksOpened } from "../../shared/ipc-rpc/events"
 import { emitIpcEvent } from "../ipc-events"
 import { DesktopLogging, scoped } from "../native/logging"
 import { safeWebContentsURL } from "../windows/state"
-import { getLastFocusedWindow, makeMainWindows, setAppQuitting, setRelaunchHandler } from "../windows"
+import { getLastFocusedWindow, hasMainWindows, makeMainWindows, setAppQuitting, setRelaunchHandler } from "../windows"
 import { acquireApplicationLock, configureApplication } from "./environment"
 import { Shutdown } from "./shutdown"
 
@@ -58,7 +58,10 @@ const runtime = Layer.effect(
         emitDeepLinks(urls)
       }
       const win = getLastFocusedWindow()
-      if (!win) return
+      if (!win) {
+        restoreWindows()
+        return
+      }
       win.show()
       win.focus()
     }
@@ -97,7 +100,7 @@ const runtime = Layer.effect(
       if (process.platform !== "darwin") app.quit()
     }
     const activate = () => {
-      if (BrowserWindow.getAllWindows().length === 0) restoreWindows()
+      if (!hasMainWindows()) restoreWindows()
     }
     const resetRelaunchHandler = setRelaunchHandler(relaunch)
     let windowsWired = false

@@ -72,6 +72,17 @@ describe("window registry", () => {
     expect(app.registry.lastFocused()).toBeUndefined()
   })
 
+  test("distinguishes registered windows from auxiliary windows", () => {
+    const app = setup()
+    const main = { name: "main" }
+    app.registry.register("a", main)
+    expect(app.registry.has(main)).toBe(true)
+    expect(app.registry.has({ name: "palette" })).toBe(false)
+    expect(app.registry.size()).toBe(1)
+    app.registry.closed("a")
+    expect(app.registry.size()).toBe(0)
+  })
+
   test("resumes forgetting closed windows after the quit flag resets", () => {
     const app = setup()
     app.registry.register("a", { name: "a" })

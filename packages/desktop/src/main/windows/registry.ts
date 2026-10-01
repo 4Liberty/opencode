@@ -1,9 +1,6 @@
 // Tracks open windows and the persisted window id list used to restore
 // windows (and their per-window persisted state) across app launches.
-export function createWindowRegistry<W>(persistence: {
-  read: () => unknown
-  write: (ids: string[]) => void
-}) {
+export function createWindowRegistry<W>(persistence: { read: () => unknown; write: (ids: string[]) => void }) {
   const windows = new Map<string, W>()
   let quitting = false
   let lastFocusedID: string | undefined
@@ -23,6 +20,12 @@ export function createWindowRegistry<W>(persistence: {
       windows.set(id, window)
       const ids = persisted()
       if (!ids.includes(id)) persistence.write([...ids, id])
+    },
+    has(window: W) {
+      return [...windows.values()].includes(window)
+    },
+    size() {
+      return windows.size
     },
     focused(id: string) {
       lastFocusedID = id

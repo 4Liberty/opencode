@@ -1,7 +1,7 @@
 import { base64Encode } from "@opencode-ai/util/encode"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { useParams, useSearchParams } from "@solidjs/router"
-import { createMemo, createResource, createRoot, getOwner, onCleanup } from "solid-js"
+import { createMemo, createResource, createRoot, getOwner, onCleanup, type Accessor } from "solid-js"
 import { requireServerKey } from "@/shell/routes/session"
 import { ServerConnection } from "@/runtime/server/registry"
 import { useServerSDK } from "@/runtime/server/client"
@@ -72,7 +72,14 @@ export const createTabComposerState = (
 export const { use: useComposerState, provider: ComposerPersistenceProvider } = createSimpleContext({
   name: "ComposerState",
   gate: false,
-  init: () => {
+  init: (props: { state?: ComposerState } = {}) => {
+    if (props.state) {
+      const state = props.state
+      return composerPersistenceValue(
+        () => state,
+        () => state,
+      )
+    }
     const params = useParams<{ serverKey?: string; id?: string }>()
     const sdk = useWorkspaceLocation()
     const [search] = useSearchParams<{ draftId?: string }>()
@@ -130,40 +137,45 @@ export const { use: useComposerState, provider: ComposerPersistenceProvider } = 
     const session = createMemo(() => load(scope()))
     const pick = (scope?: PromptScope, target?: { server?: ServerConnection.Key; scope: ServerScope }) =>
       scope ? load(scope, target) : session()
-    const ready = createComposerReady(session)
-
-    const withSuspense = <T,>(cb: () => T): (() => T) =>
-      createResource(
-        async () => {
-          const value = cb()
-          await session().ready.promise
-          return value
-        },
-        cb,
-        { initialValue: cb() },
-      )[0]
-
-    return {
-      ready,
-      capture: (scope?: PromptScope, target?: { server?: ServerConnection.Key; scope: ServerScope }) =>
-        pick(scope, target).capture(),
-      current: withSuspense(() => session().current()),
-      cursor: withSuspense(() => session().cursor()),
-      model: {
-        current: withSuspense(() => session().model.current()),
-        set: (model: PromptModel | undefined) => session().model.set(model),
-      },
-      context: {
-        items: withSuspense(() => session().context.items()),
-        add: (item: ContextItem) => session().context.add(item),
-        remove: (key: string) => session().context.remove(key),
-        removeComment: (path: string, commentID: string) => session().context.removeComment(path, commentID),
-        updateComment: (path: string, commentID: string, next: Partial<FileContextItem> & { comment?: string }) =>
-          session().context.updateComment(path, commentID, next),
-        replaceComments: (items: FileContextItem[]) => session().context.replaceComments(items),
-      },
-      set: (prompt: Prompt, cursorPosition?: number, scope?: PromptScope) => pick(scope).set(prompt, cursorPosition),
-      reset: (scope?: PromptScope) => pick(scope).reset(),
-    }
+    return composerPersistenceValue(session, pick)
   },
 })
+
+function composerPersistenceValue(
+  session: Accessor<ComposerState>,
+  pick: (scope?: PromptScope, target?: { server?: ServerConnection.Key; scope: ServerScope }) => ComposerState,
+) {
+  const withSuspense = <T,>(cb: () => T): (() => T) =>
+    createResource(
+      async () => {
+        const value = cb()
+        await session().ready.promise
+        return value
+      },
+      cb,
+      { initialValue: cb() },
+    )[0]
+
+  return {
+    ready: createComposerReady(session),
+    capture: (scope?: PromptScope, target?: { server?: ServerConnection.Key; scope: ServerScope }) =>
+      pick(scope, target).capture(),
+    current: withSuspense(() => session().current()),
+    cursor: withSuspense(() => session().cursor()),
+    model: {
+      current: withSuspense(() => session().model.current()),
+      set: (model: PromptModel | undefined) => session().model.set(model),
+    },
+    context: {
+      items: withSuspense(() => session().context.items()),
+      add: (item: ContextItem) => session().context.add(item),
+      remove: (key: string) => session().context.remove(key),
+      removeComment: (path: string, commentID: string) => session().context.removeComment(path, commentID),
+      updateComment: (path: string, commentID: string, next: Partial<FileContextItem> & { comment?: string }) =>
+        session().context.updateComment(path, commentID, next),
+      replaceComments: (items: FileContextItem[]) => session().context.replaceComments(items),
+    },
+    set: (prompt: Prompt, cursorPosition?: number, scope?: PromptScope) => pick(scope).set(prompt, cursorPosition),
+    reset: (scope?: PromptScope) => pick(scope).reset(),
+  }
+}

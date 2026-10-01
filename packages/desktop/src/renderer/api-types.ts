@@ -11,7 +11,9 @@ import type {
   SaveFilePickerOptions,
   ServerReadyData,
   TitlebarTheme,
+  QuickPromptContext,
 } from "../shared/ipc-contract"
+import type { WindowKind } from "../shared/window-bootstrap"
 
 export type WslServersAPI = WslServersPlatform
 export type UpdaterAPI = {
@@ -44,6 +46,7 @@ export type ElectronAPI = {
   draftBlobPut(data: ArrayBuffer): Promise<string>
   draftBlobGet(id: string): Promise<ArrayBuffer | null>
   getWindowID(): string
+  getWindowKind(): WindowKind
   themeReady(): Promise<void>
   onMenuCommand(cb: (id: string) => void): () => void
   onDeepLink(cb: (urls: string[]) => void): () => void
@@ -64,6 +67,11 @@ export type ElectronAPI = {
   onWindowFullscreenChanged(cb: (fullscreen: boolean) => void): () => void
   setWindowFocus(): Promise<void>
   showWindow(): Promise<void>
+  hideWindow(): Promise<void>
+  getQuickPromptShortcut(): Promise<string>
+  setQuickPromptShortcut(keybind: string): Promise<boolean>
+  getQuickPromptContext(): Promise<QuickPromptContext | null>
+  setQuickPromptContext(context: QuickPromptContext): Promise<void>
   relaunch(): void
   getZoomFactor(): Promise<number>
   setZoomFactor(factor: number): Promise<void>

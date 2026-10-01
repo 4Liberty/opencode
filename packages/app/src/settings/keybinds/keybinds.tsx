@@ -1,4 +1,4 @@
-import { For, Show, createMemo, lazy, onCleanup } from "solid-js"
+import { For, Show, createMemo, lazy, onCleanup, onMount } from "solid-js"
 import { createStore } from "solid-js/store"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { Button } from "@opencode-ai/ui/button"
@@ -10,11 +10,14 @@ import { DEFAULT_PALETTE_KEYBIND, formatKeybind, parseKeybind, useCommand } from
 import { useLanguage } from "@/runtime/i18n/language"
 import { useSettings } from "@/settings/model"
 import { SettingsList } from "@/settings/list"
+import { usePlatform } from "@/runtime/platform/platform"
 
 const Icon = lazy(() => import("@opencode-ai/ui/icon").then((module) => ({ default: module.Icon })))
 
 const IS_MAC = typeof navigator === "object" && /(Mac|iPod|iPhone|iPad)/.test(navigator.platform)
 const PALETTE_ID = "command.palette"
+const DEFAULT_QUICK_PROMPT_KEYBIND = "mod+shift+space"
+const RESET_QUICK_PROMPT_SHORTCUT_EVENT = "opencode:reset-quick-prompt-shortcut"
 
 type KeybindGroup = "General" | "Session" | "Navigation" | "Model and agent" | "Terminal" | "Prompt"
 
@@ -349,6 +352,7 @@ export function SettingsKeybinds() {
     command,
     settings,
   })
+  const [desktop, setDesktop] = createStore({ override: false })
 
   return (
     <SettingsKeybindsView
@@ -358,8 +362,12 @@ export function SettingsKeybinds() {
       keybind={controller.catalog.keybind}
       active={controller.capture.active()}
       onCapture={controller.capture.toggle}
-      hasOverrides={controller.settings.hasOverrides()}
-      onReset={controller.settings.reset}
+      hasOverrides={controller.settings.hasOverrides() || desktop.override}
+      onDesktopOverride={(override) => setDesktop("override", override)}
+      onReset={() => {
+        controller.settings.reset()
+        window.dispatchEvent(new Event(RESET_QUICK_PROMPT_SHORTCUT_EVENT))
+      }}
     />
   )
 }
@@ -372,12 +380,24 @@ function SettingsKeybindsView(props: {
   active: string | null
   onCapture: (id: string) => void
   hasOverrides: boolean
+  onDesktopOverride: (override: boolean) => void
   onReset: () => void
 }) {
   const language = useLanguage()
+  const platform = usePlatform()
   const [store, setStore] = createStore({ filter: "" })
   const filtered = createMemo(() => props.filtered(store.filter))
-  const hasResults = createMemo(() => props.groups.some((group) => (filtered().get(group)?.length ?? 0) > 0))
+  const desktopMatches = createMemo(() => {
+    if (!platform.getQuickPromptShortcut || !platform.setQuickPromptShortcut) return false
+    const query = store.filter.trim().toLowerCase()
+    if (!query) return true
+    return `${language.t("settings.shortcuts.group.desktop")} ${language.t("settings.shortcuts.global.title")} ${language.t("settings.shortcuts.global.description")}`
+      .toLowerCase()
+      .includes(query)
+  })
+  const hasResults = createMemo(
+    () => desktopMatches() || props.groups.some((group) => (filtered().get(group)?.length ?? 0) > 0),
+  )
 
   return (
     <>
@@ -418,6 +438,7 @@ function SettingsKeybindsView(props: {
       </div>
       <div class="settings-tab-body">
         <div class="settings-shortcuts flex flex-col gap-8">
+          <DesktopQuickPromptShortcut visible={desktopMatches()} onOverride={props.onDesktopOverride} />
           <For each={props.groups}>
             {(group) => (
               <Show when={(filtered().get(group) ?? []).length > 0}>
@@ -462,4 +483,136 @@ function SettingsKeybindsView(props: {
       </div>
     </>
   )
+}
+
+function DesktopQuickPromptShortcut(props: { visible: boolean; onOverride: (override: boolean) => void }) {
+  const platform = usePlatform()
+  const command = useCommand()
+  const language = useLanguage()
+  const [store, setStore] = createStore({ active: false, keybind: "", loading: true })
+  const available = () => platform.getQuickPromptShortcut && platform.setQuickPromptShortcut
+  const stop = () => {
+    setStore("active", false)
+    command.keybinds(true)
+  }
+  const save = (keybind: string) => {
+    if (!platform.setQuickPromptShortcut) return
+    setStore("loading", true)
+    void platform.setQuickPromptShortcut(keybind).then(
+      (registered) => {
+        setStore("loading", false)
+        if (!registered) {
+          showUnavailable(language)
+          return
+        }
+        setStore("keybind", keybind)
+        props.onOverride(keybind !== DEFAULT_QUICK_PROMPT_KEYBIND)
+        stop()
+      },
+      () => {
+        setStore("loading", false)
+        showUnavailable(language)
+      },
+    )
+  }
+
+  onMount(() => {
+    if (!platform.getQuickPromptShortcut) return
+    void platform
+      .getQuickPromptShortcut()
+      .then((keybind) => {
+        setStore({ keybind, loading: false })
+        props.onOverride(keybind !== DEFAULT_QUICK_PROMPT_KEYBIND)
+      })
+      .catch(() => setStore("loading", false))
+    const reset = () => save(DEFAULT_QUICK_PROMPT_KEYBIND)
+    window.addEventListener(RESET_QUICK_PROMPT_SHORTCUT_EVENT, reset)
+    onCleanup(() => window.removeEventListener(RESET_QUICK_PROMPT_SHORTCUT_EVENT, reset))
+  })
+  makeEventListener(
+    document,
+    "keydown",
+    (event) => {
+      if (!store.active || !platform.setQuickPromptShortcut) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      if (event.key === "Escape") {
+        stop()
+        return
+      }
+      if (store.loading) return
+      const clear =
+        (event.key === "Backspace" || event.key === "Delete") &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        !event.shiftKey
+      const next = clear ? "none" : recordKeybind(event)
+      if (!next) return
+      if (next !== "none" && !/^(?=.*(?:mod|ctrl|meta|alt)\+)/.test(next)) {
+        showToast({
+          title: language.t("settings.shortcuts.global.invalid.title"),
+          description: language.t("settings.shortcuts.global.invalid.description"),
+        })
+        return
+      }
+      save(next)
+    },
+    { capture: true },
+  )
+  onCleanup(() => {
+    if (store.active) command.keybinds(true)
+  })
+
+  return (
+    <Show when={available() && props.visible}>
+      <div class="settings-section">
+        <h3 class="settings-section-title">{language.t("settings.shortcuts.group.desktop")}</h3>
+        <SettingsList>
+          <div class="flex items-center justify-between gap-4 py-3">
+            <div class="flex min-w-0 flex-col gap-0.5">
+              <span>{language.t("settings.shortcuts.global.title")}</span>
+              <span class="text-11-regular text-v2-text-text-muted">
+                {language.t("settings.shortcuts.global.description")}
+              </span>
+            </div>
+            <button
+              type="button"
+              classList={{
+                "settings-keybind-button": true,
+                "settings-keybind-button--active": store.active,
+              }}
+              disabled={store.loading}
+              onClick={() => {
+                if (store.active) {
+                  stop()
+                  return
+                }
+                setStore("active", true)
+                command.keybinds(false)
+              }}
+            >
+              <Show
+                when={store.active}
+                fallback={
+                  store.keybind === "none"
+                    ? language.t("settings.shortcuts.unassigned")
+                    : formatKeybind(store.keybind, language.t)
+                }
+              >
+                {language.t("settings.shortcuts.pressKeys")}
+              </Show>
+            </button>
+          </div>
+        </SettingsList>
+      </div>
+    </Show>
+  )
+}
+
+function showUnavailable(language: Pick<LanguageContext, "t">) {
+  showToast({
+    title: language.t("settings.shortcuts.global.unavailable.title"),
+    description: language.t("settings.shortcuts.global.unavailable.description"),
+  })
 }

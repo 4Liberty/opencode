@@ -6,6 +6,7 @@ export const WindowGetFocused = Rpc.make("WindowGetFocused", { success: Schema.B
 export const WindowGetFullscreen = Rpc.make("WindowGetFullscreen", { success: Schema.Boolean })
 export const WindowSetFocus = Rpc.make("WindowSetFocus")
 export const WindowShow = Rpc.make("WindowShow")
+export const WindowHide = Rpc.make("WindowHide")
 export const WindowGetZoomFactor = Rpc.make("WindowGetZoomFactor", { success: Schema.Number })
 export const WindowSetZoomFactor = Rpc.make("WindowSetZoomFactor", {
   payload: { factor: Schema.Number },
@@ -30,6 +31,7 @@ export const WindowRpcs = RpcGroup.make(
   WindowGetFullscreen,
   WindowSetFocus,
   WindowShow,
+  WindowHide,
   WindowGetZoomFactor,
   WindowSetZoomFactor,
   WindowGetPinchZoomEnabled,
