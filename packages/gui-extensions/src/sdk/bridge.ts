@@ -7,6 +7,8 @@
 export interface BridgeLayout {
   readonly visible: boolean
   readonly bounds?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+  /** The window's content size the bounds were measured against. */
+  readonly viewport?: { readonly width: number; readonly height: number }
   readonly background?: readonly [number, number, number, number]
   readonly radius?: number
   /** The rounded card's hairline ring, which the corner masks would otherwise paint over. */
