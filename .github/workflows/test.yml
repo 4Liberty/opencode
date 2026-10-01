@@ -167,6 +167,11 @@ jobs:
           bun run script/build-node.ts --single --skip-install --outdir=dist/node
           bun run script/service-smoke.ts --node
 
+      - name: Check generated OpenAPI document
+        if: runner.os == 'Linux'
+        working-directory: packages/protocol
+        run: bun run check:generated
+
       - name: Check generated client
         if: runner.os == 'Linux'
         working-directory: packages/client
