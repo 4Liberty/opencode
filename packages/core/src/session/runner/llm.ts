@@ -30,7 +30,7 @@ import { SessionRunnerRetry } from "./retry.js"
 import { SessionStep } from "./step.js"
 import { ToolOutput } from "../../tool-output.js"
 import { Plugin } from "../../plugin.js"
-import { MAX_STEPS_PROMPT } from "./max-steps.js"
+import MAX_STEPS_PROMPT from "./prompt/max-steps.txt"
 
 const CONTINUE_AFTER_INCOMPLETE_STREAM =
   "The previous response was interrupted. Continue from where you left off without repeating completed content."

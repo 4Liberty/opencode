@@ -19,7 +19,6 @@ import { SessionMessage } from "@opencode/core/session/message"
 import { Money } from "@opencode/schema/money"
 import { SessionProjector } from "@opencode/core/session/projector"
 import { SessionExecution } from "@opencode/core/session/execution"
-import { fromRow } from "@opencode/core/session/info"
 import { SessionInbox } from "@opencode/core/session/inbox"
 import { SessionStore } from "@opencode/core/session/store"
 import { Shell } from "@opencode/schema/shell"
@@ -115,7 +114,7 @@ describe("SessionProjector", () => {
       yield* db.run(sql`update session_v2 set revert = ${legacy} where id = ${sessionID}`)
       const stored = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get()
       if (!stored) return yield* Effect.die("Session row missing")
-      const storedRevert = fromRow(stored).revert
+      const storedRevert = SessionStore.fromRow(stored).revert
       expect(String(storedRevert?.messageID)).toBe("msg_boundary")
       expect(String(storedRevert?.snapshot)).toBe("tree")
       expect(storedRevert?.files).toEqual([

@@ -94,7 +94,11 @@ import { ModelsDevPlugin } from "./models-dev.js"
 import { McpCodeModeDefaultsPlugin } from "./mcp-codemode-defaults.js"
 import { ProviderPlugins } from "./provider.js"
 import { OpencodePlugin } from "./provider/opencode.js"
-import { WebSearchPlugins } from "./websearch/index.js"
+import { WebSearchExa } from "./websearch/exa.js"
+import { WebSearchFirecrawl } from "./websearch/firecrawl.js"
+import { WebSearchParallel } from "./websearch/parallel.js"
+import { WebSearchTavily } from "./websearch/tavily.js"
+import { WebSearchTinyFish } from "./websearch/tinyfish.js"
 import { SkillPlugin } from "./skill.js"
 import { VcsHgPlugin } from "./vcs/hg.js"
 import { ToolInputRepairPlugin } from "./tool-input-repair.js"
@@ -224,7 +228,11 @@ const pre = [
   VcsHgPlugin.Plugin,
   ModelsDevPlugin,
   ...ProviderPlugins,
-  ...WebSearchPlugins,
+  WebSearchExa.Plugin,
+  WebSearchFirecrawl.Plugin,
+  WebSearchParallel.Plugin,
+  WebSearchTavily.Plugin,
+  WebSearchTinyFish.Plugin,
   PatchTool.Plugin,
   // Render model prompts after the patch plugin selects the available editing tools.
   ...OptimizePlugin.Plugins,

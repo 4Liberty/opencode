@@ -11,7 +11,6 @@ import { fileURLToPath, pathToFileURL } from "url"
 import { Config } from "../../config.js"
 import { Watcher } from "../../filesystem/watcher.js"
 import { Location } from "../../location.js"
-import { PluginSourceDirectory } from "../../plugin/source-directory.js"
 
 export type Operation =
   | {
@@ -119,6 +118,8 @@ function parse(input: ConfigPlugin.Plugin): Operation {
   return { type: "remove", target: input.slice(1) }
 }
 
+const sourceDirectories = ["plugin", "plugins"] as const
+
 const scan = Effect.fn("ConfigPluginSource.scan")(function* (
   fs: FSUtil.Interface,
   location: Location.Interface,
@@ -127,7 +128,7 @@ const scan = Effect.fn("ConfigPluginSource.scan")(function* (
   const discovered = yield* Effect.forEach(
     entries.filter((entry): entry is Directory => entry.type === "directory"),
     (entry) =>
-      PluginSourceDirectory.discover(fs, entry.path).pipe(
+      discover(fs, entry.path).pipe(
         Effect.map((targets) => targets.map((target): Operation => ({ type: "add", target, options: {} }))),
       ),
   ).pipe(Effect.map((items) => items.flat()))
@@ -188,10 +189,33 @@ const scan = Effect.fn("ConfigPluginSource.scan")(function* (
   ).pipe(Effect.map((operations) => operations.flat()))
 })
 
+const discover = Effect.fn("ConfigPluginSource.discover")(function* (fs: FSUtil.Interface, directory: string) {
+  const children = (yield* Effect.forEach(sourceDirectories, (source) =>
+    fs.readDirectoryEntries(path.join(directory, source)).pipe(
+      Effect.orElseSucceed(() => []),
+      Effect.map((entries) => entries.map((entry) => ({ ...entry, target: path.join(directory, source, entry.name) }))),
+    ),
+  ))
+    .flat()
+    .sort((a, b) => (a.target < b.target ? -1 : a.target > b.target ? 1 : 0))
+  const targets = yield* Effect.forEach(children, (entry) =>
+    Effect.gen(function* () {
+      const source = entry.target.endsWith(".ts") || entry.target.endsWith(".js")
+      if (entry.type === "file" && source) return Option.some(entry.target)
+      if (entry.type === "directory") return Option.some(entry.target)
+      if (entry.type !== "symlink") return Option.none<string>()
+      if (source && (yield* fs.isFile(entry.target))) return Option.some(entry.target)
+      if (yield* fs.isDir(entry.target)) return Option.some(entry.target)
+      return Option.none<string>()
+    }),
+  )
+  return targets.flatMap(Option.toArray)
+})
+
 function isPluginSource(entries: readonly Entry[], file: string) {
   return entries.some(
     (entry) =>
       entry.type === "directory" &&
-      PluginSourceDirectory.names.some((directory) => FSUtil.contains(path.join(entry.path, directory), file)),
+      sourceDirectories.some((directory) => FSUtil.contains(path.join(entry.path, directory), file)),
   )
 }

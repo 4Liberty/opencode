@@ -1,7 +1,13 @@
 export * as SessionStore from "./store.js"
 
 import { and, asc, desc, eq, gt, isNotNull, isNull, like, lt, notInArray, or, sql, type SQL } from "drizzle-orm"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, DateTime, Effect, Layer, Schema } from "effect"
+import { Agent } from "@opencode/schema/agent"
+import { Location } from "@opencode/schema/location"
+import { Model } from "@opencode/schema/model"
+import { Money } from "@opencode/schema/money"
+import { Provider } from "@opencode/schema/provider"
+import { PersistedRevert } from "@opencode/schema/session-revert"
 import { Project } from "@opencode/schema/project"
 import { Workspace } from "@opencode/schema/workspace"
 import { AbsolutePath, PositiveInt, RelativePath } from "@opencode/schema/schema"
@@ -12,7 +18,6 @@ import { MessageDecodeError } from "./error.js"
 import { SessionMessage } from "./message.js"
 import { Session } from "@opencode/schema/session"
 import { SessionMessageTable, SessionTable } from "./sql.js"
-import { fromRow } from "./info.js"
 
 const ListInputBase = {
   workspaceID: Workspace.ID.pipe(Schema.optional),
@@ -254,3 +259,55 @@ const layer = Layer.effect(
 )
 
 export const node = makeGlobalNode({ service: Service, layer, deps: [Database.node] })
+
+const decodeRevert = Schema.decodeUnknownSync(PersistedRevert)
+
+export function fromRow(row: typeof SessionTable.$inferSelect): Session.Info {
+  return Session.Info.make({
+    id: Session.ID.make(row.id),
+    projectID: Project.ID.make(row.project_id),
+    title: row.title ?? undefined,
+    parentID: row.parent_id ? Session.ID.make(row.parent_id) : undefined,
+    fork:
+      row.fork_session_id && row.fork_boundary
+        ? {
+            sessionID: Session.ID.make(row.fork_session_id),
+            boundary: row.fork_boundary,
+          }
+        : undefined,
+    agent: row.agent ? Agent.ID.make(row.agent) : undefined,
+    model: row.model
+      ? {
+          id: Model.ID.make(row.model.id),
+          providerID: Provider.ID.make(row.model.providerID),
+          variant: Model.VariantID.make(row.model.variant ?? "default"),
+        }
+      : undefined,
+    cost: Money.USD.make(row.cost),
+    tokens: {
+      input: row.tokens_input,
+      output: row.tokens_output,
+      reasoning: row.tokens_reasoning,
+      cache: {
+        read: row.tokens_cache_read,
+        write: row.tokens_cache_write,
+      },
+    },
+    location: Location.Ref.make({
+      directory: AbsolutePath.make(row.directory),
+      workspaceID: row.workspace_id ? Workspace.ID.make(row.workspace_id) : undefined,
+    }),
+    subpath: row.path ? RelativePath.make(row.path) : undefined,
+    metadata: row.metadata ?? undefined,
+    permissions: row.permission ?? undefined,
+    revert: row.revert ? decodeRevert(row.revert) : undefined,
+    outcome: row.idle_outcome ?? undefined,
+    time: {
+      created: DateTime.makeUnsafe(row.time_created),
+      updated: DateTime.makeUnsafe(row.time_updated),
+      idle: row.time_idle === null ? undefined : DateTime.makeUnsafe(row.time_idle),
+      viewed: row.time_viewed === null ? undefined : DateTime.makeUnsafe(row.time_viewed),
+      archived: row.time_archived ? DateTime.makeUnsafe(row.time_archived) : undefined,
+    },
+  })
+}
