@@ -1,11 +1,11 @@
 import { describe, expect } from "bun:test"
 import { and, eq } from "drizzle-orm"
 import { Cause, Context, DateTime, Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect"
+import { LLMClient } from "@opencode/ai"
 import { Agent } from "@opencode/schema/agent"
 import { Event } from "@opencode/schema/event"
 import { Model } from "@opencode/schema/model"
 import { Money } from "@opencode/schema/money"
-import { Project } from "@opencode/schema/project"
 import { Provider } from "@opencode/schema/provider"
 import { ID, Info, Output } from "@opencode/schema/shell"
 import { LayerNode } from "@opencode/util/effect/layer-node"
@@ -13,14 +13,19 @@ import { FSUtil } from "@opencode/util/fs-util"
 import { Global } from "@opencode/util/global"
 import { Bus } from "../src/bus.js"
 import { Database } from "../src/database/database.js"
+import { AppNodeBuilder } from "../src/effect/app-node-builder.js"
+import { llmClient } from "../src/effect/app-node-platform.js"
 import { EventTable } from "../src/event/sql.js"
 import { Image } from "../src/image.js"
 import { Instance } from "../src/instance/service.js"
+import { Job } from "../src/job.js"
 import { Location } from "../src/location.js"
 import { Plugin } from "../src/plugin.js"
 import { PluginHooks } from "../src/plugin/hooks.js"
+import { Project } from "../src/project.js"
 import { ProjectTable } from "../src/project/sql.js"
 import { AbsolutePath, RelativePath } from "../src/schema.js"
+import { Session } from "../src/session.js"
 import { InboxConflictError, NotFoundError, PromptConflictError } from "../src/session/error.js"
 import { SessionEvent } from "../src/session/event.js"
 import { SessionExecution } from "../src/session/execution.js"
@@ -31,7 +36,8 @@ import { SessionProjector } from "../src/session/projector.js"
 import { SessionRevert } from "../src/session/revert.js"
 import { SessionRunCoordinator } from "../src/session/run-coordinator.js"
 import { SessionSchema } from "../src/session/schema.js"
-import { Session } from "../src/session/session.js"
+import { SessionEnvironment } from "../src/session/environment.js"
+import { SessionMove } from "../src/session/move.js"
 import { SessionTable } from "../src/session/sql.js"
 import { SessionStore } from "../src/session/store.js"
 import { Shell } from "../src/shell.js"
@@ -148,28 +154,33 @@ const setup = Effect.fnUntraced(function* (options?: {
     // This fixture supplies only the instance services exercised by Session.
     provide: (session) => Effect.provide(servicesFor(session.location) as Layer.Layer<Instance.Services>),
   })
-  const sessions = yield* Session.make().pipe(
-    Effect.satisfiesServicesType<
-      | Bus.Service
-      | Database.Service
-      | FSUtil.Service
-      | SessionStore.Service
-      | Instance.Service
-      | SessionExecution.Service
-      | SessionInbox.Service
-      | Scope.Scope
-    >(),
-    Effect.provideService(Instance.Service, instances),
-    Effect.provideService(SessionExecution.Service, options?.execution ?? execution),
+  const context = yield* Layer.build(
+    AppNodeBuilder.build(Session.node, [
+      Database.node.replace(Layer.succeed(Database.Service, database)),
+      Bus.node.replace(Layer.succeed(Bus.Service, bus)),
+      SessionStore.node.replace(Layer.succeed(SessionStore.Service, store)),
+      SessionInbox.node.replace(Layer.succeed(SessionInbox.Service, yield* SessionInbox.Service)),
+      FSUtil.node.replace(Layer.succeed(FSUtil.Service, yield* FSUtil.Service)),
+      SessionProjector.node.replace(Layer.empty),
+      Instance.node.replace(Layer.succeed(Instance.Service, instances)),
+      SessionExecution.node.replace(Layer.succeed(SessionExecution.Service, options?.execution ?? execution)),
+      // Session uses these only for collection, move, and host-routing operations this suite does not exercise.
+      Project.node.replace(Layer.mock(Project.Service, {})),
+      Job.node.replace(Layer.mock(Job.Service, {})),
+      SessionEnvironment.node.replace(Layer.mock(SessionEnvironment.Service, {})),
+      SessionMove.node.replace(Layer.mock(SessionMove.Service, {})),
+      llmClient.replace(Layer.mock(LLMClient.Service, {})),
+    ]),
   )
+  const sessions = Context.get(context, Session.Service)
   return { sessions, instances, hooks, locations, activationWaits, resumes, wakes, db: database.db, bus, store }
 })
 
-describe("Session-owned handles", () => {
+describe("Session-owned operations", () => {
   it.live("owns state changes and message reads without caller services or Location acquisition", () =>
     Effect.gen(function* () {
       const fixture = yield* setup()
-      const handle = fixture.sessions.forSession(sessionID)
+      const sessions = fixture.sessions
       const model = { id: Model.ID.make("test-model"), providerID: Provider.ID.make("test-provider") }
       const messageID = SessionMessage.ID.create()
       yield* fixture.bus.publish(SessionEvent.Step.Started, {
@@ -192,23 +203,21 @@ describe("Session-owned handles", () => {
         .where(eq(SessionTable.id, sessionID))
         .run()
         .pipe(Effect.orDie)
-      const { rename, switchAgent, switchModel, view, message } = handle
-
       yield* Effect.gen(function* () {
-        yield* rename({ title: "Renamed" })
-        yield* switchAgent({ agent: Agent.ID.make("review") })
-        yield* switchModel({ model })
-        yield* switchModel({ model })
-        yield* view({ idle: 0 })
-        yield* view({ idle: 0 })
-        expect(yield* message(messageID)).toMatchObject({ type: "assistant", content: [] })
+        yield* sessions.rename({ sessionID, title: "Renamed" })
+        yield* sessions.switchAgent({ sessionID, agent: Agent.ID.make("review") })
+        yield* sessions.switchModel({ sessionID, model })
+        yield* sessions.switchModel({ sessionID, model })
+        yield* sessions.view({ sessionID, idle: 0 })
+        yield* sessions.view({ sessionID, idle: 0 })
+        expect(yield* sessions.message({ sessionID, messageID })).toMatchObject({ type: "assistant", content: [] })
       }).pipe(Effect.satisfiesServicesType<never>(), Effect.setContext(Context.empty()))
 
-      const session = yield* handle.get()
+      const session = yield* sessions.get(sessionID)
       expect(session).toMatchObject({ title: "Renamed", agent: "review", model })
       expect(session.time.viewed && DateTime.toEpochMillis(session.time.viewed)).toBe(0)
-      expect(yield* fixture.sessions.forSession(otherID).message(messageID)).toBeUndefined()
-      expect((yield* fixture.sessions.forSession(otherID).get()).title).toBe("Owned session")
+      expect(yield* sessions.message({ sessionID: otherID, messageID })).toBeUndefined()
+      expect((yield* sessions.get(otherID)).title).toBe("Owned session")
       expect(fixture.locations).toEqual([])
       expect(fixture.wakes).toEqual([])
       const events = yield* fixture.db
@@ -227,11 +236,9 @@ describe("Session-owned handles", () => {
   it.live("acquires Location only for new prompt preparation and persists before waking", () =>
     Effect.gen(function* () {
       const fixture = yield* setup()
-      const handle = fixture.sessions.forSession(sessionID)
-      const { get, prompt } = handle
-      expect(handle.id).toBe(sessionID)
-      expect((yield* get().pipe(Effect.satisfiesServicesType<never>())).location).toEqual(source)
-      const synthetic = yield* handle.synthetic({ text: "Background result", resume: false })
+      const sessions = fixture.sessions
+      expect((yield* sessions.get(sessionID).pipe(Effect.satisfiesServicesType<never>())).location).toEqual(source)
+      const synthetic = yield* sessions.synthetic({ sessionID, text: "Background result", resume: false })
       expect(fixture.locations).toEqual([])
       expect(fixture.wakes).toEqual([])
 
@@ -243,12 +250,14 @@ describe("Session-owned handles", () => {
           event.prompt.text += " prepared"
         }),
       )
-      const first = yield* prompt({
+      const first = yield* sessions.prompt({
+        sessionID,
         id: SessionMessage.ID.make("msg_owned_prepared"),
         text: "Original",
         files: [{ uri: new URL("./session-owned.test.ts", import.meta.url).href }],
       })
-      const retried = yield* fixture.sessions.forSession(sessionID).prompt({
+      const retried = yield* sessions.prompt({
+        sessionID,
         id: first.id,
         text: "Ignored retry",
         files: [{ uri: "file:///missing-owned-retry" }],
@@ -273,26 +282,34 @@ describe("Session-owned handles", () => {
     }),
   )
 
-  it.live("keeps the first admission across handles, including delivered retries and identity conflicts", () =>
+  it.live("keeps the first admission, including delivered retries and identity conflicts", () =>
     Effect.gen(function* () {
       const fixture = yield* setup()
-      const first = fixture.sessions.forSession(sessionID)
-      const second = fixture.sessions.forSession(sessionID)
-      const other = fixture.sessions.forSession(otherID)
-      const prompt = yield* first.prompt({ text: "Keep this", metadata: { source: "first" }, resume: false })
-      const retry = { id: prompt.id, text: "Ignore this", metadata: { source: "retry" }, resume: false }
-      expect(yield* second.prompt({ ...retry, delivery: "queue" })).toEqual(prompt)
-      const conflict = yield* other.prompt(retry).pipe(Effect.flip)
+      const sessions = fixture.sessions
+      const prompt = yield* sessions.prompt({
+        sessionID,
+        text: "Keep this",
+        metadata: { source: "first" },
+        resume: false,
+      })
+      const retry = { sessionID, id: prompt.id, text: "Ignore this", metadata: { source: "retry" }, resume: false }
+      expect(yield* sessions.prompt({ ...retry, delivery: "queue" })).toEqual(prompt)
+      const conflict = yield* sessions.prompt({ ...retry, sessionID: otherID }).pipe(Effect.flip)
       expect(conflict).toBeInstanceOf(PromptConflictError)
       expect(conflict).toMatchObject({ _tag: "Session.PromptConflictError", sessionID: otherID, messageID: prompt.id })
-      expect(yield* second.synthetic(retry).pipe(Effect.flip)).toMatchObject({
+      expect(yield* sessions.synthetic(retry).pipe(Effect.flip)).toMatchObject({
         _tag: "Session.SyntheticConflictError",
         sessionID,
         inputID: prompt.id,
       })
-      const synthetic = yield* first.synthetic({ text: "Original completion", description: "Job", resume: false })
-      expect(yield* second.synthetic({ ...retry, id: synthetic.id })).toEqual(synthetic)
-      expect(yield* first.inbox()).toEqual([prompt, synthetic])
+      const synthetic = yield* sessions.synthetic({
+        sessionID,
+        text: "Original completion",
+        description: "Job",
+        resume: false,
+      })
+      expect(yield* sessions.synthetic({ ...retry, id: synthetic.id })).toEqual(synthetic)
+      expect(yield* sessions.inbox(sessionID)).toEqual([prompt, synthetic])
 
       yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")
       // Delivered identity must be recoverable from the message, without retained enqueue history.
@@ -306,21 +323,23 @@ describe("Session-owned handles", () => {
         )
         .run()
         .pipe(Effect.orDie)
-      expect((yield* second.prompt({ ...retry, files: [{ uri: "file:///missing-owned-retry" }] })).payload).toEqual(
+      expect((yield* sessions.prompt({ ...retry, files: [{ uri: "file:///missing-owned-retry" }] })).payload).toEqual(
         prompt.payload,
       )
-      expect((yield* second.synthetic({ ...retry, id: synthetic.id })).payload).toEqual(synthetic.payload)
-      expect(yield* other.synthetic({ ...retry, id: synthetic.id }).pipe(Effect.flip)).toMatchObject({
+      expect((yield* sessions.synthetic({ ...retry, id: synthetic.id })).payload).toEqual(synthetic.payload)
+      expect(
+        yield* sessions.synthetic({ ...retry, sessionID: otherID, id: synthetic.id }).pipe(Effect.flip),
+      ).toMatchObject({
         _tag: "Session.SyntheticConflictError",
         sessionID: otherID,
         inputID: synthetic.id,
       })
-      expect(yield* second.prompt({ ...retry, id: synthetic.id }).pipe(Effect.flip)).toMatchObject({
+      expect(yield* sessions.prompt({ ...retry, id: synthetic.id }).pipe(Effect.flip)).toMatchObject({
         _tag: "Session.PromptConflictError",
         sessionID,
         messageID: synthetic.id,
       })
-      expect(yield* second.inbox()).toEqual([])
+      expect(yield* sessions.inbox(sessionID)).toEqual([])
       expect(yield* fixture.store.context(sessionID)).toMatchObject([
         { id: prompt.id, text: "Keep this", metadata: { source: "first" } },
         { id: synthetic.id, text: "Original completion", description: "Job" },
@@ -329,13 +348,12 @@ describe("Session-owned handles", () => {
     }),
   )
 
-  it.live("reads fresh placement through an existing handle after a projected move", () =>
+  it.live("reads fresh placement through effects constructed before a projected move", () =>
     Effect.gen(function* () {
       const fixture = yield* setup()
-      const handle = fixture.sessions.forSession(sessionID)
-      yield* handle.prompt({ text: "Before move", resume: false })
-      const get = handle.get()
-      const prompt = handle.prompt({ text: "After move", resume: false })
+      yield* fixture.sessions.prompt({ sessionID, text: "Before move", resume: false })
+      const get = fixture.sessions.get(sessionID)
+      const prompt = fixture.sessions.prompt({ sessionID, text: "After move", resume: false })
       const destination = Location.Ref.make({ directory: AbsolutePath.make("/project/moved") })
 
       yield* fixture.bus.publish(SessionEvent.Moved, {
@@ -350,18 +368,17 @@ describe("Session-owned handles", () => {
       yield* prompt
       expect(fixture.locations).toEqual([source, destination])
       expect(fixture.activationWaits).toEqual([source, destination])
-      expect((yield* fixture.sessions.forSession(otherID).get()).location).toEqual(source)
+      expect((yield* fixture.sessions.get(otherID)).location).toEqual(source)
     }),
   )
 
-  it.live("activates skills through detached handles using fresh placement and ambient publication context", () =>
+  it.live("activates skills through detached effects using fresh placement and ambient publication context", () =>
     Effect.gen(function* () {
       const fixture = yield* setup({
         skills: (ref) =>
           Layer.mock(Skill.Service, { get: () => Effect.succeed({ ...skillInfo, content: ref.directory }) }),
       })
-      const handle = fixture.sessions.forSession(sessionID)
-      const { skill } = handle
+      const sessions = fixture.sessions
       const events: Event.Payload[] = []
       yield* fixture.bus.listen((event) =>
         Effect.sync(() => {
@@ -369,12 +386,11 @@ describe("Session-owned handles", () => {
         }),
       )
       const initial = SessionMessage.ID.make("msg_owned_skill_initial")
-      yield* skill({ messageID: initial, skill: skillInfo.id, resume: false }).pipe(
-        Effect.satisfiesServicesType<never>(),
-        Effect.setContext(Context.empty()),
-      )
+      yield* sessions
+        .skill({ sessionID, messageID: initial, skill: skillInfo.id, resume: false })
+        .pipe(Effect.satisfiesServicesType<never>(), Effect.setContext(Context.empty()))
       const moved = SessionMessage.ID.make("msg_owned_skill_moved")
-      const activation = skill({ messageID: moved, skill: skillInfo.id, resume: false })
+      const activation = sessions.skill({ sessionID, messageID: moved, skill: skillInfo.id, resume: false })
       const destination = Location.Ref.make({ directory: AbsolutePath.make("/project/moved") })
       yield* fixture.bus.publish(SessionEvent.Moved, {
         sessionID,
@@ -384,13 +400,19 @@ describe("Session-owned handles", () => {
       })
 
       yield* activation.pipe(Effect.satisfiesServicesType<never>(), Effect.setContext(Context.empty()))
-      yield* skill({ skill: skillInfo.id, resume: false }).pipe(
-        Effect.provideService(Location.Service, location(source)),
-      )
+      yield* sessions
+        .skill({ sessionID, skill: skillInfo.id, resume: false })
+        .pipe(Effect.provideService(Location.Service, location(source)))
 
       expect(fixture.locations).toEqual([source, destination, destination])
-      expect(yield* handle.message(initial)).toMatchObject({ type: "skill", text: source.directory })
-      expect(yield* handle.message(moved)).toMatchObject({ type: "skill", text: destination.directory })
+      expect(yield* sessions.message({ sessionID, messageID: initial })).toMatchObject({
+        type: "skill",
+        text: source.directory,
+      })
+      expect(yield* sessions.message({ sessionID, messageID: moved })).toMatchObject({
+        type: "skill",
+        text: destination.directory,
+      })
       expect(
         events.filter((event) => event.type === SessionEvent.Skill.Activated.type).map((event) => event.location),
       ).toEqual([undefined, undefined, source])
@@ -411,22 +433,21 @@ describe("Session-owned handles", () => {
       )
       const missingID = SessionSchema.ID.make("ses_missing_skill")
       expect(
-        yield* fixture.sessions.forSession(missingID).skill({ skill: skillInfo.id }).pipe(Effect.flip),
+        yield* fixture.sessions.skill({ sessionID: missingID, skill: skillInfo.id }).pipe(Effect.flip),
       ).toMatchObject({ _tag: "Session.NotFoundError", sessionID: missingID })
       expect(fixture.locations).toEqual([])
-      const handle = fixture.sessions.forSession(sessionID)
-      const before = yield* handle.get()
+      const before = yield* fixture.sessions.get(sessionID)
       const missing = Skill.ID.make("missing")
 
-      expect(yield* handle.skill({ skill: missing }).pipe(Effect.flip)).toMatchObject({
+      expect(yield* fixture.sessions.skill({ sessionID, skill: missing }).pipe(Effect.flip)).toMatchObject({
         _tag: "Session.SkillNotFoundError",
         skill: missing,
       })
 
       expect(fixture.locations).toEqual([source])
       expect(events).toEqual([])
-      expect(yield* handle.get()).toEqual(before)
-      expect(yield* handle.inbox()).toEqual([])
+      expect(yield* fixture.sessions.get(sessionID)).toEqual(before)
+      expect(yield* fixture.sessions.inbox(sessionID)).toEqual([])
       expect(yield* fixture.store.context(sessionID)).toEqual([])
       expect(fixture.activationWaits).toEqual([source])
       expect(fixture.resumes).toEqual([])
@@ -466,16 +487,26 @@ describe("Session-owned handles", () => {
           if (event.type === SessionEvent.Skill.Activated.type) calls.push(`published:${event.id}`)
         }),
       )
-      const { skill } = fixture.sessions.forSession(sessionID)
+      const sessions = fixture.sessions
 
-      yield* skill({ messageID: SessionMessage.ID.make("msg_skill_no_resume"), skill: skillInfo.id, resume: false })
+      yield* sessions.skill({
+        sessionID,
+        messageID: SessionMessage.ID.make("msg_skill_no_resume"),
+        skill: skillInfo.id,
+        resume: false,
+      })
       expect(calls).toEqual(["published:evt_skill_no_resume"])
       yield* Effect.forEach(
         [
-          { messageID: SessionMessage.ID.make("msg_skill_default_resume"), skill: skillInfo.id },
-          { messageID: SessionMessage.ID.make("msg_skill_explicit_resume"), skill: skillInfo.id, resume: true },
+          { sessionID, messageID: SessionMessage.ID.make("msg_skill_default_resume"), skill: skillInfo.id },
+          {
+            sessionID,
+            messageID: SessionMessage.ID.make("msg_skill_explicit_resume"),
+            skill: skillInfo.id,
+            resume: true,
+          },
         ],
-        (input) => skill(input).pipe(Effect.scoped, Effect.forkScoped, Effect.flatMap(Fiber.join)),
+        (input) => sessions.skill(input).pipe(Effect.scoped, Effect.forkScoped, Effect.flatMap(Fiber.join)),
       )
 
       expect(calls).toEqual([
@@ -488,11 +519,11 @@ describe("Session-owned handles", () => {
       expect(stopped).toEqual([])
       yield* Scope.close(host, Exit.void)
       expect(stopped).toEqual([sessionID, sessionID])
-      expect(yield* fixture.sessions.forSession(sessionID).inbox()).toEqual([])
+      expect(yield* sessions.inbox(sessionID)).toEqual([])
     }),
   )
 
-  it.live("keeps prompt wakes independent of shell work across handles", () =>
+  it.live("keeps prompt wakes independent of shell work", () =>
     Effect.gen(function* () {
       const blocked = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
@@ -530,15 +561,14 @@ describe("Session-owned handles", () => {
         }),
       })
       const shell = yield* fixture.sessions
-        .forSession(sessionID)
-        .shell({ id: SessionMessage.ID.make("msg_owned_shell"), command: started.command })
+        .shell({ sessionID, id: SessionMessage.ID.make("msg_owned_shell"), command: started.command })
         .pipe(Effect.forkScoped)
       yield* Deferred.await(blocked)
 
-      const admitted = yield* fixture.sessions.forSession(sessionID).prompt({ text: "Admit while the shell runs" })
+      const admitted = yield* fixture.sessions.prompt({ sessionID, text: "Admit while the shell runs" })
       expect(yield* SessionInbox.find(fixture.db, admitted.id)).toEqual(admitted)
       expect(fixture.wakes).toEqual([{ sessionID, pending: [admitted.id], enqueued: 1 }])
-      const other = yield* fixture.sessions.forSession(otherID).prompt({ text: "Independent Session" })
+      const other = yield* fixture.sessions.prompt({ sessionID: otherID, text: "Independent Session" })
       expect(fixture.wakes).toEqual([
         { sessionID, pending: [admitted.id], enqueued: 1 },
         { sessionID: otherID, pending: [other.id], enqueued: 1 },
@@ -553,56 +583,55 @@ describe("Session-owned handles", () => {
       expect(yield* fixture.store.context(sessionID)).toMatchObject([
         { type: "shell", shellID: started.id, status: "exited", output: { output: "owned" } },
       ])
-      expect(yield* fixture.sessions.forSession(sessionID).inbox()).toMatchObject([
+      expect(yield* fixture.sessions.inbox(sessionID)).toMatchObject([
         { id: admitted.id, type: "user" },
         { type: "synthetic", payload: { metadata: { source: "shell", shellID: started.id, state: "completed" } } },
       ])
     }),
   )
 
-  it.live("mutates only this handle's pending inbox and preserves public conflict tags", () =>
+  it.live("mutates only the addressed Session's pending inbox and preserves public conflict tags", () =>
     Effect.gen(function* () {
       const fixture = yield* setup()
-      const handle = fixture.sessions.forSession(sessionID)
-      const second = fixture.sessions.forSession(sessionID)
-      const queued = yield* handle.synthetic({ text: "Queued", delivery: "queue", resume: false })
-      const steer = yield* handle.prompt({ text: "Steer", resume: false })
-      const compact = yield* handle.compact({ delivery: "queue" })
+      const sessions = fixture.sessions
+      const queued = yield* sessions.synthetic({ sessionID, text: "Queued", delivery: "queue", resume: false })
+      const steer = yield* sessions.prompt({ sessionID, text: "Steer", resume: false })
+      const compact = yield* sessions.compact({ sessionID, delivery: "queue" })
 
-      yield* second.steerInbox(queued.id)
-      yield* second.queueInbox(steer.id)
-      expect(yield* handle.inbox()).toMatchObject([
+      yield* sessions.steerInbox({ sessionID, inboxID: queued.id })
+      yield* sessions.queueInbox({ sessionID, inboxID: steer.id })
+      expect(yield* sessions.inbox(sessionID)).toMatchObject([
         { id: queued.id, delivery: "steer" },
         { id: steer.id, delivery: "queue" },
         { id: compact.id, type: "compaction", delivery: "queue" },
       ])
       expect(fixture.wakes).toHaveLength(2)
-      expect(yield* fixture.sessions.forSession(otherID).cancelInbox(queued.id).pipe(Effect.flip)).toMatchObject({
+      expect(yield* sessions.cancelInbox({ sessionID: otherID, inboxID: queued.id }).pipe(Effect.flip)).toMatchObject({
         _tag: "Session.InboxConflictError",
         sessionID: otherID,
         inboxID: queued.id,
       })
-      yield* second.cancelInbox(compact.id)
-      const cancelled = yield* handle.cancelInbox(compact.id).pipe(Effect.flip)
+      yield* sessions.cancelInbox({ sessionID, inboxID: compact.id })
+      const cancelled = yield* sessions.cancelInbox({ sessionID, inboxID: compact.id }).pipe(Effect.flip)
       expect(cancelled).toBeInstanceOf(InboxConflictError)
       expect(cancelled).toMatchObject({ _tag: "Session.InboxConflictError", sessionID, inboxID: compact.id })
-      expect(yield* handle.compact({ id: steer.id }).pipe(Effect.flip)).toMatchObject({
+      expect(yield* sessions.compact({ sessionID, id: steer.id }).pipe(Effect.flip)).toMatchObject({
         _tag: "Session.CompactionConflictError",
         sessionID,
         inputID: steer.id,
       })
 
       expect(yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")).toBe(1)
-      expect(yield* second.queueInbox(queued.id).pipe(Effect.flip)).toMatchObject({
+      expect(yield* sessions.queueInbox({ sessionID, inboxID: queued.id }).pipe(Effect.flip)).toMatchObject({
         _tag: "Session.InboxConflictError",
         sessionID,
         inboxID: queued.id,
       })
-      expect(yield* handle.inbox()).toMatchObject([{ id: steer.id, delivery: "queue" }])
-      yield* second.cancelInbox(steer.id)
-      expect(yield* handle.inbox()).toEqual([])
+      expect(yield* sessions.inbox(sessionID)).toMatchObject([{ id: steer.id, delivery: "queue" }])
+      yield* sessions.cancelInbox({ sessionID, inboxID: steer.id })
+      expect(yield* sessions.inbox(sessionID)).toEqual([])
       const missingID = SessionSchema.ID.make("ses_owned_missing")
-      const missing = yield* fixture.sessions.forSession(missingID).inbox().pipe(Effect.flip)
+      const missing = yield* sessions.inbox(missingID).pipe(Effect.flip)
       expect(missing).toBeInstanceOf(NotFoundError)
       expect(missing).toMatchObject({ _tag: "Session.NotFoundError", sessionID: missingID })
       expect(fixture.locations).toEqual([source])
@@ -642,9 +671,9 @@ describe("Session-owned handles", () => {
             ),
         }),
       })
-      const first = yield* fixture.sessions.forSession(sessionID).resume().pipe(Effect.forkScoped)
+      const first = yield* fixture.sessions.resume(sessionID).pipe(Effect.forkScoped)
       yield* Deferred.await(started)
-      const second = yield* fixture.sessions.forSession(sessionID).resume().pipe(Effect.forkScoped)
+      const second = yield* fixture.sessions.resume(sessionID).pipe(Effect.forkScoped)
       yield* Deferred.await(joining)
       yield* Fiber.interrupt(second)
 
@@ -654,11 +683,11 @@ describe("Session-owned handles", () => {
       expect(drains).toEqual([sessionID])
       yield* Deferred.succeed(release, undefined)
       yield* Fiber.join(first)
-      yield* fixture.sessions.forSession(sessionID).wait()
+      yield* fixture.sessions.wait(sessionID)
       expect(drains).toEqual([sessionID])
       expect(yield* coordinator.active).toEqual(new Set())
-      expect(yield* fixture.sessions.forSession(sessionID).interrupt({ resume: true })).toBe(false)
-      expect(yield* fixture.sessions.forSession(sessionID).interrupt()).toBe(false)
+      expect(yield* fixture.sessions.interrupt(sessionID, { resume: true })).toBe(false)
+      expect(yield* fixture.sessions.interrupt(sessionID)).toBe(false)
       expect(interrupts).toEqual([
         { sessionID, options: { resume: true } },
         { sessionID, options: undefined },
@@ -672,33 +701,35 @@ describe("Session-owned handles", () => {
       const fixture = yield* setup({
         snapshot: () => Layer.mock(Snapshot.Service, { capture: () => Effect.undefined }),
       })
-      const handle = fixture.sessions.forSession(sessionID)
-      const boundary = yield* handle.synthetic({ text: "Revert boundary", resume: false })
+      const sessions = fixture.sessions
+      const boundary = yield* sessions.synthetic({ sessionID, text: "Revert boundary", resume: false })
       yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")
-      yield* handle.revert.stage({ messageID: boundary.id, files: false })
+      yield* sessions.revert.stage({ sessionID, messageID: boundary.id, files: false })
       const entered = yield* Deferred.make<void>()
       const hook = yield* fixture.hooks.register("session", "prompt", () =>
         Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
       )
 
-      const submission = yield* handle.prompt({ text: "Cancelled before admission" }).pipe(Effect.forkScoped)
+      const submission = yield* sessions
+        .prompt({ sessionID, text: "Cancelled before admission" })
+        .pipe(Effect.forkScoped)
       yield* Deferred.await(entered)
       yield* Fiber.interrupt(submission)
 
       const cancelled = yield* Fiber.await(submission)
       expect(Exit.isFailure(cancelled) && Cause.hasInterruptsOnly(cancelled.cause)).toBe(true)
-      expect(yield* handle.inbox()).toEqual([])
-      expect((yield* handle.get()).revert?.messageID).toBe(boundary.id)
+      expect(yield* sessions.inbox(sessionID)).toEqual([])
+      expect((yield* sessions.get(sessionID)).revert?.messageID).toBe(boundary.id)
       expect(yield* fixture.store.context(sessionID)).toMatchObject([{ id: boundary.id }])
       expect(fixture.wakes).toEqual([])
       yield* hook.dispose
-      yield* handle.revert.clear()
-      expect((yield* handle.get()).revert).toBeUndefined()
+      yield* sessions.revert.clear(sessionID)
+      expect((yield* sessions.get(sessionID)).revert).toBeUndefined()
       expect(yield* fixture.store.context(sessionID)).toMatchObject([{ id: boundary.id }])
-      yield* handle.revert.stage({ messageID: boundary.id, files: false })
+      yield* sessions.revert.stage({ sessionID, messageID: boundary.id, files: false })
       const acquisitions = fixture.locations.length
-      yield* fixture.sessions.forSession(sessionID).revert.commit()
-      expect((yield* handle.get()).revert).toBeUndefined()
+      yield* sessions.revert.commit(sessionID)
+      expect((yield* sessions.get(sessionID)).revert).toBeUndefined()
       expect(yield* fixture.store.context(sessionID)).toEqual([])
       expect(fixture.locations).toHaveLength(acquisitions)
     }),
@@ -717,10 +748,10 @@ describe("Session-owned handles", () => {
               }),
           }),
       })
-      const handle = fixture.sessions.forSession(sessionID)
-      const boundary = yield* handle.synthetic({ text: "Revert boundary", resume: false })
+      const sessions = fixture.sessions
+      const boundary = yield* sessions.synthetic({ sessionID, text: "Revert boundary", resume: false })
       yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")
-      yield* handle.revert.stage({ messageID: boundary.id, files: false })
+      yield* sessions.revert.stage({ sessionID, messageID: boundary.id, files: false })
       const destination = Location.Ref.make({ directory: AbsolutePath.make("/project/moved") })
       yield* fixture.bus.publish(SessionEvent.Moved, {
         sessionID,
@@ -729,13 +760,13 @@ describe("Session-owned handles", () => {
         subpath: RelativePath.make("moved"),
       })
 
-      yield* handle.revert.stage({ messageID: boundary.id, files: false })
-      yield* handle.revert.clear()
+      yield* sessions.revert.stage({ sessionID, messageID: boundary.id, files: false })
+      yield* sessions.revert.clear(sessionID)
 
       expect(captures).toEqual([source, destination])
       expect(fixture.locations).toEqual([source, destination, destination])
       expect(fixture.activationWaits).toEqual([])
-      expect((yield* handle.get()).revert).toBeUndefined()
+      expect((yield* sessions.get(sessionID)).revert).toBeUndefined()
     }),
   )
 })
@@ -746,7 +777,7 @@ describe("SessionPrompt preparation", () => {
       const fixture = yield* setup()
       const input = { text: "Original", files: [{ uri: new URL("./session-owned.test.ts", import.meta.url).href }] }
       const request = {
-        session: yield* fixture.sessions.forSession(sessionID).get(),
+        session: yield* fixture.sessions.get(sessionID),
         messageID: SessionMessage.ID.create(),
         input,
       }
@@ -759,7 +790,7 @@ describe("SessionPrompt preparation", () => {
       expect(items[0]).toMatchObject({ type: "user", payload: { text: "Original" }, delivery: "steer" })
       expect(items[0]?.payload.files?.[0]?.mime).toBe("text/plain")
       expect(input.text).toBe("Original")
-      expect(yield* fixture.sessions.forSession(sessionID).inbox()).toEqual([])
+      expect(yield* fixture.sessions.inbox(sessionID)).toEqual([])
       expect(fixture.wakes).toEqual([])
     }),
   )
@@ -788,20 +819,20 @@ describe("SessionRevert operations", () => {
               }),
           }),
       })
-      const handle = fixture.sessions.forSession(sessionID)
-      const boundary = yield* handle.synthetic({ text: "Revert boundary", resume: false })
+      const sessions = fixture.sessions
+      const boundary = yield* sessions.synthetic({ sessionID, text: "Revert boundary", resume: false })
       yield* SessionInbox.promote(fixture.db, fixture.bus, sessionID, "steer")
       expect(calls).toEqual([])
-      const session = yield* handle.get()
+      const session = yield* sessions.get(sessionID)
       yield* SessionRevert.stage({ session, messageID: boundary.id, files: false }).pipe(
         Effect.provideService(Instance.Service, fixture.instances),
       )
       expect(calls).toEqual(["capture", "capture", "diff"])
 
-      const staged = yield* handle.get()
+      const staged = yield* sessions.get(sessionID)
       expect(staged.revert?.snapshot).toBe(Snapshot.ID.make("captured-tree"))
       yield* SessionRevert.clear(staged).pipe(Effect.provideService(Instance.Service, fixture.instances))
-      const cleared = yield* handle.get()
+      const cleared = yield* sessions.get(sessionID)
       expect(cleared.revert).toBeUndefined()
       yield* SessionRevert.clear(cleared).pipe(Effect.provideService(Instance.Service, fixture.instances))
       expect(calls).toEqual(["capture", "capture", "diff", "restore"])
@@ -824,13 +855,12 @@ describe("SessionInbox command contracts", () => {
           }),
         ),
       )
-      const handle = fixture.sessions.forSession(sessionID)
-      const pending = yield* handle.synthetic({ text: "Pending", resume: false })
+      const pending = yield* fixture.sessions.synthetic({ sessionID, text: "Pending", resume: false })
 
-      yield* handle.cancelInbox(pending.id).pipe(Effect.setContext(Context.empty()))
+      yield* fixture.sessions.cancelInbox({ sessionID, inboxID: pending.id }).pipe(Effect.setContext(Context.empty()))
 
       expect(cancelled).toEqual([pending.id])
-      expect(yield* handle.inbox()).toEqual([])
+      expect(yield* fixture.sessions.inbox(sessionID)).toEqual([])
       expect(fixture.wakes).toEqual([])
     }),
   )
