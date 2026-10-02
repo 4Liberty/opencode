@@ -9,6 +9,7 @@ import {
   type AccessRequest,
   type ActiveTab,
   type BrowserState,
+  type RelayState,
   type ServiceState,
   type ToBackground,
   type ToPanel,
@@ -32,6 +33,8 @@ export function createBackground() {
     approvals: SiteScriptApproval[]
     /** Sessions asking to read browsing data, oldest first. */
     access: AccessRequest[]
+    /** The Browser Control relay connection and the tabs its sessions use. */
+    browserControl: RelayState
   }>({
     service: { status: "loading" },
     activeTab: null,
@@ -39,6 +42,7 @@ export function createBackground() {
     scripts: { available: true, scripts: [] },
     approvals: [],
     access: [],
+    browserControl: { status: "offline", tabs: [] },
   })
   // The file the agent last asked to show; cleared when the panel shows another session.
   const [preview, setPreview] = createSignal<Extract<ToPanel, { type: "preview" }>>()
@@ -71,6 +75,7 @@ export function createBackground() {
       if (message.type === "approvals") return setState("approvals", message.approvals)
       if (message.type === "access") return setState("access", message.requests)
       if (message.type === "preview") return setPreview(message)
+      if (message.type === "browserControl") return setState("browserControl", reconcile(message.state))
       if (message.type === "activeTab") setState("activeTab", message.tab)
     })
     next.onDisconnect.addListener(() => {

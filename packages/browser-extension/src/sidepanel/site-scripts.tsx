@@ -11,6 +11,7 @@ import { For, Show, createMemo, createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
 import { appliesTo, hostLabel, parseHeader, resolveDraft, type SiteScript } from "../shared/site-script"
 import { useServer } from "./connection"
+import { UserScriptsSteps } from "./onboarding"
 import type { Background } from "./port"
 
 // Userscripts the user dismissed from the install card, by code, for the panel's lifetime.
@@ -368,36 +369,16 @@ function ScriptRow(props: {
   )
 }
 
-/** How to allow user scripts, which Chromium keeps off per extension until the user turns it on. */
+/** Site scripts need the browser's user scripts permission, which Chromium keeps off per extension. */
 function ScriptsUnavailable() {
   const background = useServer().background
   return (
-    <div data-component="scripts-unavailable" class="flex flex-col gap-2 text-12-regular">
-      <p class="flex items-center gap-1.5 font-[530] text-v2-state-fg-warning">
+    <div data-component="scripts-unavailable" class="flex flex-col gap-1.5">
+      <p class="flex items-center gap-1.5 text-12-medium text-v2-state-fg-warning">
         <Icon name="warning" size="small" class="shrink-0" />
         Site scripts are turned off in this browser
       </p>
-      <ol class="flex list-decimal flex-col gap-0.5 ps-[34px] text-v2-text-text-muted marker:text-v2-text-text-faint">
-        <li>
-          Open the extensions page (<span class="font-mono">helium://extensions</span> in Helium)
-        </li>
-        <li>Choose Details on opencode Browser</li>
-        <li>
-          Turn on <span class="font-[530] text-v2-text-text-base">Allow user scripts</span>
-        </li>
-      </ol>
-      <div class="flex items-center gap-1 ps-5">
-        <Button
-          variant="neutral"
-          size="small"
-          onClick={() => void chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` })}
-        >
-          Open extensions page
-        </Button>
-        <Button variant="ghost" size="small" onClick={() => background.send({ type: "scripts.refresh" })}>
-          Check again
-        </Button>
-      </div>
+      <UserScriptsSteps class="ps-5" onCheck={() => background.send({ type: "scripts.refresh" })} />
     </div>
   )
 }

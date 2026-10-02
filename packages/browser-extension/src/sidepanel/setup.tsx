@@ -1,84 +1,83 @@
 // Shown until the panel has an opencode server: discovery in progress, the native host is missing,
-// or the server could not be reached.
+// or the server could not be reached. Uses the welcome tab's language and re-checks on its own.
 import { Button } from "@opencode/ui/button"
 import { Icon } from "@opencode/ui/icon"
-import { Mark } from "@opencode/ui/logo"
+import { Logo } from "@opencode/ui/logo"
 import { Spinner } from "@opencode/ui/spinner"
 import { TextField } from "@opencode/ui/text-field"
 import { Show, createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { ServiceState } from "../shared/protocol"
+import { CommandBlock, INSTALL_COMMAND, Waiting, createServiceWatch, sentence } from "./onboarding"
 import type { Background } from "./port"
 
 export function Loading(props: { label: string }) {
   return (
-    <div class="flex flex-1 flex-col items-center justify-center gap-3 text-v2-text-text-muted">
-      <Spinner class="size-4" />
-      <span>{props.label}</span>
+    <div class="flex flex-1 flex-col items-center justify-center gap-3 pb-8 text-v2-text-text-faint">
+      <Spinner class="size-4 text-v2-text-text-muted" />
+      <span class="text-12-regular">{props.label}</span>
     </div>
   )
 }
 
 export function Setup(props: { state: Exclude<ServiceState, { status: "ready" }>; background: Background }) {
   const [manual, setManual] = createSignal(false)
+  const service = createServiceWatch({
+    state: () => props.state,
+    refresh: () => props.background.send({ type: "service.refresh" }),
+  })
+  const failure = () => {
+    const state = service.state()
+    return state.status === "error" ? state : undefined
+  }
   return (
-    <Show when={props.state.status === "error" && props.state} fallback={<Loading label="Connecting to opencode…" />}>
+    <Show when={failure()} fallback={<Loading label="Connecting to opencode…" />}>
       {(error) => (
-        <div class="no-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pt-10 pb-6">
-          <Mark class="mb-5 h-6 w-auto self-start text-v2-text-text-base" />
+        <div class="no-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pt-10 pb-5">
+          <Logo class="mb-7 block aspect-[234/42] w-[104px] self-start" />
+          <h1 class="text-[15px] font-[530] leading-6 tracking-[-0.1px] text-v2-text-text-base">
+            {error().hostMissing ? "Connect to opencode" : "Can't reach opencode"}
+          </h1>
           <Show
             when={error().hostMissing}
             fallback={
-              <>
-                <h1 class="text-[15px] font-[530] leading-6 text-v2-text-text-base">Can't reach opencode</h1>
-                <p class="mt-1 break-words text-v2-text-text-muted">{error().message}</p>
-              </>
+              <p class="mt-1 text-[13px] leading-5 text-v2-text-text-muted">
+                <span class="break-words">{sentence(error().message)}</span> Run the install command again to start
+                opencode.
+              </p>
             }
           >
-            <h1 class="text-[15px] font-[530] leading-6 text-v2-text-text-base">Connect to opencode</h1>
-            <p class="mt-1 text-v2-text-text-muted">
-              opencode Browser finds your local opencode server through a small helper app. Install it once:
+            <p class="mt-1 text-[13px] leading-5 text-v2-text-text-muted">
+              opencode Browser reaches opencode through a small helper. Run this once in a terminal. It installs the
+              helper and starts opencode.
             </p>
-            <ol class="mt-4 flex flex-col gap-3">
-              <li class="flex gap-2.5">
-                <Step n={1} />
-                <div class="min-w-0 flex-1">
-                  <div class="text-v2-text-text-base">In a terminal, run</div>
-                  <code class="mt-1.5 block rounded-md bg-v2-background-bg-layer-01 px-2.5 py-2 font-mono text-12-regular text-v2-text-text-base select-all">
-                    opencode browser install
-                  </code>
-                </div>
-              </li>
-              <li class="flex gap-2.5">
-                <Step n={2} />
-                <div class="text-v2-text-text-base">Then retry. The command also starts opencode if needed.</div>
-              </li>
-            </ol>
           </Show>
-          <div class="mt-5 flex items-center gap-2">
-            <Button variant="submit" size="normal" onClick={() => props.background.send({ type: "service.refresh" })}>
-              Retry
-            </Button>
-            <Button variant="ghost" size="normal" onClick={() => setManual((value) => !value)}>
-              Enter server manually
+          <CommandBlock command={INSTALL_COMMAND} class="mt-4" />
+          <Waiting checking={service.checking()} onRetry={service.retry}>
+            {error().hostMissing ? "Waiting for opencode…" : "Checking again every few seconds."}
+          </Waiting>
+
+          <div class="mt-6 border-t border-v2-border-border-muted pt-3">
+            <Button
+              variant="ghost-muted"
+              size="small"
+              class="-ms-2"
+              aria-expanded={manual()}
+              onClick={() => setManual((value) => !value)}
+            >
+              Enter a server manually
               <Icon name="chevron-down" size="small" classList={{ "rotate-180": manual() }} />
             </Button>
+            <Show when={manual()}>
+              <ManualServer background={props.background} />
+            </Show>
           </div>
-          <Show when={manual()}>
-            <ManualServer background={props.background} />
-          </Show>
-          <p class="mt-auto pt-8 text-12-regular text-v2-text-text-faint">Extension ID {chrome.runtime.id}</p>
+          <p class="mt-auto pt-8 text-12-regular text-v2-text-text-faint">
+            Extension ID <span class="font-mono select-all">{chrome.runtime.id}</span>
+          </p>
         </div>
       )}
     </Show>
-  )
-}
-
-function Step(props: { n: number }) {
-  return (
-    <span class="flex size-5 shrink-0 items-center justify-center rounded-full bg-v2-background-bg-layer-02 text-12-medium text-v2-text-text-muted">
-      {props.n}
-    </span>
   )
 }
 
@@ -86,7 +85,7 @@ function ManualServer(props: { background: Background }) {
   const [form, setForm] = createStore({ url: "http://127.0.0.1:4096", password: "" })
   return (
     <form
-      class="mt-4 flex flex-col gap-3 rounded-xl bg-v2-background-bg-layer-01 p-3"
+      class="mt-2 flex flex-col gap-3 rounded-xl border border-v2-border-border-muted bg-v2-background-bg-layer-01 p-3"
       onSubmit={(event) => {
         event.preventDefault()
         props.background.send({ type: "service.manual", url: form.url.trim(), password: form.password })
@@ -98,7 +97,7 @@ function ManualServer(props: { background: Background }) {
         type="password"
         value={form.password}
         onChange={(value) => setForm("password", value)}
-        description="From `opencode service get password`."
+        description="Find it with: opencode service get password"
       />
       <div class="flex items-center justify-between gap-2">
         <Button

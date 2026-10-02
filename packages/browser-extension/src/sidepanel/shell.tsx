@@ -7,6 +7,7 @@ import { Logo } from "@opencode/ui/logo"
 import { Tooltip } from "@opencode/ui/tooltip"
 import { Match, Show, Suspense, Switch, createMemo, createSignal, lazy, onCleanup, onMount } from "solid-js"
 import type { SiteScript } from "../shared/site-script"
+import { BrowserControlHandoffDock, BrowserControlMenu, BrowserControlNotice } from "./browser-control"
 import { BrowsingAccessDock } from "./browsing-access"
 import { Composer, prefillDraft } from "./composer"
 import { useServer } from "./connection"
@@ -149,6 +150,7 @@ export function Shell() {
             </div>
           </Match>
         </Switch>
+        <BrowserControlMenu />
         <Show
           when={running() > 0}
           fallback={
@@ -192,12 +194,14 @@ export function Shell() {
         </Tooltip>
       </header>
       <ConnectionNotice />
+      <BrowserControlNotice />
       <Show
         when={!managing()}
         fallback={
           <>
             <SiteScriptsView onTweak={tweak} />
-            <div class="flex shrink-0 flex-col px-2 empty:hidden [&:not(:empty)]:pb-2">
+            <div class="flex shrink-0 flex-col gap-1 px-2 empty:hidden [&:not(:empty)]:pb-2">
+              <BrowserControlHandoffDock />
               <ScriptApprovalDock />
               <BrowsingAccessDock />
             </div>
@@ -218,6 +222,7 @@ export function Shell() {
                 </p>
               </div>
               <div class="flex shrink-0 flex-col gap-1 px-2 pb-2">
+                <BrowserControlHandoffDock />
                 <ScriptApprovalDock />
                 <BrowsingAccessDock />
                 <Composer directory={directory()} onCreate={create} ref={(element) => (composer.current = element)} />

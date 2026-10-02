@@ -1,5 +1,14 @@
 // Service worker: routes side panel requests, tracks tabs, and owns each session's browser.
-import { PANEL_PORT, type AccessRequest, type ActiveTab, type ToBackground, type ToPanel } from "../shared/protocol"
+import {
+  PANEL_PORT,
+  WELCOME_PORT,
+  type AccessRequest,
+  type ActiveTab,
+  type FromWelcome,
+  type ToBackground,
+  type ToPanel,
+  type ToWelcome,
+} from "../shared/protocol"
 import type { RelayCommand } from "../shared/relay-rpc"
 import { appliesTo, hostLabel, type SiteScript, type SiteScriptApproval, type SiteScriptDraft } from "../shared/site-script"
 import { createBrowserControl } from "./browser-control"
@@ -13,17 +22,19 @@ import { createSiteScripts, type Applied } from "./site-scripts"
 type Panel = { port: chrome.runtime.Port; windowID?: number; sessionID?: string }
 
 const panels = new Set<Panel>()
+/** Welcome tabs: they see setup status but are not panels, so they never answer approvals. */
+const watchers = new Set<chrome.runtime.Port>()
 const browsers = new Map<string, Promise<SessionBrowser>>()
-const service = createService((state) => broadcast(() => true, { type: "service", state }))
+const service = createService((state) => broadcastStatus({ type: "service", state }))
 const scripts = createSiteScripts((state) => {
-  broadcast(() => true, { type: "scripts", state })
+  broadcastStatus({ type: "scripts", state })
   void updateBadges()
 })
 const approvals = new Map<string, { approval: SiteScriptApproval; answer: (approve: boolean) => void }>()
 const accessRequests = new Map<string, { request: AccessRequest; answer: (allow: boolean) => void }>()
 const link = createRelayLink({ service, run: runRelayCommand })
 const control = createBrowserControl({
-  changed: (state) => broadcast(() => true, { type: "browserControl", state }),
+  changed: (state) => broadcastStatus({ type: "browserControl", state }),
   badgesChanged: () => void updateBadges(),
 })
 let keepalive: ReturnType<typeof setInterval> | undefined
@@ -31,6 +42,7 @@ let keepalive: ReturnType<typeof setInterval> | undefined
 void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
 
 chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === WELCOME_PORT && port.sender?.id === chrome.runtime.id) return watch(port)
   if (port.name !== PANEL_PORT || port.sender?.id !== chrome.runtime.id) return
   const panel: Panel = { port }
   panels.add(panel)
@@ -47,6 +59,20 @@ chrome.runtime.onConnect.addListener((port) => {
     void release(panel.sessionID)
   })
 })
+
+function watch(port: chrome.runtime.Port) {
+  watchers.add(port)
+  port.onDisconnect.addListener(() => watchers.delete(port))
+  port.onMessage.addListener((message: FromWelcome) => {
+    if (message.type === "service.refresh") void service.refresh().catch(() => undefined)
+    if (message.type === "scripts.refresh") void scripts.reconcile()
+    if (message.type === "browserControl.reconnect") control.reconnect()
+  })
+  postWatcher(port, { type: "service", state: service.state() })
+  postWatcher(port, { type: "scripts", state: scripts.state() })
+  postWatcher(port, { type: "browserControl", state: control.state() })
+  void service.get().catch(() => undefined)
+}
 
 async function receive(panel: Panel, message: ToBackground) {
   switch (message.type) {
@@ -428,6 +454,20 @@ function post(panel: Panel, message: ToPanel) {
   } catch {
     panels.delete(panel)
   }
+}
+
+function postWatcher(port: chrome.runtime.Port, message: ToWelcome) {
+  try {
+    port.postMessage(message)
+  } catch {
+    watchers.delete(port)
+  }
+}
+
+/** Setup status goes to every panel and welcome tab. */
+function broadcastStatus(message: ToWelcome) {
+  broadcast(() => true, message)
+  watchers.forEach((port) => postWatcher(port, message))
 }
 
 function broadcast(filter: (panel: Panel) => boolean, message: ToPanel) {

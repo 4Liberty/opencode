@@ -71,12 +71,12 @@ function create() {
   const root = host.attachShadow({ mode: "open" })
   root.innerHTML = `<style>${STYLE}</style>
     <div id="vignette" hidden></div>
-    <div id="card" role="dialog" aria-labelledby="title" hidden>
-      <div id="title"><span id="dot"></span>Your turn</div>
+    <div id="card" role="dialog" aria-labelledby="title" aria-describedby="message" hidden>
+      <div id="head"><span id="dot"></span><span id="title">Your turn</span><span id="source">${MARK}Browser Control</span></div>
       <p id="message"></p>
       <div id="actions"><button id="continue" type="button">Continue</button></div>
     </div>
-    <div id="pill" role="status" aria-live="polite">${MARK}<span id="label"></span></div>`
+    <div id="pill" role="status" aria-live="polite">${MARK}<span id="label"></span><span id="light"></span></div>`
   root.getElementById("continue")!.addEventListener("click", () => {
     const handoffId = current?.handoffId
     if (!handoffId || completing === handoffId) return
@@ -123,47 +123,61 @@ function clear() {
   document.getElementById(HOST_ID)?.remove()
 }
 
-const MARK = `<svg id="mark" viewBox="0 0 16 20" width="9" height="11" aria-hidden="true"><path d="M12 16H4V8h8v8Z" fill="currentColor" opacity=".45"/><path d="M12 4H4v12h8V4Zm4 16H0V0h16v20Z" fill="currentColor"/></svg>`
+const MARK = `<svg class="mark" viewBox="0 0 16 20" width="9" height="11" aria-hidden="true"><path d="M12 16H4V8h8v8Z" fill="currentColor" opacity=".45"/><path d="M12 4H4v12h8V4Zm4 16H0V0h16v20Z" fill="currentColor"/></svg>`
 
+// Colors follow the color scheme preference; the page itself may be light or dark either way, so both
+// surfaces are opaque enough to read on anything. Fonts are system fonts only: a page's own @font-face
+// rules apply inside the shadow root, so a family like "Inter" could resolve to the site's file.
 const STYLE = `
   :host { all: initial !important; position: fixed !important; right: 12px !important; bottom: 12px !important;
-    z-index: 2147483647 !important; pointer-events: none !important; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif !important; }
+    z-index: 2147483647 !important; pointer-events: none !important; }
   :host([data-waiting="true"]) { inset: 0 !important; }
   * { box-sizing: border-box; }
-  #pill { position: absolute; right: 0; bottom: 0; display: inline-flex; align-items: center; gap: 6px; height: 24px;
-    padding: 0 9px 0 8px; border-radius: 999px; background: rgba(19,19,19,.88); color: #ededed;
-    box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 4px 14px rgba(0,0,0,.24); backdrop-filter: blur(8px);
-    font-size: 11.5px; font-weight: 500; line-height: 1; letter-spacing: -.005em; white-space: nowrap; }
+  #pill, #card { --bg: #161616; --fg: #ededed; --muted: #a0a0a0; --faint: #707070; --ring: rgba(255,255,255,.09);
+    --running: #f5a524; --waiting: #4c8dff; --idle: #7a7a7a; --button: #ededed; --button-fg: #111; --button-hover: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-style: normal;
+    font-synthesis: none; text-transform: none; text-align: left; -webkit-font-smoothing: antialiased; color: var(--fg); }
+  #pill { position: absolute; right: 0; bottom: 0; display: inline-flex; align-items: center; gap: 7px; height: 26px;
+    padding: 0 10px 0 9px; border-radius: 999px; background: color-mix(in srgb, var(--bg) 92%, transparent);
+    box-shadow: 0 0 0 1px var(--ring), 0 6px 16px rgba(0,0,0,.22); backdrop-filter: blur(10px);
+    font-size: 12px; font-weight: 500; line-height: 26px; letter-spacing: -.01em; white-space: nowrap; }
   :host([data-waiting="true"]) #pill { right: 12px; bottom: 12px; }
-  #mark { flex: none; color: #ededed; }
-  #pill::after { content: ""; width: 6px; height: 6px; border-radius: 999px; background: #8f8f8f; margin-left: 1px; }
-  #pill[data-state="running"]::after { background: #f5a524; animation: pulse 1.4s ease-in-out infinite; }
-  #pill[data-state="waiting"]::after { background: #3b82f6; }
-  #vignette { position: absolute; inset: 0; pointer-events: none;
-    background: radial-gradient(ellipse at center, transparent 62%, rgba(59,130,246,.07) 100%); animation: fade .3s ease-out both; }
-  #card { position: absolute; right: 12px; bottom: 46px; width: 320px; padding: 14px 14px 12px; border-radius: 12px;
-    background: #161616; color: #ededed; pointer-events: auto; user-select: text;
-    box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 16px 40px rgba(0,0,0,.36); animation: enter .22s cubic-bezier(.2,.8,.2,1) both; }
+  .mark { flex: none; display: block; }
+  #pill .mark { color: var(--fg); }
+  #label { display: block; }
+  #light { flex: none; width: 6px; height: 6px; border-radius: 999px; background: var(--idle); }
+  #pill[data-state="running"] #light { background: var(--running); box-shadow: 0 0 0 3px color-mix(in srgb, var(--running) 22%, transparent);
+    animation: pulse 1.6s ease-in-out infinite; }
+  #pill[data-state="waiting"] #light { background: var(--waiting); box-shadow: 0 0 0 3px color-mix(in srgb, var(--waiting) 24%, transparent); }
+  #vignette { position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 2px rgba(76,141,255,.55), inset 0 0 80px rgba(76,141,255,.10);
+    animation: fade .3s ease-out both; }
+  #card { position: absolute; right: 12px; bottom: 48px; width: 320px; max-width: calc(100vw - 24px); padding: 12px 12px 12px 14px;
+    border-radius: 12px; background: var(--bg); pointer-events: auto; user-select: text;
+    box-shadow: 0 0 0 1px var(--ring), 0 18px 44px rgba(0,0,0,.34); animation: enter .22s cubic-bezier(.2,.8,.2,1) both; }
   :host([data-anchor="cursor"]) #card { left: var(--card-left); top: var(--card-top); right: auto; bottom: auto; }
-  #title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; line-height: 20px; }
-  #dot { width: 7px; height: 7px; border-radius: 999px; background: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.2); }
-  #message { margin: 4px 0 12px; color: #a1a1a1; font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
+  #head { display: flex; align-items: center; gap: 8px; height: 20px; }
+  #dot { flex: none; width: 7px; height: 7px; border-radius: 999px; background: var(--waiting);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--waiting) 24%, transparent); }
+  #title { font-size: 13px; font-weight: 600; line-height: 20px; letter-spacing: -.01em; }
+  #source { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; color: var(--faint); font-size: 11.5px;
+    font-weight: 500; line-height: 20px; }
+  #source .mark { width: 7px; height: 9px; }
+  #message { margin: 6px 0 12px; color: var(--muted); font-size: 13px; line-height: 19px; overflow-wrap: anywhere; }
   #actions { display: flex; justify-content: flex-end; }
-  #continue { all: unset; cursor: pointer; height: 28px; padding: 0 12px; border-radius: 6px; background: #ededed; color: #131313;
-    font-size: 13px; font-weight: 500; line-height: 28px; }
-  #continue:hover { background: #fff; }
-  #continue:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+  #continue { all: unset; box-sizing: border-box; cursor: pointer; height: 28px; padding: 0 12px; border-radius: 7px;
+    background: var(--button); color: var(--button-fg); font-family: inherit; font-size: 13px; font-weight: 500; line-height: 28px;
+    transition: background-color .12s; }
+  #continue:hover { background: var(--button-hover); }
+  #continue:focus-visible { outline: 2px solid var(--waiting); outline-offset: 2px; }
   #continue:disabled { cursor: default; opacity: .6; }
   @media (prefers-color-scheme: light) {
-    #pill { background: rgba(255,255,255,.92); color: #171717; box-shadow: 0 0 0 1px rgba(0,0,0,.08), 0 4px 14px rgba(0,0,0,.1); }
-    #mark { color: #171717; }
-    #card { background: #fff; color: #171717; box-shadow: 0 0 0 1px rgba(0,0,0,.08), 0 16px 40px rgba(0,0,0,.14); }
-    #message { color: #6f6f6f; }
-    #continue { background: #171717; color: #fff; }
-    #continue:hover { background: #000; }
+    #pill, #card { --bg: #ffffff; --fg: #171717; --muted: #5f5f5f; --faint: #8f8f8f; --ring: rgba(0,0,0,.09);
+      --running: #d97706; --waiting: #2563eb; --idle: #a3a3a3; --button: #171717; --button-fg: #fff; --button-hover: #000; }
+    #pill { box-shadow: 0 0 0 1px var(--ring), 0 6px 16px rgba(0,0,0,.10); }
+    #card { box-shadow: 0 0 0 1px var(--ring), 0 18px 44px rgba(0,0,0,.14); }
   }
-  @keyframes pulse { 50% { opacity: .35; } }
+  @keyframes pulse { 50% { opacity: .45; } }
   @keyframes fade { from { opacity: 0; } }
   @keyframes enter { from { opacity: 0; transform: translateY(6px) scale(.98); } }
-  @media (prefers-reduced-motion: reduce) { #pill::after, #card, #vignette { animation: none !important; } }
+  @media (prefers-reduced-motion: reduce) { #light, #card, #vignette { animation: none !important; } }
 `

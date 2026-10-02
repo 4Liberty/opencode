@@ -22,6 +22,8 @@ export type RelayState = {
 }
 
 export const PANEL_PORT = "opencode-browser.panel"
+/** The welcome tab's port: it only watches setup status and asks for re-checks; it is not a panel. */
+export const WELCOME_PORT = "opencode-browser.welcome"
 
 export type ServiceInfo = { url: string; password: string; source: "host" | "manual" }
 
@@ -124,3 +126,6 @@ export type ToPanel =
   | { type: "preview"; sessionID: string; path: string }
   /** The Browser Control relay connection and the tabs its sessions use. */
   | { type: "browserControl"; state: RelayState }
+
+export type ToWelcome = Extract<ToPanel, { type: "service" | "scripts" | "browserControl" }>
+export type FromWelcome = Extract<ToBackground, { type: "service.refresh" | "scripts.refresh" | "browserControl.reconnect" }>

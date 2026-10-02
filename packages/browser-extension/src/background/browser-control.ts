@@ -75,7 +75,6 @@ export function createBrowserControl(input: {
     const mine = ++generation
     let opened = false
     socket = current
-    if (status !== "connected") setStatus("connecting")
     current.onopen = () => {
       opened = true
       void hello(current).catch(() => current.close(1011, "Handshake failed"))
