@@ -1,11 +1,12 @@
 // The panel's bridge to the background service worker: one long-lived port, mirrored into a store.
 // Chrome may stop and restart an MV3 worker at any time. The panel keeps its own state and, on every
 // reconnect, re-announces its window and the session it shows so the worker can re-derive its state.
-import { createMemo, onCleanup } from "solid-js"
+import { createMemo, createSignal, onCleanup } from "solid-js"
 import { showToast } from "@opencode/ui/toast"
 import { createStore, reconcile } from "solid-js/store"
 import {
   PANEL_PORT,
+  type AccessRequest,
   type ActiveTab,
   type BrowserState,
   type ServiceState,
@@ -29,13 +30,18 @@ export function createBackground() {
     scripts: SiteScriptsState
     /** Agent install requests waiting for the user, oldest first. */
     approvals: SiteScriptApproval[]
+    /** Sessions asking to read browsing data, oldest first. */
+    access: AccessRequest[]
   }>({
     service: { status: "loading" },
     activeTab: null,
     // Assume allowed until the worker says otherwise, so the setup notice does not flash on open.
     scripts: { available: true, scripts: [] },
     approvals: [],
+    access: [],
   })
+  // The file the agent last asked to show; cleared when the panel shows another session.
+  const [preview, setPreview] = createSignal<Extract<ToPanel, { type: "preview" }>>()
   const windowID = chrome.windows.getCurrent().then((window) => window.id ?? chrome.windows.WINDOW_ID_CURRENT)
   let view: View = { type: "session.hide" }
   let disposed = false
@@ -63,6 +69,8 @@ export function createBackground() {
       if (message.type === "notice") return showToast({ variant: "success", description: message.message })
       if (message.type === "scripts") return setState("scripts", reconcile(message.state))
       if (message.type === "approvals") return setState("approvals", message.approvals)
+      if (message.type === "access") return setState("access", message.requests)
+      if (message.type === "preview") return setPreview(message)
       if (message.type === "activeTab") setState("activeTab", message.tab)
     })
     next.onDisconnect.addListener(() => {
@@ -100,12 +108,18 @@ export function createBackground() {
       if (!sessionID || state.browser?.sessionID !== sessionID) return
       return state.browser
     },
+    preview,
+    closePreview() {
+      setPreview(undefined)
+    },
     show(input: { sessionID: string; directory: string }) {
+      if (preview()?.sessionID !== input.sessionID) setPreview(undefined)
       view = { type: "session.show", sessionID: input.sessionID, directory: input.directory }
       post(view)
     },
     hide() {
       if (view.type === "session.hide") return
+      setPreview(undefined)
       view = { type: "session.hide" }
       post(view)
     },

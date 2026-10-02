@@ -14,6 +14,16 @@ import { toastError } from "./format"
 // Drafts outlive the composer, so switching between a new conversation and sessions keeps unsent text.
 const [drafts, setDrafts] = createStore<Record<string, string>>({})
 
+type DraftTarget = { sessionID?: string; directory?: string }
+
+const keyFor = (target: DraftTarget) => target.sessionID ?? `new:${target.directory ?? ""}`
+
+/** Starts a prompt in a composer's draft, after any unsent text, for actions outside the composer. */
+export function prefillDraft(target: DraftTarget, text: string) {
+  const current = drafts[keyFor(target)]?.trimEnd()
+  setDrafts(keyFor(target), current ? `${current}\n${text}` : text)
+}
+
 export function Composer(props: {
   sessionID?: string
   directory?: string
@@ -25,7 +35,7 @@ export function Composer(props: {
   const [choice, setChoice] = createStore<{ agent?: string; model?: ModelRef }>({})
   const [include, setInclude] = createSignal(false)
   const [defaults, setDefaults] = createStore<Record<string, ModelInfo | null>>({})
-  const draftKey = () => props.sessionID ?? `new:${props.directory ?? ""}`
+  const draftKey = () => keyFor(props)
   const text = () => drafts[draftKey()] ?? ""
   const session = createMemo(() => (props.sessionID ? data.session.get(props.sessionID) : undefined))
   const directory = createMemo(() => session()?.location.directory ?? props.directory)

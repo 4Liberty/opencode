@@ -9,8 +9,9 @@ import { Switch } from "@opencode/ui/switch"
 import { Tooltip } from "@opencode/ui/tooltip"
 import { For, Show, createMemo, createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
-import { hostLabel, parseHeader, resolveDraft } from "../shared/site-script"
+import { appliesTo, hostLabel, parseHeader, resolveDraft, type SiteScript } from "../shared/site-script"
 import { useServer } from "./connection"
+import type { Background } from "./port"
 
 // Userscripts the user dismissed from the install card, by code, for the panel's lifetime.
 const [dismissed, setDismissed] = createStore<Record<string, true>>({})
@@ -208,12 +209,34 @@ export function ScriptInstallCard(props: { sessionID: string }) {
   )
 }
 
-/** Installed scripts: turn each on or off, or delete it. */
-export function SiteScriptsView() {
+/** Installed scripts that match the active tab's page, enabled or not. */
+export function scriptsOnPage(background: Background) {
+  const url = background.state.activeTab?.url
+  return url ? background.state.scripts.scripts.filter((script) => appliesTo(script, url)) : []
+}
+
+/** Installed scripts, the active page's first: turn each on or off, tweak it with the agent, or delete it. */
+export function SiteScriptsView(props: { onTweak: (script: SiteScript) => void }) {
   const background = useServer().background
   const scripts = () => background.state.scripts.scripts
   const available = () => background.state.scripts.available
+  const onPage = createMemo(() => scriptsOnPage(background))
+  // Section and script, since a script on this page is listed twice.
   const [confirming, setConfirming] = createSignal<string>()
+  const list = (section: string, items: SiteScript[]) => (
+    <ul class="flex flex-col">
+      <For each={items}>
+        {(script) => (
+          <ScriptRow
+            script={script}
+            confirming={confirming() === `${section}:${script.id}`}
+            onConfirm={(value) => setConfirming(value ? `${section}:${script.id}` : undefined)}
+            onTweak={() => props.onTweak(script)}
+          />
+        )}
+      </For>
+    </ul>
+  )
 
   return (
     <div class="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
@@ -235,81 +258,113 @@ export function SiteScriptsView() {
           </div>
         }
       >
-        <ul class="flex flex-col py-1.5">
-          <For each={scripts()}>
-            {(script) => (
-              <li class="group/script flex min-h-12 items-center gap-3 px-3 py-2">
-                <div class="flex min-w-0 flex-1 flex-col">
-                  <span
-                    class="truncate text-[13px] font-[530] leading-[18px]"
-                    classList={{
-                      "text-v2-text-text-base": script.enabled,
-                      "text-v2-text-text-muted": !script.enabled,
-                    }}
-                  >
-                    {script.name}
-                  </span>
-                  <span
-                    class="truncate text-12-regular leading-4 text-v2-text-text-faint"
-                    title={script.matches.join("\n")}
-                  >
-                    {sites(script.matches)}
-                  </span>
-                  <Show when={script.description}>
-                    {(description) => (
-                      <span class="truncate text-12-regular leading-4 text-v2-text-text-faint" title={description()}>
-                        {description()}
-                      </span>
-                    )}
-                  </Show>
-                </div>
-                <Show
-                  when={confirming() === script.id}
-                  fallback={
-                    <>
-                      <Switch
-                        hideLabel
-                        checked={script.enabled}
-                        disabled={!available()}
-                        onChange={(enabled) => background.send({ type: "scripts.setEnabled", id: script.id, enabled })}
-                      >
-                        {`Run ${script.name}`}
-                      </Switch>
-                      <Tooltip placement="top-end" value="Delete">
-                        <IconButton
-                          variant="ghost-muted"
-                          size="normal"
-                          class="shrink-0"
-                          icon={<Icon name="trash" size="small" />}
-                          aria-label={`Delete ${script.name}`}
-                          onClick={() => setConfirming(script.id)}
-                        />
-                      </Tooltip>
-                    </>
-                  }
-                >
-                  <div class="flex shrink-0 items-center gap-1">
-                    <Button variant="ghost" size="small" onClick={() => setConfirming(undefined)}>
-                      Cancel
-                    </Button>
-                    <Button
-                      variant="danger"
-                      size="small"
-                      onClick={() => {
-                        setConfirming(undefined)
-                        background.send({ type: "scripts.remove", id: script.id })
-                      }}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </Show>
-              </li>
-            )}
-          </For>
-        </ul>
+        <div class="flex flex-col py-1.5">
+          <Show when={onPage().length > 0} fallback={list("all", scripts())}>
+            <SectionLabel>On this page</SectionLabel>
+            {list("page", onPage())}
+            <SectionLabel>All scripts</SectionLabel>
+            {list("all", scripts())}
+          </Show>
+        </div>
       </Show>
     </div>
+  )
+}
+
+function SectionLabel(props: { children: string }) {
+  return (
+    <h2 class="flex h-7 items-end px-3 pb-1 text-[11px] font-[530] tracking-[0.05px] text-v2-text-text-faint">
+      {props.children}
+    </h2>
+  )
+}
+
+function ScriptRow(props: {
+  script: SiteScript
+  confirming: boolean
+  onConfirm: (confirming: boolean) => void
+  onTweak: () => void
+}) {
+  const background = useServer().background
+  const available = () => background.state.scripts.available
+  return (
+    <li class="group/script flex min-h-12 items-center gap-3 px-3 py-2">
+      <div class="flex min-w-0 flex-1 flex-col">
+        <span
+          class="truncate text-[13px] font-[530] leading-[18px]"
+          classList={{
+            "text-v2-text-text-base": props.script.enabled,
+            "text-v2-text-text-muted": !props.script.enabled,
+          }}
+        >
+          {props.script.name}
+        </span>
+        <span
+          class="truncate text-12-regular leading-4 text-v2-text-text-faint"
+          title={props.script.matches.join("\n")}
+        >
+          {sites(props.script.matches)}
+        </span>
+        <Show when={props.script.description}>
+          {(description) => (
+            <span class="truncate text-12-regular leading-4 text-v2-text-text-faint" title={description()}>
+              {description()}
+            </span>
+          )}
+        </Show>
+      </div>
+      <Show
+        when={props.confirming}
+        fallback={
+          <>
+            <Switch
+              hideLabel
+              checked={props.script.enabled}
+              disabled={!available()}
+              onChange={(enabled) => background.send({ type: "scripts.setEnabled", id: props.script.id, enabled })}
+            >
+              {`Run ${props.script.name}`}
+            </Switch>
+            <div class="-me-1 flex shrink-0 items-center">
+              <Tooltip placement="top-end" value="Tweak with the agent">
+                <IconButton
+                  variant="ghost-muted"
+                  size="normal"
+                  icon={<Icon name="pencil-line" size="small" />}
+                  aria-label={`Tweak ${props.script.name}`}
+                  onClick={() => props.onTweak()}
+                />
+              </Tooltip>
+              <Tooltip placement="top-end" value="Delete">
+                <IconButton
+                  variant="ghost-muted"
+                  size="normal"
+                  icon={<Icon name="trash" size="small" />}
+                  aria-label={`Delete ${props.script.name}`}
+                  onClick={() => props.onConfirm(true)}
+                />
+              </Tooltip>
+            </div>
+          </>
+        }
+      >
+        <div class="flex shrink-0 items-center gap-1">
+          <Button variant="ghost" size="small" onClick={() => props.onConfirm(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            size="small"
+            onClick={() => {
+              props.onConfirm(false)
+              background.send({ type: "scripts.remove", id: props.script.id })
+            }}
+          >
+            Delete
+          </Button>
+        </div>
+      </Show>
+    </li>
   )
 }
 

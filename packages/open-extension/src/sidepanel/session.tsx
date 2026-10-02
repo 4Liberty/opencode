@@ -12,10 +12,12 @@ import { Spinner } from "@opencode/ui/spinner"
 import { TextShimmer } from "@opencode/ui/text-shimmer"
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { BrowserStrip } from "./browser-strip"
+import { BrowsingAccessDock } from "./browsing-access"
 import { Composer } from "./composer"
 import { useServer } from "./connection"
 import { PermissionDock, QuestionDock, UnsupportedFormDock, answerable } from "./docks"
 import { toastError } from "./format"
+import { FilePreview } from "./preview"
 import { ScriptApprovalDock, ScriptInstallCard } from "./site-scripts"
 
 const noDiffs: FileDiffInfo[] = []
@@ -153,6 +155,10 @@ export default function SessionView(props: {
   const dismiss = () => settleForm((input) => data.session.form.cancel(input))
 
   const working = () => status().type === "busy" && !blocked()
+  const preview = () => {
+    const request = server.background.preview()
+    return request?.sessionID === props.sessionID ? request : undefined
+  }
 
   let scroller!: HTMLDivElement
   let content!: HTMLDivElement
@@ -268,6 +274,15 @@ export default function SessionView(props: {
                 onClick={scrollToEnd}
               />
             </Show>
+            <Show when={preview()} keyed>
+              {(request) => (
+                <FilePreview
+                  path={request.path}
+                  directory={directory()}
+                  onClose={() => server.background.closePreview()}
+                />
+              )}
+            </Show>
           </div>
           <div class="flex shrink-0 flex-col gap-1 px-2 pb-2">
             <Show when={permission()} keyed>
@@ -293,7 +308,14 @@ export default function SessionView(props: {
               )}
             </Show>
             <ScriptApprovalDock />
-            <Show when={!blocked() && server.background.state.approvals.length === 0}>
+            <BrowsingAccessDock />
+            <Show
+              when={
+                !blocked() &&
+                server.background.state.approvals.length === 0 &&
+                server.background.state.access.length === 0
+              }
+            >
               <ScriptInstallCard sessionID={props.sessionID} />
             </Show>
             <BrowserStrip sessionID={props.sessionID} />

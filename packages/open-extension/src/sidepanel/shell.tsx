@@ -6,12 +6,14 @@ import { IconButton } from "@opencode/ui/icon-button"
 import { Logo } from "@opencode/ui/logo"
 import { Tooltip } from "@opencode/ui/tooltip"
 import { Match, Show, Suspense, Switch, createMemo, createSignal, lazy, onCleanup, onMount } from "solid-js"
-import { Composer } from "./composer"
+import type { SiteScript } from "../shared/site-script"
+import { BrowsingAccessDock } from "./browsing-access"
+import { Composer, prefillDraft } from "./composer"
 import { useServer } from "./connection"
 import { basename, toastError } from "./format"
 import { History } from "./history"
 import { ProjectPicker } from "./projects"
-import { ScriptApprovalDock, SiteScriptsView } from "./site-scripts"
+import { ScriptApprovalDock, SiteScriptsView, scriptsOnPage } from "./site-scripts"
 
 const SessionView = lazy(() => import("./session"))
 
@@ -30,6 +32,8 @@ export function Shell() {
     return id ? data.session.get(id) : undefined
   })
   const composer = { current: undefined as HTMLTextAreaElement | undefined }
+  // Matches the toolbar badge: enabled scripts that run on the active tab.
+  const running = createMemo(() => scriptsOnPage(server.background).filter((script) => script.enabled).length)
 
   const focusComposer = () => requestAnimationFrame(() => composer.current?.focus())
 
@@ -66,6 +70,15 @@ export function Shell() {
     setManaging(false)
     setView(undefined)
     server.background.hide()
+    focusComposer()
+  }
+
+  const tweak = (script: SiteScript) => {
+    prefillDraft(
+      { sessionID: view(), directory: directory() },
+      `Change the site script "${script.name}" (id ${script.id}): `,
+    )
+    setManaging(false)
     focusComposer()
   }
 
@@ -136,17 +149,37 @@ export function Shell() {
             </div>
           </Match>
         </Switch>
-        <Tooltip placement="bottom" value="Site scripts">
-          <IconButton
-            variant="ghost-muted"
-            size="large"
-            icon={<Icon name="code" />}
-            aria-label="Site scripts"
-            aria-pressed={managing()}
-            classList={{ "bg-v2-overlay-simple-overlay-hover": managing() }}
-            onClick={() => setManaging((value) => !value)}
-          />
-        </Tooltip>
+        <Show
+          when={running() > 0}
+          fallback={
+            <Tooltip placement="bottom" value="Site scripts">
+              <IconButton
+                variant="ghost-muted"
+                size="large"
+                icon={<Icon name="code" />}
+                aria-label="Site scripts"
+                aria-pressed={managing()}
+                classList={{ "bg-v2-overlay-simple-overlay-hover": managing() }}
+                onClick={() => setManaging((value) => !value)}
+              />
+            </Tooltip>
+          }
+        >
+          <Tooltip placement="bottom" value={`${running()} site script${running() === 1 ? "" : "s"} on this page`}>
+            <Button
+              variant="ghost-muted"
+              size="normal"
+              icon="code"
+              class="shrink-0 !gap-1 !ps-1.5 !pe-2 tabular-nums"
+              aria-label={`Site scripts, ${running()} on this page`}
+              aria-pressed={managing()}
+              classList={{ "bg-v2-overlay-simple-overlay-hover": managing() }}
+              onClick={() => setManaging((value) => !value)}
+            >
+              {running()}
+            </Button>
+          </Tooltip>
+        </Show>
         <History directory={session()?.location.directory ?? directory()} current={view()} onOpen={open} />
         <Tooltip placement="bottom-end" value="New conversation">
           <IconButton
@@ -163,9 +196,10 @@ export function Shell() {
         when={!managing()}
         fallback={
           <>
-            <SiteScriptsView />
+            <SiteScriptsView onTweak={tweak} />
             <div class="flex shrink-0 flex-col px-2 empty:hidden [&:not(:empty)]:pb-2">
               <ScriptApprovalDock />
+              <BrowsingAccessDock />
             </div>
           </>
         }
@@ -185,6 +219,7 @@ export function Shell() {
               </div>
               <div class="flex shrink-0 flex-col gap-1 px-2 pb-2">
                 <ScriptApprovalDock />
+                <BrowsingAccessDock />
                 <Composer directory={directory()} onCreate={create} ref={(element) => (composer.current = element)} />
               </div>
             </>
