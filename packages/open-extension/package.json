@@ -1,16 +1,14 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@opencode/open-extension",
-  "version": "0.0.1",
+  "version": "2.0.22",
   "private": true,
-  "description": "Open Extension: an opencode side panel for Chromium browsers that lets agents use tabs you share",
   "type": "module",
   "license": "MIT",
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch --mode development",
     "typecheck": "tsgo --noEmit -p tsconfig.json",
-    "test": "bun test",
     "host:install": "bun host/install.ts"
   },
   "dependencies": {
