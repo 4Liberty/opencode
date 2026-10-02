@@ -510,13 +510,13 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
         }),
       ],
     }),
-    Spec.make("sidepanel", {
-      description: "Connect the opencode browser side panel extension",
+    Spec.make("browser", {
+      description: "Connect the opencode Browser extension",
       commands: [
-        Spec.make("install", { description: "Set up the side panel helper and open the extension page" }),
+        Spec.make("install", { description: "Set up opencode Browser: register the helper, add Browser Control, and open the extension page" }),
         Spec.make("status", { description: "Show where the helper is registered and when the extension connected" }),
-        Spec.make("uninstall", { description: "Remove the side panel helper" }),
-        Spec.make("host", { description: "Native messaging host started by the browser extension" }),
+        Spec.make("uninstall", { description: "Remove the opencode Browser helper" }),
+        Spec.make("host", { description: "Native messaging host started by the opencode Browser extension" }),
       ],
     }),
     Spec.make("reload", {

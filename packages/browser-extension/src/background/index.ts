@@ -1,0 +1,442 @@
+// Service worker: routes side panel requests, tracks tabs, and owns each session's browser.
+import { PANEL_PORT, type AccessRequest, type ActiveTab, type ToBackground, type ToPanel } from "../shared/protocol"
+import type { RelayCommand } from "../shared/relay-rpc"
+import { appliesTo, hostLabel, type SiteScript, type SiteScriptApproval, type SiteScriptDraft } from "../shared/site-script"
+import { grant, granted, readBrowsing } from "./browsing"
+import { shareable } from "./policy"
+import { createRelayLink } from "./relay-link"
+import { createService } from "./service"
+import { createSessionBrowser, type SessionBrowser } from "./session-browser"
+import { createSiteScripts, type Applied } from "./site-scripts"
+
+type Panel = { port: chrome.runtime.Port; windowID?: number; sessionID?: string }
+
+const panels = new Set<Panel>()
+const browsers = new Map<string, Promise<SessionBrowser>>()
+const service = createService((state) => broadcast(() => true, { type: "service", state }))
+const scripts = createSiteScripts((state) => {
+  broadcast(() => true, { type: "scripts", state })
+  void updateBadges()
+})
+const approvals = new Map<string, { approval: SiteScriptApproval; answer: (approve: boolean) => void }>()
+const accessRequests = new Map<string, { request: AccessRequest; answer: (allow: boolean) => void }>()
+const link = createRelayLink({ service, run: runRelayCommand })
+let keepalive: ReturnType<typeof setInterval> | undefined
+
+void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== PANEL_PORT || port.sender?.id !== chrome.runtime.id) return
+  const panel: Panel = { port }
+  panels.add(panel)
+  port.onMessage.addListener((message: ToBackground) => {
+    void receive(panel, message).catch((error: unknown) => {
+      console.warn("[opencode-browser]", message.type, error)
+      post(panel, { type: "error", message: error instanceof Error ? error.message : String(error) })
+    })
+  })
+  port.onDisconnect.addListener(() => {
+    panels.delete(panel)
+    // Site script requests are relayed while a panel is open, since only a panel can approve them.
+    if (panels.size === 0) link.stop()
+    void release(panel.sessionID)
+  })
+})
+
+async function receive(panel: Panel, message: ToBackground) {
+  switch (message.type) {
+    case "panel.hello": {
+      panel.windowID = message.windowID
+      post(panel, { type: "service", state: service.state() })
+      post(panel, { type: "scripts", state: scripts.state() })
+      post(panel, { type: "approvals", approvals: pendingApprovals() })
+      post(panel, { type: "access", requests: pendingAccess() })
+      link.start()
+      await service.get().catch(() => undefined)
+      await sendActiveTab(message.windowID)
+      return
+    }
+    case "service.refresh":
+      await service.refresh().catch(() => undefined)
+      return
+    case "service.manual":
+      await service.manual(message.url, message.password).catch(() => undefined)
+      return
+    case "service.clearManual":
+      await service.clearManual().catch(() => undefined)
+      return
+    case "session.show": {
+      const previous = panel.sessionID
+      panel.sessionID = message.sessionID
+      const browser = await ensure(message.sessionID, {
+        directory: message.directory,
+        ...(message.workspaceID ? { workspaceID: message.workspaceID } : {}),
+      }, panel.windowID)
+      browser.want(panel.windowID ?? chrome.windows.WINDOW_ID_CURRENT)
+      post(panel, { type: "browser", state: browser.snapshot() })
+      if (panel.windowID !== undefined) await sendActiveTab(panel.windowID)
+      if (previous !== message.sessionID) await release(previous)
+      return
+    }
+    case "session.hide": {
+      const previous = panel.sessionID
+      panel.sessionID = undefined
+      await release(previous)
+      return
+    }
+    case "browser.takeover":
+      ;(await browsers.get(message.sessionID))?.takeover(panel.windowID ?? chrome.windows.WINDOW_ID_CURRENT)
+      return
+    case "tab.share": {
+      const browser = await browsers.get(message.sessionID)
+      if (!browser) return
+      // A tab belongs to one session at a time.
+      await Promise.all(
+        Array.from(browsers.values(), async (other) => {
+          const resolved = await other
+          if (resolved !== browser) resolved.release(message.chromeTabID)
+        }),
+      )
+      await browser.share(message.chromeTabID)
+      if (panel.windowID !== undefined) await sendActiveTab(panel.windowID)
+      return
+    }
+    case "tab.unshare":
+      ;(await browsers.get(message.sessionID))?.unshare(message.tabID)
+      if (panel.windowID !== undefined) await sendActiveTab(panel.windowID)
+      return
+    case "tab.focus":
+      await (await browsers.get(message.sessionID))?.focus(message.tabID)
+      return
+    case "scripts.install": {
+      const result = await scripts.install(message.draft)
+      post(panel, { type: "notice", message: `Installed "${result.script.name}". ${appliedText(result.script, result.applied)}` })
+      return
+    }
+    case "scripts.setEnabled": {
+      const result = await scripts.setEnabled(message.id, message.enabled)
+      if (result.applied.injected || result.applied.reloaded)
+        post(panel, { type: "notice", message: `${message.enabled ? "Turned on" : "Turned off"} "${result.script.name}". ${appliedText(result.script, result.applied)}` })
+      return
+    }
+    case "scripts.remove": {
+      const result = await scripts.remove(message.id)
+      if (result.applied.reloaded)
+        post(panel, { type: "notice", message: `Deleted "${result.script.name}". ${appliedText(result.script, result.applied)}` })
+      return
+    }
+    case "scripts.refresh":
+      await scripts.reconcile()
+      return
+    case "access.reply": {
+      const pending = accessRequests.get(message.id)
+      if (!pending) return
+      accessRequests.delete(message.id)
+      broadcastAccess()
+      pending.answer(message.allow)
+      return
+    }
+    case "approval.reply": {
+      const pending = approvals.get(message.id)
+      if (!pending) return
+      approvals.delete(message.id)
+      broadcastApprovals()
+      pending.answer(message.approve)
+      return
+    }
+  }
+}
+
+/** Runs a site_scripts tool call relayed from the opencode plugin. */
+async function runRelayCommand(command: RelayCommand, signal: AbortSignal): Promise<unknown> {
+  switch (command.action) {
+    case "list": {
+      const state = scripts.state()
+      return {
+        allowed: state.available,
+        ...(state.error ? { note: state.error } : {}),
+        scripts: (await scripts.list()).map(summary),
+      }
+    }
+    case "get":
+      return scripts.get(command.id)
+    case "install": {
+      if (!(await approve(command.draft, signal))) throw new Error("The user chose Deny in the side panel; the site script was not installed.")
+      const result = await scripts.install(command.draft)
+      return {
+        ...summary(result.script),
+        note: `Installed. ${appliedText(result.script, result.applied)} Verify it on the page; do not reload tabs that were already updated.`,
+      }
+    }
+    case "remove": {
+      const result = await scripts.remove(command.id)
+      return { ...summary(result.script), note: appliedText(result.script, result.applied) }
+    }
+    case "set_enabled": {
+      const result = await scripts.setEnabled(command.id, command.enabled)
+      return { ...summary(result.script), note: appliedText(result.script, result.applied) }
+    }
+    case "history":
+    case "bookmarks":
+    case "top_sites":
+    case "recently_closed":
+      if (!(await allowBrowsing(command.sessionID, command.action, signal)))
+        throw new Error("The user chose Don't allow in the side panel; browsing data was not shared with this conversation.")
+      return readBrowsing(command)
+  }
+}
+
+/** Asks once per session whether the agent may read browsing data; the grant is remembered. */
+async function allowBrowsing(sessionID: string, reason: AccessRequest["reason"], signal: AbortSignal) {
+  if (await granted(sessionID)) return true
+  if (panels.size === 0)
+    throw new Error("The opencode Browser side panel is closed. Ask the user to open it so they can allow access.")
+  // Parallel calls from one session share a single prompt.
+  const existing = Array.from(accessRequests.values()).find((pending) => pending.request.sessionID === sessionID)
+  const answer = existing
+    ? new Promise<boolean>((resolve) => {
+        const previous = existing.answer
+        existing.answer = (allow) => {
+          previous(allow)
+          resolve(allow)
+        }
+      })
+    : new Promise<boolean>((resolve) => {
+        const request: AccessRequest = { id: crypto.randomUUID(), sessionID, reason }
+        const withdraw = () => {
+          if (!accessRequests.delete(request.id)) return
+          broadcastAccess()
+          resolve(false)
+        }
+        accessRequests.set(request.id, {
+          request,
+          answer: (allow) => {
+            signal.removeEventListener("abort", withdraw)
+            resolve(allow)
+          },
+        })
+        signal.addEventListener("abort", withdraw, { once: true })
+        broadcastAccess()
+      })
+  const allowed = await answer
+  if (allowed) await grant(sessionID)
+  return allowed
+}
+
+function pendingAccess() {
+  return Array.from(accessRequests.values(), (pending) => pending.request)
+}
+
+function broadcastAccess() {
+  broadcast(() => true, { type: "access", requests: pendingAccess() })
+}
+
+/** The toolbar badge counts the enabled site scripts that run on each tab's page. */
+async function updateBadges(tabs?: chrome.tabs.Tab[]) {
+  const enabled = (await scripts.list()).filter((script) => script.enabled)
+  const targets = tabs ?? (await chrome.tabs.query({}))
+  await Promise.all(
+    targets.map((tab) => {
+      if (tab.id === undefined) return
+      const count = tab.url ? enabled.filter((script) => appliesTo(script, tab.url!)).length : 0
+      return chrome.action.setBadgeText({ tabId: tab.id, text: count ? String(count) : "" }).catch(() => undefined)
+    }),
+  )
+}
+
+/** Asks every open panel; the first answer wins. A cancelled tool call withdraws the request. */
+async function approve(draft: SiteScriptDraft, signal: AbortSignal) {
+  if (panels.size === 0)
+    throw new Error("The opencode Browser side panel is closed. Ask the user to open it so they can approve the script.")
+  const approval = await scripts.preview(draft, crypto.randomUUID())
+  return new Promise<boolean>((resolve) => {
+    const withdraw = () => {
+      if (!approvals.delete(approval.id)) return
+      broadcastApprovals()
+      resolve(false)
+    }
+    approvals.set(approval.id, {
+      approval,
+      answer: (approved) => {
+        signal.removeEventListener("abort", withdraw)
+        resolve(approved)
+      },
+    })
+    signal.addEventListener("abort", withdraw, { once: true })
+    broadcastApprovals()
+  })
+}
+
+function pendingApprovals() {
+  return Array.from(approvals.values(), (pending) => pending.approval)
+}
+
+function broadcastApprovals() {
+  broadcast(() => true, { type: "approvals", approvals: pendingApprovals() })
+}
+
+function summary(script: SiteScript) {
+  return {
+    id: script.id,
+    name: script.name,
+    ...(script.description ? { description: script.description } : {}),
+    matches: script.matches,
+    ...(script.excludeMatches?.length ? { excludeMatches: script.excludeMatches } : {}),
+    runAt: script.runAt,
+    ...(script.world === "page" ? { world: script.world } : {}),
+    enabled: script.enabled,
+  }
+}
+
+function sites(script: SiteScript) {
+  return [...new Set(script.matches.map(hostLabel))].join(", ")
+}
+
+/** Says what happened to open tabs, for toasts and the agent. */
+function appliedText(script: SiteScript, applied: Applied) {
+  const count = (n: number) => `${n} open tab${n === 1 ? "" : "s"}`
+  const parts = [
+    ...(applied.injected ? [`Running now in ${count(applied.injected)}.`] : []),
+    ...(applied.reloaded ? [`Reloaded ${count(applied.reloaded)}.`] : []),
+  ]
+  return parts.length ? parts.join(" ") : `It applies the next time you open ${sites(script)}.`
+}
+
+function ensure(sessionID: string, location: { directory: string; workspaceID?: string }, windowID?: number) {
+  const existing = browsers.get(sessionID)
+  if (existing) return existing
+  const created = createSessionBrowser({
+    sessionID,
+    location,
+    windowId: windowID ?? chrome.windows.WINDOW_ID_CURRENT,
+    service,
+    preview: (path) => {
+      const showing = Array.from(panels).filter((panel) => panel.sessionID === sessionID)
+      if (!showing.length)
+        throw new Error("No side panel is showing this conversation, so the file cannot be shown. Tell the user the path instead.")
+      showing.forEach((panel) => post(panel, { type: "preview", sessionID, path }))
+    },
+    changed: (state) => {
+      broadcast((panel) => panel.sessionID === sessionID, { type: "browser", state })
+      const windows = new Set(Array.from(panels, (panel) => panel.windowID).filter((id) => id !== undefined))
+      windows.forEach((id) => void sendActiveTab(id))
+    },
+  })
+  browsers.set(sessionID, created)
+  updateKeepalive()
+  return created
+}
+
+/** A session's browser stays while a panel shows it or the agent still has tabs; then it detaches. */
+async function release(sessionID: string | undefined) {
+  if (!sessionID) return
+  if (Array.from(panels).some((panel) => panel.sessionID === sessionID)) return
+  const browser = await browsers.get(sessionID)
+  if (!browser || !browser.empty) return
+  browsers.delete(sessionID)
+  updateKeepalive()
+  await browser.dispose()
+}
+
+// Chrome stops an idle worker after 30 seconds even while a fetch stream is open. Extension API calls
+// reset that timer, so ping one while any session's browser is attached.
+function updateKeepalive() {
+  if (browsers.size > 0 && !keepalive) keepalive = setInterval(() => void chrome.runtime.getPlatformInfo(), 20_000)
+  if (browsers.size === 0 && keepalive) {
+    clearInterval(keepalive)
+    keepalive = undefined
+  }
+}
+
+async function forEachBrowser(callback: (browser: SessionBrowser) => void) {
+  await Promise.all(Array.from(browsers.values(), async (browser) => callback(await browser)))
+}
+
+async function sendActiveTab(windowID: number) {
+  const [tab] = await chrome.tabs.query({ active: true, windowId: windowID })
+  schedulePageContext(windowID, tab)
+  const owners = await Promise.all(Array.from(browsers.values()))
+  const active: ActiveTab | null = tab?.id
+    ? {
+        chromeTabID: tab.id,
+        title: tab.title || tab.url || "Untitled",
+        url: tab.url ?? "",
+        ...(tab.favIconUrl ? { favIconUrl: tab.favIconUrl } : {}),
+        shareable: shareable(tab.url),
+        ...(() => {
+          const owner = owners.find((browser) => browser.owns(tab.id!))
+          return owner ? { sessionID: owner.sessionID } : {}
+        })(),
+      }
+    : null
+  broadcast((panel) => panel.windowID === windowID, { type: "activeTab", tab: active })
+}
+
+const pageTimers = new Map<number, ReturnType<typeof setTimeout>>()
+/** Updates the "current page" context of sessions shown in this window once browsing settles. */
+function schedulePageContext(windowID: number, tab: chrome.tabs.Tab | undefined) {
+  clearTimeout(pageTimers.get(windowID))
+  pageTimers.set(
+    windowID,
+    setTimeout(() => {
+      pageTimers.delete(windowID)
+      const shown = new Set(
+        Array.from(panels)
+          .filter((panel) => panel.windowID === windowID && panel.sessionID)
+          .map((panel) => panel.sessionID!),
+      )
+      shown.forEach((sessionID) => void browsers.get(sessionID)?.then((browser) => browser.page(tab)))
+    }, 1_000),
+  )
+}
+
+function post(panel: Panel, message: ToPanel) {
+  try {
+    panel.port.postMessage(message)
+  } catch {
+    panels.delete(panel)
+  }
+}
+
+function broadcast(filter: (panel: Panel) => boolean, message: ToPanel) {
+  panels.forEach((panel) => {
+    if (filter(panel)) post(panel, message)
+  })
+}
+
+void chrome.action.setBadgeBackgroundColor({ color: "#3b3b3b" })
+void chrome.action.setBadgeTextColor?.({ color: "#ffffff" })
+
+chrome.tabs.onUpdated.addListener((_tabId, change, tab) => {
+  void forEachBrowser((browser) => browser.tabUpdated(tab))
+  if (change.url || change.status === "loading") void updateBadges([tab])
+  if (tab.active && (change.url || change.title || change.favIconUrl || change.status)) void sendActiveTab(tab.windowId)
+})
+chrome.tabs.onActivated.addListener((info) => {
+  void sendActiveTab(info.windowId)
+  // The previously active tab changed too; refresh every owned tab's active flag.
+  void chrome.tabs.query({ windowId: info.windowId }).then((tabs) =>
+    forEachBrowser((browser) => tabs.forEach((tab) => browser.tabUpdated(tab))),
+  )
+})
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void forEachBrowser((browser) => browser.tabRemoved(tabId))
+})
+chrome.webNavigation.onCommitted.addListener((details) => {
+  if (details.frameId !== 0 || details.documentLifecycle === "prerender") return
+  void forEachBrowser((browser) => browser.committed(details.tabId))
+})
+chrome.downloads.onCreated.addListener((item) => {
+  void (async () => {
+    for (const browser of await Promise.all(Array.from(browsers.values()))) if (browser.download(item)) return
+  })()
+})
+chrome.downloads.onChanged.addListener((delta) => {
+  void chrome.downloads.search({ id: delta.id }).then(([item]) => {
+    if (item) void forEachBrowser((browser) => browser.downloadChanged(item))
+  })
+})
+chrome.webNavigation.onErrorOccurred.addListener((details) => {
+  if (details.frameId !== 0) return
+  void forEachBrowser((browser) => browser.loadFailed(details.tabId, details.error))
+})
