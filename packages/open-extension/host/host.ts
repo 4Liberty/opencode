@@ -2,6 +2,8 @@
 // opencode background service's URL and password, starting the service when it is not running.
 // Framing: each message is a 4-byte little-endian length followed by that many bytes of JSON.
 
+export {}
+
 const opencode = process.env.OPENCODE_BIN || "opencode"
 
 const reader = Bun.stdin.stream().getReader()

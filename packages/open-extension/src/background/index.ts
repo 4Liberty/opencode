@@ -18,7 +18,10 @@ chrome.runtime.onConnect.addListener((port) => {
   const panel: Panel = { port }
   panels.add(panel)
   port.onMessage.addListener((message: ToBackground) => {
-    void receive(panel, message).catch((error: unknown) => console.warn("[open-extension]", message.type, error))
+    void receive(panel, message).catch((error: unknown) => {
+      console.warn("[open-extension]", message.type, error)
+      post(panel, { type: "error", message: error instanceof Error ? error.message : String(error) })
+    })
   })
   port.onDisconnect.addListener(() => {
     panels.delete(panel)
@@ -53,6 +56,7 @@ async function receive(panel: Panel, message: ToBackground) {
       }, panel.windowID)
       browser.want(panel.windowID ?? chrome.windows.WINDOW_ID_CURRENT)
       post(panel, { type: "browser", state: browser.snapshot() })
+      if (panel.windowID !== undefined) await sendActiveTab(panel.windowID)
       if (previous !== message.sessionID) await release(previous)
       return
     }

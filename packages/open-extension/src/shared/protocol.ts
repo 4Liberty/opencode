@@ -68,3 +68,5 @@ export type ToPanel =
   | { type: "service"; state: ServiceState }
   | { type: "browser"; state: BrowserState }
   | { type: "activeTab"; tab: ActiveTab | null }
+  /** A panel request failed, for example sharing a tab the browser will not let extensions debug. */
+  | { type: "error"; message: string }
