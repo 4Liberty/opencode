@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@opencode/open-extension",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Open Extension: an opencode side panel for Chromium browsers that lets agents use tabs you share",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch --mode development",
+    "typecheck": "tsgo --noEmit -p tsconfig.json",
+    "test": "bun test",
+    "host:install": "bun host/install.ts"
+  },
+  "dependencies": {
+    "@opencode/client": "workspace:*",
+    "@opencode/plugin-browser": "workspace:*",
+    "@opencode/session-ui": "workspace:*",
+    "@opencode/ui": "workspace:*",
+    "effect": "catalog:",
+    "solid-js": "catalog:"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@tsconfig/node22": "catalog:",
+    "@types/bun": "catalog:",
+    "@types/chrome": "0.3.4",
+    "@typescript/native-preview": "catalog:",
+    "devtools-protocol": "0.0.1687809",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:",
+    "vite": "8.2.2",
+    "vite-plugin-solid": "2.11.14"
+  }
+}
