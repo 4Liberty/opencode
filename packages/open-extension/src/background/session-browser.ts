@@ -38,6 +38,7 @@ type Connection = {
 const GUIDANCE = [
   "You are running inside Open Extension, opencode's side panel in the user's web browser.",
   "The browser.* tools control the user's real browser: tabs you open with browser.tabs.open and tabs the user shares from the panel (browser.tabs.list shows them). Use them for anything in the user's browser instead of other browser automation such as the browser-control skill or CLI.",
+  "The user watches the tabs you use, and pointer actions show a cursor in the page. Move around a site the way a person would: find links and buttons with browser.snapshot or browser.find, then use browser.click, browser.fill, and browser.press. Use browser.navigate only to open a new site or an exact URL the user gave, and browser.evaluate to read data, not to click or navigate.",
   "If you need the page the user is looking at and it is not shared, ask them to click Share tab in the panel, or open the URL yourself with browser.tabs.open.",
   "To change how a website looks or behaves persistently, write a site script and install it with site_scripts.install; the user approves it in the panel. Never ask the user to install Tampermonkey or Violentmonkey.",
 ].join("\n")

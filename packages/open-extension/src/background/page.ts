@@ -5,6 +5,7 @@ import { Browser } from "@opencode/plugin-browser/rpc"
 import type { Protocol } from "devtools-protocol"
 import { Schema } from "effect"
 import { abortError, createCdp, waitFor } from "./cdp"
+import { CURSOR } from "./cursor"
 import { createDiagnostics } from "./diagnostics"
 import { normalizeURL } from "./policy"
 
@@ -305,9 +306,12 @@ export function createBrowserPage(options: {
       case "click":
         await click(target(action.ref), action.button ?? "left", action.count ?? 1, action.modifiers)
         break
-      case "hover":
-        await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...(await point(target(action.ref))) })
+      case "hover": {
+        const position = await point(target(action.ref))
+        await cursor(position)
+        await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...position })
         break
+      }
       case "drag": {
         const source = target(action.from)
         const destination = target(action.to)
@@ -316,6 +320,7 @@ export function createBrowserPage(options: {
         const box = await rect(destination)
         const to = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
         const html5 = await call(source, "function() { return this.draggable; }")
+        await cursor(from, true)
         let data: Protocol.Input.DragData | undefined
         const off = cdp.on("Input.dragIntercepted", (event) => {
           data = event.data
@@ -324,6 +329,7 @@ export function createBrowserPage(options: {
         await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...from })
         await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...from, button: "left", buttons: 1, clickCount: 1 })
         try {
+          void cursor(to)
           for (let i = 1; i <= 10; i++) {
             abortError(signal)
             await cdp.send("Input.dispatchMouseEvent", {
@@ -368,10 +374,11 @@ export function createBrowserPage(options: {
         break
       case "scroll": {
         const metrics = await cdp.send("Page.getLayoutMetrics")
+        const center = { x: metrics.cssLayoutViewport.clientWidth / 2, y: metrics.cssLayoutViewport.clientHeight / 2 }
+        await cursor(center)
         await cdp.send("Input.dispatchMouseEvent", {
           type: "mouseWheel",
-          x: metrics.cssLayoutViewport.clientWidth / 2,
-          y: metrics.cssLayoutViewport.clientHeight / 2,
+          ...center,
           deltaX: action.deltaX ?? 0,
           deltaY: action.deltaY,
         })
@@ -661,6 +668,7 @@ export function createBrowserPage(options: {
   async function click(element: Element, button = "left", count = 1, modifiers: readonly string[] = []) {
     const position = await point(element)
     const flags = modifiers.reduce((mask, key) => mask | ({ Alt: 1, Control: 2, Meta: 4, Shift: 8 }[key] ?? 0), 0)
+    await cursor(position, true)
     await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...position, modifiers: flags })
     for (let clickCount = 1; clickCount <= count; clickCount++) {
       await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...position, button, clickCount, modifiers: flags })
@@ -686,6 +694,7 @@ export function createBrowserPage(options: {
       )
       return
     }
+    await cursor(await point(element), true)
     await cdp.send("DOM.focus", { backendNodeId: element.backendID }, element.sessionID)
     // Focusing this field blurs the previous one; a validation dialog from that blur must stop here.
     abortError(signal)
@@ -696,6 +705,7 @@ export function createBrowserPage(options: {
   }
 
   async function select(element: Element, values: readonly string[]) {
+    await cursor(await point(element), true)
     await call(
       element,
       `function(values) { if (!(this instanceof HTMLSelectElement) || this.disabled) throw new Error('Target is not an enabled HTML select. Take a fresh snapshot and choose an enabled dropdown ref.'); if (!this.multiple && values.length !== 1) throw new Error('This dropdown accepts exactly one value; pass a one-item values array.'); for (const value of values) if (!Array.from(this.options).some(option => option.value === value && !option.disabled)) throw new Error('Option value was not found or is disabled. Inspect option values with browser.evaluate before retrying browser.select; values are not visible labels.'); for (const option of this.options) option.selected = values.includes(option.value); this.dispatchEvent(new Event('input',{bubbles:true})); this.dispatchEvent(new Event('change',{bubbles:true})); }`,
@@ -821,16 +831,48 @@ export function createBrowserPage(options: {
         )
       }
       if (["textbox", "searchbox"].includes(role) || properties.get("editable")) return
+      // Adjacent text runs become one line. Pages that wrap each letter in its own element would
+      // otherwise spend the whole line budget on single characters before reaching any control.
+      let text: string[] = []
+      const flush = () => {
+        if (!text.length) return
+        const joined = text.join("").replace(/\s+/g, " ").trim()
+        text = []
+        if (!joined) return
+        if (lines.length >= 500) {
+          truncated = true
+          return
+        }
+        lines.push(`${"  ".repeat(level + 1)}[StaticText] ${JSON.stringify(joined.slice(0, 300))}`)
+      }
       for (const childID of node.childIds ?? []) {
         const child = nodes.get(childID)
-        if (child) await walk(child, level + 1)
+        if (!child) continue
+        if (child.role?.value === "StaticText" && !child.ignored) {
+          text.push(String(child.name?.value ?? ""))
+          continue
+        }
+        flush()
+        await walk(child, level + 1)
       }
+      flush()
     }
     await walk(root, 0)
     const content = (
       action.type === "find" ? lines.filter((line) => line.toLowerCase().includes(action.text.toLowerCase())) : lines
     ).join("\n")
     return { content: content.slice(0, Browser.MAX_TEXT), truncated: truncated || content.length > Browser.MAX_TEXT }
+  }
+
+  /** Glides the visible agent cursor to a top-viewport point; drawing must never fail the action. */
+  async function cursor(position: { x: number; y: number }, press = false) {
+    await cdp
+      .send("Runtime.evaluate", {
+        expression: `(${CURSOR})(${position.x}, ${position.y}, ${press})`,
+        awaitPromise: true,
+        silent: true,
+      })
+      .catch(() => undefined)
   }
 
   // Wait for the compositor to apply a scroll before measuring; a stalled page must not hold input back.
