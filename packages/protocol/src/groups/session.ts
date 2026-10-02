@@ -14,7 +14,7 @@ import {
   statics,
 } from "@opencode/schema/schema"
 import { Event } from "@opencode/schema/event"
-import { Context, Effect, Encoding, Result, Schema, SchemaGetter, Struct } from "effect"
+import { Context, Effect, Encoding, Result, Schema, SchemaGetter, SchemaParser, Struct } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import {
   ConflictError,
@@ -98,7 +98,8 @@ const invalidCursor = "Invalid cursor" as const
 export const SessionsCursor = Schema.String.pipe(
   Schema.brand("SessionsCursor"),
   statics((schema) => {
-    const make = schema.make.bind(schema)
+    // Read the default constructor without caching it on the schema, so `make` can be replaced.
+    const make = SchemaParser.make(schema)
     return {
       make: (input: typeof SessionsCursorInput.Type) => make(Encoding.encodeBase64Url(encodeSessionsCursor(input))),
       parse: (input: string) =>
