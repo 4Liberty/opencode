@@ -1,7 +1,25 @@
 // Messages between the side panel and the background service worker. Each panel holds one long-lived
 // `chrome.runtime.connect({ name: PANEL_PORT })` port; the open port also keeps the worker alive.
 
+import type { PageStatus } from "../browser-control/protocol"
 import type { SiteScriptApproval, SiteScriptDraft, SiteScriptsState } from "./site-script"
+
+export type RelayStatus =
+  /** No relay is running; Browser Control's CLI or MCP server starts one on demand. */
+  | "offline"
+  | "connecting"
+  | "connected"
+  /** The relay runs but refused this extension (an older relay that does not know opencode Browser). */
+  | "rejected"
+  /** Another extension (usually the old Browser Control extension) holds this profile's connection. */
+  | "conflict"
+  | "incompatible"
+
+export type RelayState = {
+  status: RelayStatus
+  /** Tabs the relay has attached, with their page status when a session is running or waiting. */
+  tabs: { tabId: number; status?: PageStatus }[]
+}
 
 export const PANEL_PORT = "opencode-browser.panel"
 
@@ -83,6 +101,11 @@ export type ToBackground =
   | { type: "approval.reply"; id: string; approve: boolean }
   /** The user's answer to a request to read browsing history and bookmarks. */
   | { type: "access.reply"; id: string; allow: boolean }
+  /** Let Browser Control (its CLI and MCP agents) use this tab. */
+  | { type: "browserControl.attach"; chromeTabID: number }
+  /** Answer Browser Control's handoff on this tab, the same as the page's Continue button. */
+  | { type: "browserControl.continue"; chromeTabID: number }
+  | { type: "browserControl.reconnect" }
 
 export type ToPanel =
   | { type: "service"; state: ServiceState }
@@ -99,3 +122,5 @@ export type ToPanel =
   | { type: "access"; requests: AccessRequest[] }
   /** The agent asked to show a server file (browser.preview) in the panel showing this session. */
   | { type: "preview"; sessionID: string; path: string }
+  /** The Browser Control relay connection and the tabs its sessions use. */
+  | { type: "browserControl"; state: RelayState }

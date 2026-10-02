@@ -16,5 +16,5 @@
     "skipLibCheck": true,
     "types": ["vite/client", "bun", "chrome"]
   },
-  "include": ["src", "plugin", "vite.config.ts"]
+  "include": ["src", "plugin", "vite.config.ts", "vite.content.config.ts"]
 }

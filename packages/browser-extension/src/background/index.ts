@@ -2,6 +2,7 @@
 import { PANEL_PORT, type AccessRequest, type ActiveTab, type ToBackground, type ToPanel } from "../shared/protocol"
 import type { RelayCommand } from "../shared/relay-rpc"
 import { appliesTo, hostLabel, type SiteScript, type SiteScriptApproval, type SiteScriptDraft } from "../shared/site-script"
+import { createBrowserControl } from "./browser-control"
 import { grant, granted, readBrowsing } from "./browsing"
 import { shareable } from "./policy"
 import { createRelayLink } from "./relay-link"
@@ -21,6 +22,10 @@ const scripts = createSiteScripts((state) => {
 const approvals = new Map<string, { approval: SiteScriptApproval; answer: (approve: boolean) => void }>()
 const accessRequests = new Map<string, { request: AccessRequest; answer: (allow: boolean) => void }>()
 const link = createRelayLink({ service, run: runRelayCommand })
+const control = createBrowserControl({
+  changed: (state) => broadcast(() => true, { type: "browserControl", state }),
+  badgesChanged: () => void updateBadges(),
+})
 let keepalive: ReturnType<typeof setInterval> | undefined
 
 void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
@@ -51,6 +56,7 @@ async function receive(panel: Panel, message: ToBackground) {
       post(panel, { type: "scripts", state: scripts.state() })
       post(panel, { type: "approvals", approvals: pendingApprovals() })
       post(panel, { type: "access", requests: pendingAccess() })
+      post(panel, { type: "browserControl", state: control.state() })
       link.start()
       await service.get().catch(() => undefined)
       await sendActiveTab(message.windowID)
@@ -127,6 +133,15 @@ async function receive(panel: Panel, message: ToBackground) {
     }
     case "scripts.refresh":
       await scripts.reconcile()
+      return
+    case "browserControl.attach":
+      control.attachTab(message.chromeTabID)
+      return
+    case "browserControl.continue":
+      control.completeHandoff(message.chromeTabID)
+      return
+    case "browserControl.reconnect":
+      control.reconnect()
       return
     case "access.reply": {
       const pending = accessRequests.get(message.id)
@@ -231,18 +246,35 @@ function broadcastAccess() {
   broadcast(() => true, { type: "access", requests: pendingAccess() })
 }
 
-/** The toolbar badge counts the enabled site scripts that run on each tab's page. */
+/**
+ * The toolbar badge shows Browser Control's state for a tab it uses (ON, RUN, WAIT), otherwise how many
+ * enabled site scripts run on the tab's page.
+ */
 async function updateBadges(tabs?: chrome.tabs.Tab[]) {
   const enabled = (await scripts.list()).filter((script) => script.enabled)
   const targets = tabs ?? (await chrome.tabs.query({}))
   await Promise.all(
-    targets.map((tab) => {
+    targets.map(async (tab) => {
       if (tab.id === undefined) return
+      const relay = control.badge(tab.id)
       const count = tab.url ? enabled.filter((script) => appliesTo(script, tab.url!)).length : 0
-      return chrome.action.setBadgeText({ tabId: tab.id, text: count ? String(count) : "" }).catch(() => undefined)
+      const text = relay?.text ?? (count ? String(count) : "")
+      await chrome.action.setBadgeText({ tabId: tab.id, text }).catch(() => undefined)
+      await chrome.action
+        .setBadgeBackgroundColor({ tabId: tab.id, color: BADGE_COLORS[relay?.text ?? ""] ?? BADGE_COLORS.default })
+        .catch(() => undefined)
+      await chrome.action
+        .setTitle({
+          tabId: tab.id,
+          title: relay?.title ?? (count ? `opencode Browser · ${count} site script${count === 1 ? "" : "s"} on this page` : "opencode Browser"),
+        })
+        .catch(() => undefined)
     }),
   )
 }
+
+// Neutral by default; amber while an agent runs, blue while it waits for the user.
+const BADGE_COLORS: Record<string, string> = { default: "#3b3b3b", RUN: "#b45309", WAIT: "#2563eb" }
 
 /** Asks every open panel; the first answer wins. A cancelled tool call withdraws the request. */
 async function approve(draft: SiteScriptDraft, signal: AbortSignal) {
@@ -404,8 +436,27 @@ function broadcast(filter: (panel: Panel) => boolean, message: ToPanel) {
   })
 }
 
-void chrome.action.setBadgeBackgroundColor({ color: "#3b3b3b" })
+void chrome.action.setBadgeBackgroundColor({ color: BADGE_COLORS.default })
 void chrome.action.setBadgeTextColor?.({ color: "#ffffff" })
+
+// Content scripts (page status, handoffs) and the recording document talk to Browser Control.
+chrome.runtime.onMessage.addListener((message, sender) => {
+  control.runtimeMessage(message, sender)
+  return false
+})
+
+// Browser Control's toolbar action lets its sessions use the current tab; here the toolbar opens the panel,
+// so that action lives in the icon's menu (and in the panel).
+chrome.runtime.onInstalled.addListener((details) => {
+  chrome.contextMenus.create(
+    { id: "browser-control.attach", title: "Let Browser Control use this tab", contexts: ["action"] },
+    () => void chrome.runtime.lastError,
+  )
+  if (details.reason === "install") void chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") })
+})
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === "browser-control.attach" && tab?.id !== undefined) control.attachTab(tab.id)
+})
 
 chrome.tabs.onUpdated.addListener((_tabId, change, tab) => {
   void forEachBrowser((browser) => browser.tabUpdated(tab))

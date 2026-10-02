@@ -1,4 +1,5 @@
 import type { ProtocolMapping } from "devtools-protocol/types/protocol-mapping.js"
+import { DebuggerHub } from "./debugger-hub"
 import { protocolError } from "./errors"
 
 export type Cdp = ReturnType<typeof createCdp>
@@ -38,20 +39,18 @@ export function createCdp(tabId: number, options: { detached: (reason: string) =
   chrome.debugger.onEvent.addListener(receive)
   chrome.debugger.onDetach.addListener(detach)
 
+  // Every page registers as its own owner, so the Browser Control relay or another session on the same tab
+  // keeps the shared attachment alive when this page lets go.
+  const owner = `page:${crypto.randomUUID()}`
   const attach = () => {
-    if (state.attached) return Promise.resolve()
-    state.attaching ??= chrome.debugger.attach({ tabId }, "1.3").then(
+    if (state.attached && DebuggerHub.isOwner(tabId, owner)) return Promise.resolve()
+    state.attaching ??= DebuggerHub.attach(tabId, owner).then(
       () => {
         state.attached = true
       },
       (error: unknown) => {
         state.attaching = undefined
-        const message = error instanceof Error ? error.message : String(error)
-        throw new Error(
-          /already attached/i.test(message)
-            ? "Another debugger (DevTools or another extension) is attached to this tab. Ask the user to close it, then retry."
-            : `Could not attach to this tab: ${message}`,
-        )
+        throw error
       },
     )
     return state.attaching
@@ -100,7 +99,7 @@ export function createCdp(tabId: number, options: { detached: (reason: string) =
       chrome.debugger.onEvent.removeListener(receive)
       chrome.debugger.onDetach.removeListener(detach)
       listeners.clear()
-      if (state.attached) await chrome.debugger.detach({ tabId }).catch(() => undefined)
+      if (state.attached) await DebuggerHub.detach(tabId, owner)
       state.attached = false
     },
   }

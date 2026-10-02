@@ -24,6 +24,8 @@ export default defineConfig(({ mode }) => ({
     rolldownOptions: {
       input: {
         sidepanel: fileURLToPath(new URL("./sidepanel.html", import.meta.url)),
+        welcome: fileURLToPath(new URL("./welcome.html", import.meta.url)),
+        offscreen: fileURLToPath(new URL("./offscreen.html", import.meta.url)),
         background: fileURLToPath(new URL("./src/background/index.ts", import.meta.url)),
       },
       output: {
