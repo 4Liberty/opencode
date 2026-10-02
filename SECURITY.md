@@ -14,9 +14,7 @@ OpenCode is an AI-powered coding assistant that runs locally on your machine. It
 
 ### No Sandbox
 
-OpenCode does **not** sandbox the agent. By default, Build permits shell commands and file edits without confirmation;
-Plan restricts edits to its plan directory. Configured rules can ask or deny, and sensitive reads and external paths ask
-by default. Permission prompts are not a security boundary.
+OpenCode does **not** sandbox the agent. The permission system exists as a UX feature to help users stay aware of what actions the agent is taking - it prompts for confirmation before executing commands, writing files, etc. However, it is not designed to provide security isolation.
 
 If you need true isolation, run OpenCode inside a Docker container or VM.
 
