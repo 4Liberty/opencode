@@ -11,6 +11,8 @@ import {
 const STORAGE_KEY = "siteScripts"
 
 export type SiteScripts = ReturnType<typeof createSiteScripts>
+/** What happened to the matching tabs that were already open. */
+export type Applied = { injected: number; reloaded: number }
 
 export function createSiteScripts(changed: (state: SiteScriptsState) => void) {
   let scripts: SiteScript[] = []
@@ -81,7 +83,42 @@ export function createSiteScripts(changed: (state: SiteScriptsState) => void) {
     await (existing?.enabled ? scripting.update([registration(script)]) : scripting.register([registration(script)]))
     scripts = existing ? scripts.map((item) => (item.id === existing.id ? script : item)) : [...scripts, script]
     await save()
-    return script
+    // A replaced script already ran in open tabs, so they reload; a new one is injected into them live.
+    const applied = existing?.enabled
+      ? await reload([...(await openTabs(existing)), ...(await openTabs(script))])
+      : await inject(script)
+    return { script, applied }
+  }
+
+  /** Runs a just-enabled script in matching open tabs now, so they need no reload. */
+  async function inject(script: SiteScript): Promise<Applied> {
+    const tabs = await openTabs(script)
+    const scripting = await api()
+    // userScripts.execute arrived in Chrome 135; without it, a reload has the same effect.
+    if (typeof scripting.execute !== "function") return reload(tabs)
+    const results = await Promise.all(
+      tabs.map((tabId) =>
+        scripting
+          .execute({
+            target: { tabId },
+            js: [{ code: script.code }],
+            world: script.world === "page" ? "MAIN" : "USER_SCRIPT",
+            injectImmediately: true,
+          })
+          .then(
+            () => true,
+            () => chrome.tabs.reload(tabId).then(() => false),
+          ),
+      ),
+    )
+    return { injected: results.filter(Boolean).length, reloaded: results.filter((ok) => !ok).length }
+  }
+
+  /** A script's effects cannot be taken back in place, so turning one off or changing it reloads its tabs. */
+  async function reload(tabIds: number[]): Promise<Applied> {
+    const unique = [...new Set(tabIds)]
+    await Promise.all(unique.map((tabId) => chrome.tabs.reload(tabId).catch(() => undefined)))
+    return { injected: 0, reloaded: unique.length }
   }
 
   return {
@@ -114,14 +151,14 @@ export function createSiteScripts(changed: (state: SiteScriptsState) => void) {
     async setEnabled(id: string, enabled: boolean) {
       await loaded
       const script = find(id)
-      if (script.enabled === enabled) return script
+      if (script.enabled === enabled) return { script, applied: { injected: 0, reloaded: 0 } }
       const scripting = await api()
       if (enabled) await scripting.register([registration(script)])
       if (!enabled) await scripting.unregister({ ids: [id] })
       const next = { ...script, enabled, updated: Date.now() }
       scripts = scripts.map((item) => (item.id === id ? next : item))
       await save()
-      return next
+      return { script: next, applied: enabled ? await inject(next) : await reload(await openTabs(next)) }
     },
     async remove(id: string) {
       await loaded
@@ -129,7 +166,7 @@ export function createSiteScripts(changed: (state: SiteScriptsState) => void) {
       if (script.enabled) await (await api()).unregister({ ids: [id] }).catch(() => undefined)
       scripts = scripts.filter((item) => item.id !== id)
       await save()
-      return script
+      return { script, applied: script.enabled ? await reload(await openTabs(script)) : { injected: 0, reloaded: 0 } }
     },
   }
 
@@ -164,6 +201,17 @@ function registration(script: SiteScript): chrome.userScripts.RegisteredUserScri
     // Isolated by default: page DOM and storage, but not the page's own JavaScript globals.
     world: script.world === "page" ? "MAIN" : "USER_SCRIPT",
   }
+}
+
+/** Open tabs a script applies to: its match patterns minus its exclusions. */
+async function openTabs(script: Pick<SiteScript, "matches" | "excludeMatches">) {
+  const query = (patterns: string[]) =>
+    chrome.tabs.query({ url: patterns }).then(
+      (tabs) => tabs.flatMap((tab) => (tab.id === undefined ? [] : [tab.id])),
+      () => [] as number[],
+    )
+  const excluded = new Set(script.excludeMatches?.length ? await query(script.excludeMatches) : [])
+  return (await query(script.matches)).filter((tabId) => !excluded.has(tabId))
 }
 
 function sameMatches(a: readonly string[], b: readonly string[]) {

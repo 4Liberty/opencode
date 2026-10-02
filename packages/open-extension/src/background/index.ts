@@ -6,7 +6,7 @@ import { shareable } from "./policy"
 import { createScriptsLink } from "./scripts-link"
 import { createService } from "./service"
 import { createSessionBrowser, type SessionBrowser } from "./session-browser"
-import { createSiteScripts } from "./site-scripts"
+import { createSiteScripts, type Applied } from "./site-scripts"
 
 type Panel = { port: chrome.runtime.Port; windowID?: number; sessionID?: string }
 
@@ -103,16 +103,22 @@ async function receive(panel: Panel, message: ToBackground) {
       await (await browsers.get(message.sessionID))?.focus(message.tabID)
       return
     case "scripts.install": {
-      const script = await scripts.install(message.draft)
-      post(panel, { type: "notice", message: `Installed "${script.name}". Reload ${sites(script)} to run it.` })
+      const result = await scripts.install(message.draft)
+      post(panel, { type: "notice", message: `Installed "${result.script.name}". ${appliedText(result.script, result.applied)}` })
       return
     }
-    case "scripts.setEnabled":
-      await scripts.setEnabled(message.id, message.enabled)
+    case "scripts.setEnabled": {
+      const result = await scripts.setEnabled(message.id, message.enabled)
+      if (result.applied.injected || result.applied.reloaded)
+        post(panel, { type: "notice", message: `${message.enabled ? "Turned on" : "Turned off"} "${result.script.name}". ${appliedText(result.script, result.applied)}` })
       return
-    case "scripts.remove":
-      await scripts.remove(message.id)
+    }
+    case "scripts.remove": {
+      const result = await scripts.remove(message.id)
+      if (result.applied.reloaded)
+        post(panel, { type: "notice", message: `Deleted "${result.script.name}". ${appliedText(result.script, result.applied)}` })
       return
+    }
     case "scripts.refresh":
       await scripts.reconcile()
       return
@@ -142,13 +148,20 @@ async function runScriptsCommand(command: ScriptsCommand, signal: AbortSignal): 
       return scripts.get(command.id)
     case "install": {
       if (!(await approve(command.draft, signal))) throw new Error("The user chose Deny in the side panel; the site script was not installed.")
-      const script = await scripts.install(command.draft)
-      return { ...summary(script), note: `Installed. Reload ${sites(script)} to run it, then verify on the page.` }
+      const result = await scripts.install(command.draft)
+      return {
+        ...summary(result.script),
+        note: `Installed. ${appliedText(result.script, result.applied)} Verify it on the page; do not reload tabs that were already updated.`,
+      }
     }
-    case "remove":
-      return summary(await scripts.remove(command.id))
-    case "set_enabled":
-      return summary(await scripts.setEnabled(command.id, command.enabled))
+    case "remove": {
+      const result = await scripts.remove(command.id)
+      return { ...summary(result.script), note: appliedText(result.script, result.applied) }
+    }
+    case "set_enabled": {
+      const result = await scripts.setEnabled(command.id, command.enabled)
+      return { ...summary(result.script), note: appliedText(result.script, result.applied) }
+    }
   }
 }
 
@@ -198,6 +211,16 @@ function summary(script: SiteScript) {
 
 function sites(script: SiteScript) {
   return [...new Set(script.matches.map(hostLabel))].join(", ")
+}
+
+/** Says what happened to open tabs, for toasts and the agent. */
+function appliedText(script: SiteScript, applied: Applied) {
+  const count = (n: number) => `${n} open tab${n === 1 ? "" : "s"}`
+  const parts = [
+    ...(applied.injected ? [`Running now in ${count(applied.injected)}.`] : []),
+    ...(applied.reloaded ? [`Reloaded ${count(applied.reloaded)}.`] : []),
+  ]
+  return parts.length ? parts.join(" ") : `It applies the next time you open ${sites(script)}.`
 }
 
 function ensure(sessionID: string, location: { directory: string; workspaceID?: string }, windowID?: number) {
