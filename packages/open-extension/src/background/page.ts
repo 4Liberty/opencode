@@ -797,6 +797,8 @@ export function createBrowserPage(options: {
       const role = String(node.role?.value ?? "node")
         .replace(/[^a-zA-Z0-9_-]/g, "")
         .slice(0, 40)
+      // Each text run repeats its StaticText parent's name; listing both doubles the snapshot.
+      if (role === "InlineTextBox") return
       const properties = new Map(node.properties?.map((property) => [property.name, property.value.value]) ?? [])
       if (!node.ignored) {
         const actionable =
