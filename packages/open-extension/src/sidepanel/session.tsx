@@ -208,7 +208,7 @@ export default function SessionView(props: {
             <div
               ref={scroller}
               data-slot="session-timeline-scroll"
-              class="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+              class="min-h-0 flex-1 overflow-y-auto overscroll-contain outline-none"
               tabIndex={-1}
               onScroll={() => {
                 const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight

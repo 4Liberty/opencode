@@ -18,6 +18,9 @@ export default defineConfig(({ mode }) => ({
     minify: mode !== "development",
     sourcemap: mode === "development" ? "inline" : false,
     modulePreload: false,
+    // One stylesheet: without the preload helper, a lazy chunk's CSS (for example the timeline's
+    // text-shimmer styles) would never be linked, and both shimmer layers would render as text.
+    cssCodeSplit: false,
     rolldownOptions: {
       input: {
         sidepanel: fileURLToPath(new URL("./sidepanel.html", import.meta.url)),
