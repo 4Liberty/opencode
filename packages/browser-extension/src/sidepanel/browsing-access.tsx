@@ -4,7 +4,7 @@ import { DockPrompt } from "@opencode/session-ui/dock-prompt"
 import { Button } from "@opencode/ui/button"
 import { Icon } from "@opencode/ui/icon"
 import { Show, createSignal } from "solid-js"
-import type { AccessRequest } from "../shared/protocol"
+import { BROWSING_PERMISSIONS, type AccessRequest } from "../shared/protocol"
 import { useServer } from "./connection"
 
 const reasons: Record<AccessRequest["reason"], string> = {
@@ -28,7 +28,12 @@ export function BrowsingAccessDock() {
     const id = request()?.id
     if (!id || answered() === id) return
     setAnswered(id)
-    background.send({ type: "access.reply", id, allow })
+    if (!allow) return background.send({ type: "access.reply", id, allow })
+    // Chrome only shows its permission prompt from a click, so request the optional permissions here.
+    void chrome.permissions
+      .request({ permissions: BROWSING_PERMISSIONS })
+      .catch(() => false)
+      .then((granted) => background.send({ type: "access.reply", id, allow: granted }))
   }
 
   return (

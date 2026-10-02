@@ -1,5 +1,6 @@
 // Service worker: routes side panel requests, tracks tabs, and owns each session's browser.
 import {
+  BROWSING_PERMISSIONS,
   PANEL_PORT,
   WELCOME_PORT,
   type AccessRequest,
@@ -229,7 +230,10 @@ async function runRelayCommand(command: RelayCommand, signal: AbortSignal): Prom
 
 /** Asks once per session whether the agent may read browsing data; the grant is remembered. */
 async function allowBrowsing(sessionID: string, reason: AccessRequest["reason"], signal: AbortSignal) {
-  if (await granted(sessionID)) return true
+  // The browser permissions are optional and requested on the panel's Allow click; if the user removed
+  // them in the browser's settings, ask again.
+  const permitted = await chrome.permissions.contains({ permissions: BROWSING_PERMISSIONS })
+  if (permitted && (await granted(sessionID))) return true
   if (panels.size === 0)
     throw new Error("The OpenCode Browser side panel is closed. Ask the user to open it so they can allow access.")
   // Parallel calls from one session share a single prompt.
@@ -259,7 +263,7 @@ async function allowBrowsing(sessionID: string, reason: AccessRequest["reason"],
         signal.addEventListener("abort", withdraw, { once: true })
         broadcastAccess()
       })
-  const allowed = await answer
+  const allowed = (await answer) && (await chrome.permissions.contains({ permissions: BROWSING_PERMISSIONS }))
   if (allowed) await grant(sessionID)
   return allowed
 }

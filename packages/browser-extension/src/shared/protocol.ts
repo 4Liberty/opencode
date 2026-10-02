@@ -72,6 +72,9 @@ export type ActiveTab = {
   sessionID?: string
 }
 
+/** Optional manifest permissions, requested from the side panel the first time the user allows access. */
+export const BROWSING_PERMISSIONS: chrome.runtime.ManifestPermission[] = ["history", "bookmarks", "topSites", "sessions"]
+
 /** One grant covers history, bookmarks, top sites, and recently closed tabs for a session. */
 export type AccessRequest = {
   id: string

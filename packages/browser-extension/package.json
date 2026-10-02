@@ -8,7 +8,8 @@
   "scripts": {
     "build": "vite build && vite build -c vite.content.config.ts",
     "dev": "vite build -c vite.content.config.ts --mode development && (vite build -c vite.content.config.ts --watch --mode development & vite build --watch --mode development)",
-    "typecheck": "tsgo --noEmit -p tsconfig.json"
+    "typecheck": "tsgo --noEmit -p tsconfig.json",
+    "package": "bun scripts/package.ts"
   },
   "dependencies": {
     "@opencode/client": "workspace:*",

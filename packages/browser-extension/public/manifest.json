@@ -54,15 +54,17 @@
     "nativeMessaging",
     "alarms",
     "userScripts",
-    "history",
-    "bookmarks",
-    "topSites",
-    "sessions",
     "downloads",
     "offscreen",
     "tabCapture",
     "activeTab",
     "contextMenus"
+  ],
+  "optional_permissions": [
+    "history",
+    "bookmarks",
+    "topSites",
+    "sessions"
   ],
   "host_permissions": [
     "<all_urls>"
