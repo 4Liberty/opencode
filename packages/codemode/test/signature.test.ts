@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Effect, Schema, SchemaGetter } from "effect"
-import { CodeMode, Tool } from "../src/index.js"
+import { CodeMode, Tool, nonFiniteNumberDefinition, signatureJsonSchema } from "../src/index.js"
 import {
   decodeInput,
   inputProperties,
@@ -667,6 +667,100 @@ describe("union schemas render every alternative", () => {
     for (const amount of ["NaN", "Infinity", "-Infinity"]) {
       expect(() => decodeInput(tool, { amount })).toThrow("Expected number")
     }
+  })
+
+  test("Effect number encodings render as number wherever they appear", () => {
+    const Amount = Schema.Number.annotate({ identifier: "Amount" })
+    const schema = Schema.Struct({
+      plain: Schema.Number,
+      count: Schema.Int,
+      bounded: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 10 })),
+      positive: Schema.Number.check(Schema.isGreaterThan(0)),
+      maybe: Schema.optionalKey(Schema.Number),
+      nullable: Schema.NullOr(Schema.Number),
+      list: Schema.Array(Schema.Number),
+      scores: Schema.Record(Schema.String, Schema.Number),
+      nested: Schema.Struct({ first: Amount, second: Amount }),
+    })
+    const tool = Tool.make({ description: "Numbers", input: schema, output: schema, execute: Effect.succeed })
+    const compact = [
+      "{ plain: number",
+      "count: number",
+      "bounded: number",
+      "positive: number",
+      "maybe?: number",
+      "nullable: number | null",
+      "list: Array<number>",
+      "scores: { [key: string]: number }",
+      "nested: { first: number; second: number } }",
+    ].join("; ")
+    expect(inputTypeScript(tool)).toBe(compact)
+    expect(outputTypeScript(tool)).toBe(compact)
+    for (const rendered of [inputTypeScript(tool, true), outputTypeScript(tool, true)]) {
+      expect(rendered).toContain("  /** @integer */\n  count: number,")
+      expect(rendered).toContain("  /** @integer @minimum 1 @maximum 10 */\n  bounded: number,")
+      expect(rendered).not.toContain("Infinity")
+    }
+    const named = Tool.make({ description: "n", input: Amount, output: Amount, execute: Effect.succeed })
+    expect(inputTypeScript(named)).toBe("number")
+    expect(outputTypeScript(named)).toBe("number")
+  })
+
+  test("explicit non-finite string alternatives stay visible", () => {
+    const literals = ["NaN", "Infinity", "-Infinity"] as const
+    const union = Schema.Union([Schema.Finite, Schema.Literals(literals)])
+    const tool = Tool.make({ description: "n", input: union, output: union, execute: Effect.succeed })
+    expect(inputTypeScript(tool)).toBe('number | "NaN" | "Infinity" | "-Infinity"')
+    expect(outputTypeScript(tool)).toBe('number | "NaN" | "Infinity" | "-Infinity"')
+    for (const value of literals) expect(decodeInput(tool, value)).toBe(value)
+
+    const mixed = Schema.Struct({
+      amount: Schema.Union([Schema.Number, Schema.Literals(literals)]),
+      missing: Schema.Union([Schema.Finite, Schema.Literal("NaN")]),
+    })
+    const mixedTool = Tool.make({ description: "n", input: mixed, output: mixed, execute: Effect.succeed })
+    const rendered = '{ amount: number | "NaN" | "Infinity" | "-Infinity"; missing: number | "NaN" }'
+    expect(inputTypeScript(mixedTool)).toBe(rendered)
+    expect(outputTypeScript(mixedTool)).toBe(rendered)
+    expect(decodeInput(mixedTool, { amount: "-Infinity", missing: "NaN" })).toEqual({
+      amount: "-Infinity",
+      missing: "NaN",
+    })
+
+    const raw = { anyOf: [{ type: "number" }, { type: "string", enum: [...literals] }] }
+    const rawTool = Tool.make({ description: "n", input: raw, output: raw, execute: Effect.succeed })
+    expect(jsonSchemaToTypeScript(raw)).toBe('number | "NaN" | "Infinity" | "-Infinity"')
+    expect(inputTypeScript(rawTool)).toBe('number | "NaN" | "Infinity" | "-Infinity"')
+    expect(outputTypeScript(rawTool)).toBe('number | "NaN" | "Infinity" | "-Infinity"')
+    expect(decodeInput(rawTool, "Infinity")).toBe("Infinity")
+    expect(
+      jsonSchemaToTypeScript({
+        anyOf: [{ type: "number" }, ...literals.map((value) => ({ type: "string", enum: [value] }))],
+      }),
+    ).toBe("number")
+  })
+
+  test("raw schemas exported by signatureJsonSchema keep number provenance", () => {
+    const schema = Schema.Struct({
+      amount: Schema.Number,
+      maybe: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+      sentinel: Schema.Literals(["NaN", "Infinity", "-Infinity"]),
+    })
+    const document = signatureJsonSchema(schema)
+    const raw = { ...document.schema, $defs: document.definitions } as Tool.JsonSchema
+    expect(Object.keys(document.definitions)).toEqual([nonFiniteNumberDefinition])
+    const rendered = '{ amount: number; maybe?: number | null; sentinel: "NaN" | "Infinity" | "-Infinity" }'
+    expect(jsonSchemaToTypeScript(raw)).toBe(rendered)
+    expect(
+      inputTypeScript(Tool.make({ description: "n", input: schema, output: schema, execute: Effect.succeed })),
+    ).toBe(rendered)
+    // Only the reserved definition name carries provenance; an authored definition keeps its strings.
+    expect(
+      jsonSchemaToTypeScript({
+        anyOf: [{ type: "number" }, { $ref: "#/$defs/Other" }],
+        $defs: { Other: { type: "string", enum: ["Infinity", "-Infinity", "NaN"] } },
+      }),
+    ).toBe('number | "Infinity" | "-Infinity" | "NaN"')
   })
 
   test("keeps unrelated and partial grouped string enums alongside numbers", () => {

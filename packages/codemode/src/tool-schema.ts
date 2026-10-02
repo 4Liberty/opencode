@@ -9,17 +9,41 @@ export const identifierSegment = /^[A-Za-z_$][A-Za-z0-9_$]*$/
 
 const renderKey = (name: string): string => (identifierSegment.test(name) ? name : JSON.stringify(name))
 
-const effectNumberSentinel = (schema: JsonSchema) =>
-  schema.type === "string" &&
-  Array.isArray(schema.enum) &&
-  (schema.enum.length === 1 ||
-    (schema.enum.length === 3 && ["NaN", "Infinity", "-Infinity"].every((value) => schema.enum?.includes(value)))) &&
-  schema.enum.every((value) => value === "NaN" || value === "Infinity" || value === "-Infinity")
+// Effect's JSON codec encodes every unchecked `number` as `finite | nonFiniteLiterals`, sharing one literal-union
+// AST. Code Mode decodes the Type side, which rejects those strings, so that exact AST is extracted into a reserved
+// definition and rendered as `number`, while authored literal unions keep their alternatives.
+const effectNumberJson = SchemaAST.toEncoded(Schema.toCodecJson(Schema.Number).ast)
+const effectNonFiniteNumbers = SchemaAST.isUnion(effectNumberJson)
+  ? effectNumberJson.types.find(SchemaAST.isUnion)
+  : undefined
+export const nonFiniteNumberDefinition = "codemode/NonFiniteNumber"
+
+/**
+ * Effect JSON Schema document as Code Mode renders it. Effect's synthetic non-finite number alternatives become a
+ * `$ref` to `nonFiniteNumberDefinition`; hosts that rewrite the document must keep that reference so
+ * `jsonSchemaToTypeScript` can still distinguish it from an authored literal union.
+ */
+export const signatureJsonSchema = (schema: Schema.Top) =>
+  Schema.toJsonSchemaDocument(schema, {
+    onExcessProperty: "error",
+    referencePolicy: (input) => (input.ast === effectNonFiniteNumbers ? nonFiniteNumberDefinition : input.identifier),
+  })
 
 const definitionName = (ref: string): string | undefined => {
   const tokens = JsonPointer.parseUriFragment(ref)
   return tokens?.length === 2 && (tokens[0] === "$defs" || tokens[0] === "definitions") ? tokens[1] : undefined
 }
+
+const nonFiniteNumberReference = (schema: JsonSchema) =>
+  schema.$ref !== undefined && definitionName(schema.$ref) === nonFiniteNumberDefinition
+
+// Raw schemas carry the reserved reference when a host preserved it, or other generators' singleton sentinels.
+const effectNumberSentinel = (schema: JsonSchema) =>
+  nonFiniteNumberReference(schema) ||
+  (schema.type === "string" &&
+    Array.isArray(schema.enum) &&
+    schema.enum.length === 1 &&
+    (schema.enum[0] === "NaN" || schema.enum[0] === "Infinity" || schema.enum[0] === "-Infinity"))
 
 const intersection = (members: ReadonlyArray<string>): string => {
   const concrete = members.filter((member) => member !== "unknown")
@@ -33,6 +57,7 @@ const MAX_RENDER_DEPTH = 8
 type RenderContext = {
   readonly definitions: Readonly<Record<string, JsonSchema>>
   readonly pretty: boolean
+  readonly numberSentinel: (schema: JsonSchema) => boolean
 }
 
 const hasUnresolvedRef = (
@@ -148,7 +173,7 @@ const renderSchema = (
   if (alternatives) {
     if (
       alternatives.some((item) => item.type === "number") &&
-      alternatives.every((item) => item.type === "number" || effectNumberSentinel(item))
+      alternatives.every((item) => item.type === "number" || ctx.numberSentinel(item))
     )
       return "number"
     if (
@@ -206,12 +231,15 @@ const renderSchema = (
 
 export const toTypeScript = (schema: Schema.Top, decoded = false, pretty = false): string => {
   try {
-    const visible = decoded ? Schema.toType(schema) : schema
-    const document = Schema.toJsonSchemaDocument(visible, { onExcessProperty: "error" }) as {
+    const document = signatureJsonSchema(decoded ? Schema.toType(schema) : schema) as {
       readonly schema: JsonSchema
-      readonly definitions?: Readonly<Record<string, JsonSchema>>
+      readonly definitions: Readonly<Record<string, JsonSchema>>
     }
-    return renderSchema(document.schema, { definitions: document.definitions ?? {}, pretty })
+    return renderSchema(document.schema, {
+      definitions: document.definitions,
+      pretty,
+      numberSentinel: nonFiniteNumberReference,
+    })
   } catch {
     return "unknown"
   }
@@ -219,7 +247,7 @@ export const toTypeScript = (schema: Schema.Top, decoded = false, pretty = false
 
 export const jsonSchemaToTypeScript = (schema: JsonSchema, pretty = false): string => {
   try {
-    return renderSchema(schema, { definitions: {}, pretty })
+    return renderSchema(schema, { definitions: {}, pretty, numberSentinel: effectNumberSentinel })
   } catch {
     return "unknown"
   }
