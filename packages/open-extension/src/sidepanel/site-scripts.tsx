@@ -239,7 +239,7 @@ export function SiteScriptsView(props: { onTweak: (script: SiteScript) => void }
   )
 
   return (
-    <div class="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+    <div class="no-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
       <Show when={!available()}>
         <div class="px-3 pt-3">
           <div class="rounded-lg border border-v2-border-border-muted bg-v2-background-bg-layer-01 p-3">

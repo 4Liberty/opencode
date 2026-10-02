@@ -24,7 +24,7 @@ export function Setup(props: { state: Exclude<ServiceState, { status: "ready" }>
   return (
     <Show when={props.state.status === "error" && props.state} fallback={<Loading label="Connecting to opencode…" />}>
       {(error) => (
-        <div class="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pt-10 pb-6">
+        <div class="no-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pt-10 pb-6">
           <Mark class="mb-5 h-6 w-auto self-start text-v2-text-text-base" />
           <Show
             when={error().hostMissing}

@@ -124,7 +124,7 @@ export function FilePreview(props: { path: string; directory: string; onClose: (
           />
         </Tooltip>
       </div>
-      <div class="flex min-h-0 flex-1 flex-col overflow-auto overscroll-contain">
+      <div class="no-scrollbar flex min-h-0 flex-1 flex-col overflow-auto overscroll-contain">
         <Switch>
           <Match when={content().type === "loading"}>
             <div class="flex flex-1 items-center justify-center text-v2-icon-icon-muted">
