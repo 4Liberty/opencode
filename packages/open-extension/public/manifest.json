@@ -26,7 +26,12 @@
     "storage",
     "nativeMessaging",
     "alarms",
-    "userScripts"
+    "userScripts",
+    "history",
+    "bookmarks",
+    "topSites",
+    "sessions",
+    "downloads"
   ],
   "host_permissions": ["<all_urls>"],
   "content_security_policy": {

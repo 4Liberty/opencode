@@ -2,12 +2,12 @@
 // server's event stream while a side panel is open; requests carry the Location of the plugin instance
 // that sent them, so the answer goes back to the same one.
 import { OpenCode, isRpcError, isRpcInternalError, type JsonValue } from "@opencode/client/promise"
-import { SCRIPTS_RPC_ID, type ScriptsCommand, type ScriptsControl, type ScriptsOutcome } from "../shared/scripts-rpc"
+import { RELAY_RPC_ID, type RelayCommand, type RelayControl, type RelayOutcome } from "../shared/relay-rpc"
 import type { Service } from "./service"
 
-export function createScriptsLink(input: {
+export function createRelayLink(input: {
   service: Service
-  run: (command: ScriptsCommand, signal: AbortSignal) => Promise<unknown>
+  run: (command: RelayCommand, signal: AbortSignal) => Promise<unknown>
 }) {
   const running = new Map<string, AbortController>()
   let active: AbortController | undefined
@@ -22,7 +22,7 @@ export function createScriptsLink(input: {
     const call = (method: "command" | "result", body: Record<string, unknown>, directory?: string) =>
       client.rpc
         .call({
-          rpcID: SCRIPTS_RPC_ID,
+          rpcID: RELAY_RPC_ID,
           method,
           input: body as JsonValue,
           ...(directory ? { location: { directory } } : {}),
@@ -36,9 +36,9 @@ export function createScriptsLink(input: {
       const abort = new AbortController()
       running.set(requestID, abort)
       // Another browser profile may have claimed it first; then there is nothing to do here.
-      const command = (await call("command", { requestID }, directory).catch(() => undefined)) as ScriptsCommand | undefined
+      const command = (await call("command", { requestID }, directory).catch(() => undefined)) as RelayCommand | undefined
       if (!command) return running.delete(requestID)
-      const outcome: ScriptsOutcome = await input.run(command, abort.signal).then(
+      const outcome: RelayOutcome = await input.run(command, abort.signal).then(
         (value) => ({ ok: true, value }),
         (cause: unknown) => ({ ok: false, message: cause instanceof Error ? cause.message : String(cause) }),
       )
@@ -49,8 +49,8 @@ export function createScriptsLink(input: {
     }
     for await (const event of client.event.subscribe({ signal })) {
       if (event.type === "server.connected") attempts = 0
-      if (event.type !== `rpc.${SCRIPTS_RPC_ID}.control`) continue
-      const control = event.data as ScriptsControl
+      if (event.type !== `rpc.${RELAY_RPC_ID}.control`) continue
+      const control = event.data as RelayControl
       if (control.type === "cancel") {
         running.get(control.requestID)?.abort()
         continue

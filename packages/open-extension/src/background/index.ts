@@ -1,9 +1,10 @@
 // Service worker: routes side panel requests, tracks tabs, and owns each session's browser.
-import { PANEL_PORT, type ActiveTab, type ToBackground, type ToPanel } from "../shared/protocol"
-import type { ScriptsCommand } from "../shared/scripts-rpc"
-import { hostLabel, type SiteScript, type SiteScriptApproval, type SiteScriptDraft } from "../shared/site-script"
+import { PANEL_PORT, type AccessRequest, type ActiveTab, type ToBackground, type ToPanel } from "../shared/protocol"
+import type { RelayCommand } from "../shared/relay-rpc"
+import { appliesTo, hostLabel, type SiteScript, type SiteScriptApproval, type SiteScriptDraft } from "../shared/site-script"
+import { grant, granted, readBrowsing } from "./browsing"
 import { shareable } from "./policy"
-import { createScriptsLink } from "./scripts-link"
+import { createRelayLink } from "./relay-link"
 import { createService } from "./service"
 import { createSessionBrowser, type SessionBrowser } from "./session-browser"
 import { createSiteScripts, type Applied } from "./site-scripts"
@@ -13,9 +14,13 @@ type Panel = { port: chrome.runtime.Port; windowID?: number; sessionID?: string 
 const panels = new Set<Panel>()
 const browsers = new Map<string, Promise<SessionBrowser>>()
 const service = createService((state) => broadcast(() => true, { type: "service", state }))
-const scripts = createSiteScripts((state) => broadcast(() => true, { type: "scripts", state }))
+const scripts = createSiteScripts((state) => {
+  broadcast(() => true, { type: "scripts", state })
+  void updateBadges()
+})
 const approvals = new Map<string, { approval: SiteScriptApproval; answer: (approve: boolean) => void }>()
-const link = createScriptsLink({ service, run: runScriptsCommand })
+const accessRequests = new Map<string, { request: AccessRequest; answer: (allow: boolean) => void }>()
+const link = createRelayLink({ service, run: runRelayCommand })
 let keepalive: ReturnType<typeof setInterval> | undefined
 
 void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
@@ -45,6 +50,7 @@ async function receive(panel: Panel, message: ToBackground) {
       post(panel, { type: "service", state: service.state() })
       post(panel, { type: "scripts", state: scripts.state() })
       post(panel, { type: "approvals", approvals: pendingApprovals() })
+      post(panel, { type: "access", requests: pendingAccess() })
       link.start()
       await service.get().catch(() => undefined)
       await sendActiveTab(message.windowID)
@@ -122,6 +128,14 @@ async function receive(panel: Panel, message: ToBackground) {
     case "scripts.refresh":
       await scripts.reconcile()
       return
+    case "access.reply": {
+      const pending = accessRequests.get(message.id)
+      if (!pending) return
+      accessRequests.delete(message.id)
+      broadcastAccess()
+      pending.answer(message.allow)
+      return
+    }
     case "approval.reply": {
       const pending = approvals.get(message.id)
       if (!pending) return
@@ -134,7 +148,7 @@ async function receive(panel: Panel, message: ToBackground) {
 }
 
 /** Runs a site_scripts tool call relayed from the opencode plugin. */
-async function runScriptsCommand(command: ScriptsCommand, signal: AbortSignal): Promise<unknown> {
+async function runRelayCommand(command: RelayCommand, signal: AbortSignal): Promise<unknown> {
   switch (command.action) {
     case "list": {
       const state = scripts.state()
@@ -162,7 +176,72 @@ async function runScriptsCommand(command: ScriptsCommand, signal: AbortSignal): 
       const result = await scripts.setEnabled(command.id, command.enabled)
       return { ...summary(result.script), note: appliedText(result.script, result.applied) }
     }
+    case "history":
+    case "bookmarks":
+    case "top_sites":
+    case "recently_closed":
+      if (!(await allowBrowsing(command.sessionID, command.action, signal)))
+        throw new Error("The user chose Don't allow in the side panel; browsing data was not shared with this conversation.")
+      return readBrowsing(command)
   }
+}
+
+/** Asks once per session whether the agent may read browsing data; the grant is remembered. */
+async function allowBrowsing(sessionID: string, reason: AccessRequest["reason"], signal: AbortSignal) {
+  if (await granted(sessionID)) return true
+  if (panels.size === 0)
+    throw new Error("The Open Extension side panel is closed. Ask the user to open it so they can allow access.")
+  // Parallel calls from one session share a single prompt.
+  const existing = Array.from(accessRequests.values()).find((pending) => pending.request.sessionID === sessionID)
+  const answer = existing
+    ? new Promise<boolean>((resolve) => {
+        const previous = existing.answer
+        existing.answer = (allow) => {
+          previous(allow)
+          resolve(allow)
+        }
+      })
+    : new Promise<boolean>((resolve) => {
+        const request: AccessRequest = { id: crypto.randomUUID(), sessionID, reason }
+        const withdraw = () => {
+          if (!accessRequests.delete(request.id)) return
+          broadcastAccess()
+          resolve(false)
+        }
+        accessRequests.set(request.id, {
+          request,
+          answer: (allow) => {
+            signal.removeEventListener("abort", withdraw)
+            resolve(allow)
+          },
+        })
+        signal.addEventListener("abort", withdraw, { once: true })
+        broadcastAccess()
+      })
+  const allowed = await answer
+  if (allowed) await grant(sessionID)
+  return allowed
+}
+
+function pendingAccess() {
+  return Array.from(accessRequests.values(), (pending) => pending.request)
+}
+
+function broadcastAccess() {
+  broadcast(() => true, { type: "access", requests: pendingAccess() })
+}
+
+/** The toolbar badge counts the enabled site scripts that run on each tab's page. */
+async function updateBadges(tabs?: chrome.tabs.Tab[]) {
+  const enabled = (await scripts.list()).filter((script) => script.enabled)
+  const targets = tabs ?? (await chrome.tabs.query({}))
+  await Promise.all(
+    targets.map((tab) => {
+      if (tab.id === undefined) return
+      const count = tab.url ? enabled.filter((script) => appliesTo(script, tab.url!)).length : 0
+      return chrome.action.setBadgeText({ tabId: tab.id, text: count ? String(count) : "" }).catch(() => undefined)
+    }),
+  )
 }
 
 /** Asks every open panel; the first answer wins. A cancelled tool call withdraws the request. */
@@ -231,6 +310,12 @@ function ensure(sessionID: string, location: { directory: string; workspaceID?: 
     location,
     windowId: windowID ?? chrome.windows.WINDOW_ID_CURRENT,
     service,
+    preview: (path) => {
+      const showing = Array.from(panels).filter((panel) => panel.sessionID === sessionID)
+      if (!showing.length)
+        throw new Error("No side panel is showing this conversation, so the file cannot be shown. Tell the user the path instead.")
+      showing.forEach((panel) => post(panel, { type: "preview", sessionID, path }))
+    },
     changed: (state) => {
       broadcast((panel) => panel.sessionID === sessionID, { type: "browser", state })
       const windows = new Set(Array.from(panels, (panel) => panel.windowID).filter((id) => id !== undefined))
@@ -319,8 +404,12 @@ function broadcast(filter: (panel: Panel) => boolean, message: ToPanel) {
   })
 }
 
+void chrome.action.setBadgeBackgroundColor({ color: "#3b3b3b" })
+void chrome.action.setBadgeTextColor?.({ color: "#ffffff" })
+
 chrome.tabs.onUpdated.addListener((_tabId, change, tab) => {
   void forEachBrowser((browser) => browser.tabUpdated(tab))
+  if (change.url || change.status === "loading") void updateBadges([tab])
   if (tab.active && (change.url || change.title || change.favIconUrl || change.status)) void sendActiveTab(tab.windowId)
 })
 chrome.tabs.onActivated.addListener((info) => {
@@ -336,6 +425,16 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.webNavigation.onCommitted.addListener((details) => {
   if (details.frameId !== 0 || details.documentLifecycle === "prerender") return
   void forEachBrowser((browser) => browser.committed(details.tabId))
+})
+chrome.downloads.onCreated.addListener((item) => {
+  void (async () => {
+    for (const browser of await Promise.all(Array.from(browsers.values()))) if (browser.download(item)) return
+  })()
+})
+chrome.downloads.onChanged.addListener((delta) => {
+  void chrome.downloads.search({ id: delta.id }).then(([item]) => {
+    if (item) void forEachBrowser((browser) => browser.downloadChanged(item))
+  })
 })
 chrome.webNavigation.onErrorOccurred.addListener((details) => {
   if (details.frameId !== 0) return

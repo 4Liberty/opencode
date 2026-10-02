@@ -7,6 +7,7 @@ import { Schema } from "effect"
 import type { BrowserState, BrowserStatus, PanelTab } from "../shared/protocol"
 import { browserFailure, unsupported } from "./errors"
 import { createBrowserPage, UnsupportedOperation, type BrowserPage } from "./page"
+import type { Recording } from "./profiling"
 import { normalizeURL, shareable } from "./policy"
 import type { Service } from "./service"
 
@@ -19,6 +20,8 @@ type Entry = {
   canGoForward: boolean
   loadError?: string
   page?: BrowserPage
+  /** When the agent last acted on this tab; downloads without a referrer go to the latest. */
+  active?: number
 }
 type Stored = Pick<Entry, "id" | "tabId" | "kind" | "generation">
 type Methods = (typeof Browser.Definition)["methods"]
@@ -56,6 +59,8 @@ export async function createSessionBrowser(input: {
   windowId: number
   service: Service
   changed: (state: BrowserState) => void
+  /** Shows a server file (browser.preview) in the panel showing this session; throws if none does. */
+  preview: (path: string) => void
 }) {
   const storageKey = `browser:${input.sessionID}`
   const entries = new Map<Browser.TabID, Entry>()
@@ -73,6 +78,7 @@ export async function createSessionBrowser(input: {
   let retry: ReturnType<typeof setTimeout> | undefined
   let stateTimer: ReturnType<typeof setTimeout> | undefined
   let guided = false
+  const recording: { recording?: Recording } = {}
   let lastPage: string | undefined
 
   // Tabs survive a service worker restart; their IDs must too, or the agent's tab IDs go stale.
@@ -172,6 +178,7 @@ export async function createSessionBrowser(input: {
         entry.canGoForward = value.canGoForward
         publish()
       },
+      shared: recording,
     }))
   const add = (tab: chrome.tabs.Tab, kind: Entry["kind"]) => {
     const entry: Entry = {
@@ -221,7 +228,10 @@ export async function createSessionBrowser(input: {
   const execute = async (command: Browser.Command, signal: AbortSignal): Promise<Browser.Result> => {
     const action = command.action
     if (action.type === "tabs.list") return { value: inventory(), files: [] }
-    if (action.type === "preview") throw new UnsupportedOperation()
+    if (action.type === "preview") {
+      input.preview(action.path)
+      return { value: { path: action.path }, files: [] }
+    }
     if (action.type === "tabs.open") {
       const url = normalizeURL(action.url ?? "about:blank")
       const tab = await chrome.tabs.create({ windowId: await targetWindow(), url, active: action.focus !== false })
@@ -244,6 +254,7 @@ export async function createSessionBrowser(input: {
       publish(true)
       return { value: inventory(), files: [] }
     }
+    entry.active = Date.now()
     const result = await page(entry).execute(command, signal)
     publish(true)
     return result
@@ -503,6 +514,22 @@ export async function createSessionBrowser(input: {
       if (value === lastPage) return
       lastPage = value
       void putContext("open-extension.page", value)
+    },
+    /** Claims a download if it came from one of this session's tabs; returns whether it did. */
+    download(item: chrome.downloads.DownloadItem) {
+      const list = Array.from(entries.values())
+      const byReferrer = item.referrer ? list.find((entry) => tabs.get(entry.tabId)?.url === item.referrer) : undefined
+      // A download the agent just triggered (within 15 seconds) belongs to the tab it was using.
+      const recent = list
+        .filter((entry) => entry.active && Date.now() - entry.active < 15_000)
+        .sort((a, b) => (b.active ?? 0) - (a.active ?? 0))[0]
+      const owner = byReferrer ?? recent
+      if (!owner) return false
+      page(owner).download(item)
+      return true
+    },
+    downloadChanged(item: chrome.downloads.DownloadItem) {
+      entries.forEach((entry) => entry.page?.downloadChanged(item))
     },
     loadFailed(tabId: number, message: string) {
       const entry = find(tabId)

@@ -7,29 +7,29 @@ import { Schema } from "effect"
 import { abortError, createCdp, waitFor } from "./cdp"
 import { CURSOR } from "./cursor"
 import { createDiagnostics } from "./diagnostics"
+import { createBrowserFiles } from "./files"
 import { normalizeURL } from "./policy"
+import { createProfiling, type Recording } from "./profiling"
 
 type Element = { backendID: number; frameID: string; sessionID?: string }
 
 const mac = /mac/i.test(navigator.userAgent)
-// Captures belong to the tab, not whichever document it now shows.
-const retainedOperations: readonly Browser.Method[] = ["navigate"]
-const unsupportedOperations: readonly Browser.Method[] = [
+// Captures and downloads belong to the tab, not whichever document it now shows.
+const retainedOperations: readonly Browser.Method[] = [
+  "navigate",
   "files.list",
   "files.get",
-  "trace.start",
   "trace.stop",
   "trace.analyze",
-  "cpu.start",
   "cpu.stop",
   "cpu.analyze",
-  "heap.snapshot",
   "heap.summary",
   "heap.query",
   "heap.object",
   "heap.compare",
-  "lighthouse",
 ]
+// Lighthouse runs in Node on the desktop; it is not bundled into the extension.
+const unsupportedOperations: readonly Browser.Method[] = ["lighthouse"]
 
 export type BrowserPage = ReturnType<typeof createBrowserPage>
 
@@ -43,6 +43,8 @@ export function createBrowserPage(options: {
   detached: (reason: string) => void
   /** Navigation history changed; the inventory republishes state. */
   history: (value: { canGoBack: boolean; canGoForward: boolean }) => void
+  /** The one performance trace the session may record at a time. */
+  shared: { recording?: Recording }
 }) {
   const cdp = createCdp(options.tabId, {
     detached: (reason) => {
@@ -54,6 +56,10 @@ export function createBrowserPage(options: {
     },
   })
   const diagnostics = createDiagnostics(cdp)
+  const documents = new Map<string, string>()
+  const sourceURLs = () => [...new Set([options.state().url, ...documents.values()])].sort()
+  const files = createBrowserFiles({ source: sourceURLs, readBlob })
+  const profiling = createProfiling({ tabId: options.tabId, cdp, files, source: sourceURLs, shared: options.shared })
   const refs = new Map<string, Element>()
   const sessions = new Map<string, string>()
   const parents = new Map<string, string>()
@@ -67,11 +73,13 @@ export function createBrowserPage(options: {
   let ready: Promise<void> | undefined
 
   cdp.on("Page.frameNavigated", ({ frame }) => {
+    documents.set(frame.id, frame.url)
     revision++
     if (!frame.parentId) void refreshHistory()
   })
   cdp.on("Page.navigatedWithinDocument", () => void refreshHistory())
-  cdp.on("Page.frameDetached", () => {
+  cdp.on("Page.frameDetached", ({ frameId }) => {
+    documents.delete(frameId)
     revision++
   })
   cdp.on("Runtime.executionContextCreated", ({ context }, sessionID) => {
@@ -131,9 +139,12 @@ export function createBrowserPage(options: {
     /** A new document replaced the old one; refs, frames, and diagnostics belong to the old one. */
     reset() {
       refs.clear()
+      documents.clear()
       diagnostics.clear()
       revision++
     },
+    download: (item: chrome.downloads.DownloadItem) => files.download(item),
+    downloadChanged: (item: chrome.downloads.DownloadItem) => files.downloadChanged(item),
     async execute(command: Browser.Command, signal: AbortSignal): Promise<Browser.Result> {
       abortError(signal)
       if (closed)
@@ -181,7 +192,11 @@ export function createBrowserPage(options: {
       }
       if (command.action.type !== "dialog") dialogs.add(reject)
       try {
-        return await Promise.race([execute(command.action, command.files, run.signal), modal.promise, cancelled.promise])
+        return await Promise.race([
+          execute(command.action, command.files, run.signal, command.target),
+          modal.promise,
+          cancelled.promise,
+        ])
       } finally {
         signal.removeEventListener("abort", cancel)
         dialogs.delete(reject)
@@ -191,8 +206,23 @@ export function createBrowserPage(options: {
       if (closed) return
       closed = true
       refs.clear()
+      await profiling.dispose()
+      files.clear()
       await cdp.dispose()
     },
+  }
+
+  /** Reads a blob: download inside the page that created it, while it still exists. */
+  async function readBlob(url: string) {
+    const value = await cdp
+      .send("Runtime.evaluate", {
+        expression: `fetch(${JSON.stringify(url)}).then((r) => r.blob()).then((b) => b.size > ${Browser.MAX_FILE_BYTES} ? null : new Promise((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(",")[1] ?? ""); reader.readAsDataURL(b) })).catch(() => null)`,
+        awaitPromise: true,
+        returnByValue: true,
+      })
+      .catch(() => undefined)
+    const encoded = value?.result.value
+    return typeof encoded === "string" ? Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0)) : null
   }
 
   async function refreshHistory() {
@@ -218,6 +248,7 @@ export function createBrowserPage(options: {
     action: Browser.Action,
     transfers: readonly Browser.File[],
     signal: AbortSignal,
+    approved?: Browser.Target,
   ): Promise<Browser.Result> {
     const result = (value: unknown, attached: Browser.File[] = []): Browser.Result => {
       const json = Schema.decodeUnknownSync(Schema.Json)(value)
@@ -454,14 +485,12 @@ export function createBrowserPage(options: {
           captureBeyondViewport: true,
           clip: { ...bounds, scale },
         })
-        const data = Uint8Array.from(atob(capture.data), (char) => char.charCodeAt(0))
-        if (data.byteLength > Browser.MAX_FILE_BYTES)
-          throw new Error(
-            "Capture exceeds the 5 MiB transfer limit. Reduce screenshot maxWidth or quality, or capture an element. Do not retry an identical capture.",
-          )
-        return result({ tab: options.state() }, [
-          { id: Browser.FileID.make(`file_${crypto.randomUUID()}`), name: `screenshot.${format}`, mime: `image/${format}`, data },
-        ])
+        const id = files.save(
+          `screenshot.${format}`,
+          `image/${format}`,
+          Uint8Array.from(atob(capture.data), (char) => char.charCodeAt(0)),
+        )
+        return result({ tab: options.state() }, [await files.transfer(id)])
       }
       case "dialog": {
         if (action.action !== "get") {
@@ -492,6 +521,35 @@ export function createBrowserPage(options: {
         )
         break
       }
+      case "files.list":
+        return result({ tab: options.state(), files: files.list() })
+      case "files.get":
+        return result({ tab: options.state() }, [await files.transfer(action.fileID, approved?.resources)])
+      case "trace.start":
+        await profiling.startTrace(action.durationMs)
+        return result({ tab: options.state(), recording: true })
+      case "trace.stop": {
+        const value = await profiling.stopTrace()
+        return result({ tab: options.state(), durationMs: value.durationMs, incomplete: value.incomplete }, [
+          await files.transfer(value.id),
+        ])
+      }
+      case "cpu.start":
+        await profiling.startCpu()
+        return result({ tab: options.state(), recording: true })
+      case "cpu.stop": {
+        const value = await profiling.stopCpu()
+        return result({ tab: options.state(), durationMs: value.durationMs }, [await files.transfer(value.id)])
+      }
+      case "heap.snapshot":
+        return result({ tab: options.state() }, [await files.transfer(await profiling.heap())])
+      case "trace.analyze":
+      case "cpu.analyze":
+      case "heap.summary":
+      case "heap.query":
+      case "heap.object":
+      case "heap.compare":
+        return result({ tab: options.state(), ...(await profiling.analyze(action)) })
       case "console":
         return result({ tab: options.state(), ...diagnostics.console(action) })
       case "network.list":
@@ -514,7 +572,16 @@ export function createBrowserPage(options: {
         resources: [dialog ? dialogURL : options.state().url],
         key: `${options.state().generation}:${dialogRevision}:${Boolean(dialog)}`,
       }
+    const fileIDs =
+      action.type === "heap.compare" ? [action.before, action.after] : "fileID" in action ? [action.fileID] : []
+    if (fileIDs.length)
+      return {
+        resources: [...new Set(fileIDs.flatMap((id) => files.get(id).resources))].sort(),
+        key: JSON.stringify(fileIDs),
+      }
     if (action.type === "network.get") return { resources: [diagnostics.info(action.id).url], key: action.id }
+    if (action.type === "trace.stop" || action.type === "cpu.stop")
+      return profiling.target(action.type === "trace.stop" ? "trace" : "cpu")
     const tree = await frames()
     const selected = (
       action.type === "drag"
@@ -540,8 +607,8 @@ export function createBrowserPage(options: {
         ...new Set(
           action.type === "navigate"
             ? [new URL(normalizeURL(action.url)).href]
-            : action.type === "screenshot"
-              ? tree.map((frame) => frame.url)
+            : ["screenshot", "trace.start", "cpu.start", "heap.snapshot"].includes(action.type)
+              ? sourceURLs()
               : urls.length
                 ? urls
                 : [options.state().url],

@@ -52,6 +52,14 @@ export type ActiveTab = {
   sessionID?: string
 }
 
+/** One grant covers history, bookmarks, top sites, and recently closed tabs for a session. */
+export type AccessRequest = {
+  id: string
+  sessionID: string
+  /** What the agent asked for first, for example "history". */
+  reason: "history" | "bookmarks" | "top_sites" | "recently_closed"
+}
+
 export type ToBackground =
   | { type: "panel.hello"; windowID: number }
   | { type: "service.refresh" }
@@ -73,6 +81,8 @@ export type ToBackground =
   | { type: "scripts.refresh" }
   /** The user's answer to an agent's install request. */
   | { type: "approval.reply"; id: string; approve: boolean }
+  /** The user's answer to a request to read browsing history and bookmarks. */
+  | { type: "access.reply"; id: string; allow: boolean }
 
 export type ToPanel =
   | { type: "service"; state: ServiceState }
@@ -85,3 +95,7 @@ export type ToPanel =
   | { type: "approvals"; approvals: SiteScriptApproval[] }
   /** A panel-initiated script change succeeded; for confirmation toasts. */
   | { type: "notice"; message: string }
+  /** Sessions asking to read browsing history, bookmarks, top sites, and recently closed tabs. */
+  | { type: "access"; requests: AccessRequest[] }
+  /** The agent asked to show a server file (browser.preview) in the panel showing this session. */
+  | { type: "preview"; sessionID: string; path: string }

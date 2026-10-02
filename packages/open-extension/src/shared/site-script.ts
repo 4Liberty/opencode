@@ -122,3 +122,32 @@ export function hostLabel(pattern: string) {
   if (!host) return pattern
   return host === "*" ? "all sites" : host.replace(/^\*\./, "")
 }
+
+/** Chrome match-pattern semantics: `*` scheme is http(s), `*.host` includes the host, `*` in the path is a glob. */
+export function matchesPattern(pattern: string, url: string) {
+  if (!URL.canParse(url)) return false
+  const target = new URL(url)
+  if (pattern === "<all_urls>") return /^(https?|file|ftp|wss?):$/.test(target.protocol)
+  const parts = pattern.match(/^(\*|[a-z][a-z0-9+.-]*):\/\/([^/]*)(\/.*)$/i)
+  if (!parts) return false
+  const scheme = parts[1].toLowerCase()
+  const protocol = target.protocol.slice(0, -1)
+  if (scheme === "*" ? protocol !== "http" && protocol !== "https" : scheme !== protocol) return false
+  const host = parts[2].toLowerCase()
+  const hostname = (host.includes(":") ? target.host : target.hostname).toLowerCase()
+  const hostMatches =
+    host === "*" ||
+    host === hostname ||
+    (host.startsWith("*.") && (hostname === host.slice(2) || hostname.endsWith(host.slice(1))))
+  if (!hostMatches) return false
+  const glob = new RegExp(`^${parts[3].split("*").map((piece) => piece.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`)
+  return glob.test(target.pathname + target.search)
+}
+
+/** Whether a script applies to a URL: any match pattern and no exclusion. */
+export function appliesTo(script: Pick<SiteScript, "matches" | "excludeMatches">, url: string) {
+  return (
+    script.matches.some((pattern) => matchesPattern(pattern, url)) &&
+    !(script.excludeMatches ?? []).some((pattern) => matchesPattern(pattern, url))
+  )
+}
