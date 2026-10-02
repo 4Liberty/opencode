@@ -75,6 +75,12 @@ const Handlers = Runtime.handlers(Commands, {
     set: () => import("./commands/handlers/service/set"),
     unset: () => import("./commands/handlers/service/unset"),
   },
+  sidepanel: {
+    install: () => import("./commands/handlers/sidepanel/install"),
+    status: () => import("./commands/handlers/sidepanel/status"),
+    uninstall: () => import("./commands/handlers/sidepanel/uninstall"),
+    host: () => import("./commands/handlers/sidepanel/host"),
+  },
   serve: () => import("./commands/handlers/serve"),
 })
 
