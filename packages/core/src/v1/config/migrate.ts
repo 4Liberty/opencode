@@ -93,30 +93,23 @@ function experimental(info: typeof ConfigV1.Info.Type) {
   }
 }
 
-function permissions(info?: ConfigPermissionV1.Info, tools?: Readonly<Record<string, boolean>>) {
-  const rules: Array<{ action: string; resource: string; effect: ConfigPermissionV1.Action }> = Object.entries(
-    tools ?? {},
-  ).map(([action, enabled]) => ({
-    action: normalizeAction(action),
-    resource: "*",
-    effect: enabled ? ("allow" as const) : ("deny" as const),
-  }))
-  for (const [key, rule] of Object.entries(info ?? {})) {
-    if (!rule) continue
+function permissions(info?: ConfigPermissionV1.Info, tools?: ReadonlyArray<readonly [string, boolean]>) {
+  const rules: Array<{ action: string; resource: string; effect: ConfigPermissionV1.Action }> = (tools ?? []).map(
+    ([action, enabled]) => ({
+      action: normalizeAction(action),
+      resource: "*",
+      effect: enabled ? "allow" : "deny",
+    }),
+  )
+  for (const [key, rule] of info ?? []) {
     const action = normalizeAction(key)
     if (typeof rule === "string") {
       rules.push({ action, resource: "*", effect: rule })
       continue
     }
-    rules.push(...Object.entries(rule).map(([resource, effect]) => ({ action, resource, effect })))
+    rules.push(...rule.map(([resource, effect]) => ({ action, resource, effect })))
   }
   return rules.length ? rules : undefined
-}
-
-// Effect emits declared keys in schema order. Permission rules are last-match-wins, so restore the author's key order.
-function inInputOrder(info: ConfigPermissionV1.Info | undefined, input: unknown): ConfigPermissionV1.Info | undefined {
-  if (info === undefined || typeof input !== "object" || input === null) return info
-  return Object.fromEntries(Object.keys(input).flatMap((key) => (Object.hasOwn(info, key) ? [[key, info[key]]] : [])))
 }
 
 // Map v1 permission/tool keys onto their renamed v2 tool actions so migrated rules keep matching.
@@ -144,7 +137,7 @@ function agents(info: typeof ConfigV1.Info.Type) {
   }
 }
 
-export function migrateAgent(info: ConfigAgentV1.Info, permission?: unknown) {
+export function migrateAgent(info: ConfigAgentV1.Info) {
   const body = {
     ...info.options,
     ...(info.temperature === undefined ? {} : { temperature: info.temperature }),
@@ -162,7 +155,7 @@ export function migrateAgent(info: ConfigAgentV1.Info, permission?: unknown) {
         color: info.color === undefined ? undefined : info.color.startsWith("#") ? info.color : "#aaaaaa",
         steps: info.steps,
         disabled: info.disable,
-        permissions: permissions(inInputOrder(info.permission, permission)),
+        permissions: permissions(info.permission),
       }),
     ),
   )

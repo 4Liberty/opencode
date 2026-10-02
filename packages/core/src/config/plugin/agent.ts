@@ -195,8 +195,9 @@ function decode(file: { directory: string; filepath: string; primary: boolean },
       : markdown.data
   const agent = legacy
     ? Option.getOrUndefined(
-        Option.map(decodeLegacyAgent({ name, ...markdown.data, prompt: body }, { errors: "all" }), (agent) =>
-          ConfigMigrateV1.migrateAgent(agent, markdown.data.permission),
+        Option.map(
+          decodeLegacyAgent({ name, ...markdown.data, prompt: body }, { errors: "all" }),
+          ConfigMigrateV1.migrateAgent,
         ),
       )
     : Option.getOrUndefined(decodeAgent({ ...data, system: body }, { errors: "all" }))
