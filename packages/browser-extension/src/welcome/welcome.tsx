@@ -310,7 +310,7 @@ function Page() {
         </ol>
 
         <p class="mt-5 text-12-regular leading-[18px] text-v2-text-text-faint">
-          {ready()
+          {ready() && !problem()
             ? "You're set. You can close this tab."
             : "You can close this tab anytime. The side panel walks you through anything that's missing."}
         </p>
