@@ -29,7 +29,7 @@ An application embedding the fetch handler without a password must provide its o
 
 | Category                        | Rationale                                                               |
 | ------------------------------- | ----------------------------------------------------------------------- |
-| **Authorized server access**   | Access to the API with valid credentials is expected behavior           |
+| **Server access when opted-in** | If you enable server mode, API access is expected behavior              |
 | **Sandbox escapes**             | The permission system is not a sandbox (see above)                      |
 | **LLM provider data handling**  | Data sent to your configured LLM provider is governed by their policies |
 | **MCP server behavior**         | External MCP servers you configure are outside our trust boundary       |
