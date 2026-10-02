@@ -16,8 +16,12 @@ import { resolveConfigPath } from "../commands/handlers/mcp/add"
 
 export const HOST_NAME = "ai.opencode.browser"
 /** Extension IDs the host answers. The unpacked build's manifest key fixes its ID. */
-export const EXTENSION_IDS = ["afeafocngkodbmaipcngoamamfmekgfo"]
-/** Chrome Web Store listing; set once the extension is published. */
+/** The Chrome Web Store build, then the unpacked build (its ID is pinned by the manifest key). */
+export const EXTENSION_IDS = ["mfnicocicmmlkpjnaffgihfjhdgjkdjg", "afeafocngkodbmaipcngoamamfmekgfo"]
+/**
+ * Chrome Web Store listing; set once the extension is published:
+ * https://chromewebstore.google.com/detail/mfnicocicmmlkpjnaffgihfjhdgjkdjg
+ */
 export const STORE_URL: string | undefined = undefined
 export const PLUGIN_FILE = "opencode-browser.ts"
 /** Larger plugin sources are refused; the real one is a few kilobytes. */
