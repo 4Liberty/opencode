@@ -5,12 +5,13 @@ import { Icon } from "@opencode/ui/icon"
 import { IconButton } from "@opencode/ui/icon-button"
 import { Logo } from "@opencode/ui/logo"
 import { Tooltip } from "@opencode/ui/tooltip"
-import { Show, Suspense, createMemo, createSignal, lazy, onCleanup, onMount } from "solid-js"
+import { Match, Show, Suspense, Switch, createMemo, createSignal, lazy, onCleanup, onMount } from "solid-js"
 import { Composer } from "./composer"
 import { useServer } from "./connection"
 import { basename, toastError } from "./format"
 import { History } from "./history"
 import { ProjectPicker } from "./projects"
+import { ScriptApprovalDock, SiteScriptsView } from "./site-scripts"
 
 const SessionView = lazy(() => import("./session"))
 
@@ -18,6 +19,8 @@ export function Shell() {
   const server = useServer()
   const data = server.data
   const [view, setView] = createSignal<string>()
+  // The site scripts list replaces the conversation until the user goes back or opens another one.
+  const [managing, setManaging] = createSignal(false)
   // A directory picked for this panel's lifetime; every fresh panel starts in the server's home directory.
   const [picked, setPicked] = createSignal<string>()
   const home = () => data.location.info()?.directory
@@ -44,6 +47,7 @@ export function Shell() {
   }
 
   const open = (sessionID: string) => {
+    setManaging(false)
     setView(sessionID)
     const info = data.session.get(sessionID)
     // A session still being created is announced once the server has it (see `create`).
@@ -59,6 +63,7 @@ export function Shell() {
   }
 
   const startNew = () => {
+    setManaging(false)
     setView(undefined)
     server.background.hide()
     focusComposer()
@@ -74,8 +79,7 @@ export function Shell() {
   return (
     <div class="flex h-full min-h-0 flex-col bg-v2-background-bg-base">
       <header class="flex h-11 shrink-0 items-center gap-1 border-b border-v2-border-border-muted px-2">
-        <Show
-          when={view()}
+        <Switch
           fallback={
             <ProjectPicker
               directory={directory()}
@@ -87,32 +91,62 @@ export function Shell() {
             />
           }
         >
-          <Show when={session()?.parentID}>
-            {(parent) => (
-              <Tooltip placement="bottom" value="Back to parent session">
-                <IconButton
-                  variant="ghost-muted"
-                  size="large"
-                  icon={<Icon name="arrow-left" />}
-                  aria-label="Back to parent session"
-                  onClick={() => open(parent())}
-                />
-              </Tooltip>
-            )}
-          </Show>
-          <div class="flex min-w-0 flex-1 flex-col px-1.5">
-            <span class="truncate text-[13px] font-[530] leading-4 tracking-[-0.04px] text-v2-text-text-base">
-              {session()?.title || "New conversation"}
+          <Match when={managing()}>
+            <Tooltip placement="bottom" value="Back">
+              <IconButton
+                variant="ghost-muted"
+                size="large"
+                icon={<Icon name="arrow-left" />}
+                aria-label="Back"
+                onClick={() => {
+                  setManaging(false)
+                  focusComposer()
+                }}
+              />
+            </Tooltip>
+            <span class="min-w-0 flex-1 truncate px-1.5 text-[13px] font-[530] leading-4 tracking-[-0.04px] text-v2-text-text-base">
+              Site scripts
             </span>
-            <Show when={session()?.location.directory}>
-              {(value) => (
-                <span class="truncate text-12-regular leading-4 text-v2-text-text-faint">
-                  {value() === home() ? "Home" : basename(value())}
-                </span>
+          </Match>
+          <Match when={view()}>
+            <Show when={session()?.parentID}>
+              {(parent) => (
+                <Tooltip placement="bottom" value="Back to parent session">
+                  <IconButton
+                    variant="ghost-muted"
+                    size="large"
+                    icon={<Icon name="arrow-left" />}
+                    aria-label="Back to parent session"
+                    onClick={() => open(parent())}
+                  />
+                </Tooltip>
               )}
             </Show>
-          </div>
-        </Show>
+            <div class="flex min-w-0 flex-1 flex-col px-1.5">
+              <span class="truncate text-[13px] font-[530] leading-4 tracking-[-0.04px] text-v2-text-text-base">
+                {session()?.title || "New conversation"}
+              </span>
+              <Show when={session()?.location.directory}>
+                {(value) => (
+                  <span class="truncate text-12-regular leading-4 text-v2-text-text-faint">
+                    {value() === home() ? "Home" : basename(value())}
+                  </span>
+                )}
+              </Show>
+            </div>
+          </Match>
+        </Switch>
+        <Tooltip placement="bottom" value="Site scripts">
+          <IconButton
+            variant="ghost-muted"
+            size="large"
+            icon={<Icon name="code" />}
+            aria-label="Site scripts"
+            aria-pressed={managing()}
+            classList={{ "bg-v2-overlay-simple-overlay-hover": managing() }}
+            onClick={() => setManaging((value) => !value)}
+          />
+        </Tooltip>
         <History directory={session()?.location.directory ?? directory()} current={view()} onOpen={open} />
         <Tooltip placement="bottom-end" value="New conversation">
           <IconButton
@@ -126,29 +160,42 @@ export function Shell() {
       </header>
       <ConnectionNotice />
       <Show
-        when={view()}
-        keyed
+        when={!managing()}
         fallback={
           <>
-            <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 px-8 pb-8 text-center">
-              <div data-component="new-chat-logo" aria-hidden="true" class="text-v2-background-bg-inverse">
-                <Logo class="block aspect-[234/42] w-[136px] opacity-25" />
-              </div>
-              <p class="max-w-[248px] text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-faint">
-                Ask about this page, or have the agent use your tabs.
-              </p>
-            </div>
-            <div class="shrink-0 px-2 pb-2">
-              <Composer directory={directory()} onCreate={create} ref={(element) => (composer.current = element)} />
+            <SiteScriptsView />
+            <div class="flex shrink-0 flex-col px-2 empty:hidden [&:not(:empty)]:pb-2">
+              <ScriptApprovalDock />
             </div>
           </>
         }
       >
-        {(id) => (
-          <Suspense>
-            <SessionView sessionID={id} onOpen={open} composerRef={(element) => (composer.current = element)} />
-          </Suspense>
-        )}
+        <Show
+          when={view()}
+          keyed
+          fallback={
+            <>
+              <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 px-8 pb-8 text-center">
+                <div data-component="new-chat-logo" aria-hidden="true" class="text-v2-background-bg-inverse">
+                  <Logo class="block aspect-[234/42] w-[136px] opacity-25" />
+                </div>
+                <p class="max-w-[248px] text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-faint">
+                  Ask about this page, or have the agent use your tabs.
+                </p>
+              </div>
+              <div class="flex shrink-0 flex-col gap-1 px-2 pb-2">
+                <ScriptApprovalDock />
+                <Composer directory={directory()} onCreate={create} ref={(element) => (composer.current = element)} />
+              </div>
+            </>
+          }
+        >
+          {(id) => (
+            <Suspense>
+              <SessionView sessionID={id} onOpen={open} composerRef={(element) => (composer.current = element)} />
+            </Suspense>
+          )}
+        </Show>
       </Show>
     </div>
   )

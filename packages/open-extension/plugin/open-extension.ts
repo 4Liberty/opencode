@@ -99,7 +99,7 @@ export default {
       editor.add({
         name: "install",
         description:
-          "Install or update a site script. The user approves it in the Open Extension side panel; the call waits for their answer and fails if they decline. A script with the same id, or the same name and matches, is replaced. Matching tabs pick it up on their next load.",
+          "Install or update a site script. The Open Extension side panel shows the user an Install (or Update) / Deny prompt with the code; the call waits for their answer and fails if they choose Deny. A script with the same id, or the same name and matches, is replaced. Matching tabs pick it up on their next load.",
         input: {
           type: "object",
           properties: {

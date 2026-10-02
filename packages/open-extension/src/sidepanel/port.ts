@@ -2,7 +2,8 @@
 // Chrome may stop and restart an MV3 worker at any time. The panel keeps its own state and, on every
 // reconnect, re-announces its window and the session it shows so the worker can re-derive its state.
 import { createMemo, onCleanup } from "solid-js"
-import { createStore } from "solid-js/store"
+import { showToast } from "@opencode/ui/toast"
+import { createStore, reconcile } from "solid-js/store"
 import {
   PANEL_PORT,
   type ActiveTab,
@@ -11,6 +12,7 @@ import {
   type ToBackground,
   type ToPanel,
 } from "../shared/protocol"
+import type { SiteScriptApproval, SiteScriptsState } from "../shared/site-script"
 import { toastError } from "./format"
 
 type View = Extract<ToBackground, { type: "session.show" | "session.hide" }>
@@ -24,7 +26,16 @@ export function createBackground() {
     service: ServiceState
     browser?: BrowserState
     activeTab: ActiveTab | null
-  }>({ service: { status: "loading" }, activeTab: null })
+    scripts: SiteScriptsState
+    /** Agent install requests waiting for the user, oldest first. */
+    approvals: SiteScriptApproval[]
+  }>({
+    service: { status: "loading" },
+    activeTab: null,
+    // Assume allowed until the worker says otherwise, so the setup notice does not flash on open.
+    scripts: { available: true, scripts: [] },
+    approvals: [],
+  })
   const windowID = chrome.windows.getCurrent().then((window) => window.id ?? chrome.windows.WINDOW_ID_CURRENT)
   let view: View = { type: "session.hide" }
   let disposed = false
@@ -49,6 +60,9 @@ export function createBackground() {
       if (message.type === "service") return setState("service", message.state)
       if (message.type === "browser") return setState("browser", message.state)
       if (message.type === "error") return toastError("Open Extension")(message.message)
+      if (message.type === "notice") return showToast({ variant: "success", description: message.message })
+      if (message.type === "scripts") return setState("scripts", reconcile(message.state))
+      if (message.type === "approvals") return setState("approvals", message.approvals)
       if (message.type === "activeTab") setState("activeTab", message.tab)
     })
     next.onDisconnect.addListener(() => {

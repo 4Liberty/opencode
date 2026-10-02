@@ -141,7 +141,7 @@ async function runScriptsCommand(command: ScriptsCommand, signal: AbortSignal): 
     case "get":
       return scripts.get(command.id)
     case "install": {
-      if (!(await approve(command.draft, signal))) throw new Error("The user declined to install this site script.")
+      if (!(await approve(command.draft, signal))) throw new Error("The user chose Deny in the side panel; the site script was not installed.")
       const script = await scripts.install(command.draft)
       return { ...summary(script), note: `Installed. Reload ${sites(script)} to run it, then verify on the page.` }
     }

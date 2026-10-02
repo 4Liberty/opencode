@@ -16,6 +16,7 @@ import { Composer } from "./composer"
 import { useServer } from "./connection"
 import { PermissionDock, QuestionDock, UnsupportedFormDock, answerable } from "./docks"
 import { toastError } from "./format"
+import { ScriptApprovalDock, ScriptInstallCard } from "./site-scripts"
 
 const noDiffs: FileDiffInfo[] = []
 const idle: SessionStatus = { type: "idle" }
@@ -290,6 +291,10 @@ export default function SessionView(props: {
                   />
                 </Show>
               )}
+            </Show>
+            <ScriptApprovalDock />
+            <Show when={!blocked() && server.background.state.approvals.length === 0}>
+              <ScriptInstallCard sessionID={props.sessionID} />
             </Show>
             <BrowserStrip sessionID={props.sessionID} />
             <Show when={!blocked()}>
