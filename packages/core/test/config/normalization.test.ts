@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Duration, Effect, Schema } from "effect"
-import { Arbitrary } from "effect/unstable/arbitrary"
+import { Arbitrary, Duration, Effect, Schema } from "effect"
 import { ConfigNormalize } from "@opencode/core/config/normalize"
 import { Info } from "@opencode/schema/config"
 

@@ -14,8 +14,8 @@ import {
   Scope,
   Stream,
 } from "effect"
-import { HttpClient } from "effect/unstable/http"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { HttpClient } from "effect/http"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import type { SshConfig, SshHttp, SshItem, SshStart, SshState } from "./contract"
 import { createAskpass } from "./askpass"
 import { bootstrap } from "./bootstrap"

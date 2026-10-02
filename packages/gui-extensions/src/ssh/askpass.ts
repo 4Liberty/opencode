@@ -1,6 +1,6 @@
 import { NodeSocketServer } from "@effect/platform-node"
 import { Deferred, Effect, Fiber, Schema, Semaphore } from "effect"
-import { Socket } from "effect/unstable/socket"
+import { Socket } from "effect/socket"
 import { randomUUID } from "node:crypto"
 import { SshFailure } from "./command"
 
