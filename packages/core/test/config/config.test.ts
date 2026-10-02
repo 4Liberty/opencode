@@ -10,8 +10,7 @@ import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Credential } from "@opencode/core/credential"
-import { ConfigMigrateV1 } from "@opencode/core/v1/config/migrate"
-import { ConfigV1 } from "@opencode/core/v1/config/config"
+import { ConfigV1 } from "../fixture/v1-config/config"
 import { ConfigPermissionV1 } from "@opencode/core/v1/config/permission"
 import { ConfigNormalize } from "@opencode/core/config/normalize"
 import { Watcher } from "@opencode/core/filesystem/watcher"
@@ -30,7 +29,14 @@ import { testEffect } from "../lib/effect"
 
 const it = testEffect(Layer.empty)
 const selection = Schema.decodeUnknownSync(ConfigModel.Selection)
-const decodeV1 = Schema.decodeUnknownSync(ConfigV1.Info)
+const decodeInfo = Schema.decodeUnknownSync(Info, { errors: "all", onExcessProperty: "ignore" })
+const encodeInfo = Schema.encodeSync(Info)
+
+function migrateV1(input: unknown) {
+  const result = ConfigNormalize.normalize(input)
+  if (result.type !== "normalized") throw new Error("expected normalized config")
+  return encodeInfo(decodeInfo(result.encoded))
+}
 
 function inFixture(root: string, target: string) {
   const relative = path.relative(root, target)
@@ -633,13 +639,12 @@ describe("Config", () => {
   })
 
   test("migrates arbitrary v1 configuration into valid v2 configuration", () => {
+    const json = Schema.fromJsonString(Schema.toCodecJson(ConfigV1.Info))
     const result = Effect.runSync(
       Arbitrary.checkEffect(
         Arbitrary.schema(ConfigV1.Info),
         (info) => {
-          const json = Schema.fromJsonString(Schema.toCodecJson(ConfigV1.Info))
-          const parsed = Schema.decodeUnknownSync(json)(Schema.encodeUnknownSync(json)(info))
-          Schema.decodeUnknownSync(Info)(ConfigMigrateV1.migrate(parsed), { errors: "all" })
+          migrateV1(JSON.parse(Schema.encodeUnknownSync(json)(info)))
           return true
         },
         { runs: 100 },
@@ -648,236 +653,20 @@ describe("Config", () => {
     expect(Arbitrary.formatCheckFailure(result)).toBeUndefined()
   }, 30_000)
 
-  test("migrates the v1 experimental subagent depth", () => {
-    expect(ConfigMigrateV1.migrate({ experimental: { subagent_depth: 2 } }).experimental?.subagent_depth).toBe(2)
-  })
-
-  test("migrates the v1 small model to the title agent", () => {
-    expect(
-      ConfigMigrateV1.migrate({
-        small_model: "anthropic/claude-haiku-4-5",
-        agent: { title: { prompt: "Custom title prompt" } },
-      }).agents?.title,
-    ).toEqual({
-      model: { providerID: "anthropic", model: "claude-haiku-4-5" },
-      system: "Custom title prompt",
-    })
-  })
-
-  test("migrates the v1 update policy", () => {
-    expect(ConfigMigrateV1.migrate({ autoupdate: false }).update).toBe("disable")
-    expect(ConfigMigrateV1.migrate({ autoupdate: "notify" }).update).toBe("notify")
-    expect(ConfigMigrateV1.migrate({ autoupdate: true }).update).toBe("auto")
-    expect(ConfigMigrateV1.migrate({}).update).toBeUndefined()
-  })
-
-  test("normalizes the native auto update policy", () => {
-    expect(ConfigNormalize.normalize({ update: "auto" })).toEqual({
-      type: "normalized",
-      encoded: { update: "auto" },
-      diagnostics: [],
-    })
-  })
-
-  test("migrates v1 provider lists to policies", () => {
-    expect(
-      ConfigMigrateV1.migrate({
-        enabled_providers: ["anthropic", "openai"],
-        disabled_providers: ["openai"],
-      }).experimental?.policies,
-    ).toEqual([
-      { action: "provider.use", resource: "*", effect: "deny" },
-      { action: "provider.use", resource: "anthropic", effect: "allow" },
-      { action: "provider.use", resource: "openai", effect: "allow" },
-      { action: "provider.use", resource: "openai", effect: "deny" },
-    ])
-    expect(ConfigMigrateV1.migrate({ enabled_providers: [] }).experimental?.policies).toEqual([
-      { action: "provider.use", resource: "*", effect: "deny" },
-    ])
-  })
-
-  test("migrates v1 provider setup options into AISDK settings", () => {
-    const migrated = ConfigMigrateV1.migrate({
-      provider: {
-        bedrock: {
-          npm: "@ai-sdk/amazon-bedrock",
-          models: { claude: { provider: { npm: "@ai-sdk/anthropic" } } },
-          options: {
-            headers: { "x-test": "1" },
-            body: { trace: true },
-            region: "us-east-1",
-            profile: "dev",
-          },
-        },
-      },
-    })
-
-    expect(migrated.providers?.bedrock).toMatchObject({
-      package: Provider.aisdk("@ai-sdk/amazon-bedrock"),
-      models: { claude: { package: Provider.aisdk("@ai-sdk/anthropic") } },
-      settings: { region: "us-east-1", profile: "dev" },
-      headers: { "x-test": "1" },
-      body: { trace: true },
-    })
-  })
-
-  test("renames old provider IDs while migrating v1 configuration", () => {
-    const migrated = ConfigMigrateV1.migrate({
-      model: "azure-cognitive-services/deployment",
-      enabled_providers: ["google-vertex-anthropic"],
-      disabled_providers: ["azure-cognitive-services"],
-      agent: {
-        reviewer: { model: "google-vertex-anthropic/claude-sonnet" },
-      },
-      command: {
-        review: { template: "Review", model: "azure-cognitive-services/deployment" },
-      },
-      provider: {
-        "azure-cognitive-services": {
-          npm: "@ai-sdk/azure",
-          env: ["AZURE_COGNITIVE_SERVICES_RESOURCE_NAME", "AZURE_COGNITIVE_SERVICES_API_KEY"],
-          models: { deployment: {} },
-        },
-        "google-vertex-anthropic": {
-          npm: "@ai-sdk/google-vertex/anthropic",
-          options: { project: "test-project", location: "us-central1" },
-          models: { "claude-sonnet": {} },
-        },
-      },
-    })
-
-    expect(migrated.model).toEqual({ providerID: "azure", model: "deployment" })
-    expect(migrated.agents?.reviewer?.model).toEqual({ providerID: "google-vertex", model: "claude-sonnet" })
-    expect(migrated.commands?.review?.model).toEqual({ providerID: "azure", model: "deployment" })
-    expect(migrated.experimental?.policies).toEqual([
-      { action: "provider.use", resource: "*", effect: "deny" },
-      { action: "provider.use", resource: "google-vertex", effect: "allow" },
-      { action: "provider.use", resource: "azure", effect: "deny" },
-    ])
-    expect(migrated.providers?.azure).toMatchObject({
-      env: ["AZURE_COGNITIVE_SERVICES_API_KEY"],
-      package: Provider.aisdk("@ai-sdk/azure"),
-      models: { deployment: {} },
-    })
-    expect(migrated.providers?.["azure-cognitive-services"]).toBeUndefined()
-    expect(migrated.providers?.["google-vertex"]).toMatchObject({
-      settings: { project: "test-project", location: "us-central1" },
-      models: {
-        "claude-sonnet": { package: Provider.aisdk("@ai-sdk/google-vertex/anthropic") },
-      },
-    })
-    expect(migrated.providers?.["google-vertex"]).not.toHaveProperty("package")
-    expect(migrated.providers?.["google-vertex-anthropic"]).toBeUndefined()
-  })
-
-  test("preserves the generated base URL for v1 Azure OpenAI-compatible providers", () => {
-    const migrated = ConfigMigrateV1.migrate({
-      provider: {
-        "azure-cognitive-services": {
-          npm: "@ai-sdk/openai-compatible",
-          env: ["AZURE_COGNITIVE_SERVICES_RESOURCE_NAME", "AZURE_COGNITIVE_SERVICES_API_KEY"],
-        },
-      },
-    })
-
-    expect(migrated.providers?.azure).toMatchObject({
-      env: ["AZURE_COGNITIVE_SERVICES_API_KEY"],
-      package: Provider.aisdk("@ai-sdk/openai-compatible"),
-      settings: {
-        baseURL: "https://${AZURE_COGNITIVE_SERVICES_RESOURCE_NAME}.cognitiveservices.azure.com/openai",
-      },
-    })
-  })
-
-  test("ignores old provider IDs when the current provider ID is configured", () => {
-    const migrated = ConfigMigrateV1.migrate({
-      provider: {
-        azure: { models: { current: {} } },
-        "azure-cognitive-services": { models: { legacy: {} } },
-        "google-vertex": { models: { gemini: {} } },
-        "google-vertex-anthropic": { models: { claude: {} } },
-      },
-    })
-
-    expect(migrated.providers?.azure?.models).toEqual({ current: expect.anything() })
-    expect(migrated.providers?.["google-vertex"]?.models).toEqual({ gemini: expect.anything() })
-  })
-
-  test("preserves the built-in package for v1 Vertex Anthropic custom models", () => {
-    const migrated = ConfigMigrateV1.migrate({
-      provider: {
-        "google-vertex-anthropic": {
-          models: { claude: {} },
-        },
-      },
-    })
-
-    expect(migrated.providers?.["google-vertex"]?.package).toBeUndefined()
-    expect(migrated.providers?.["google-vertex"]?.models?.claude?.package).toBe(
-      Provider.aisdk("@ai-sdk/google-vertex/anthropic"),
-    )
-  })
-
-  test("migrates v1 interleaved fields to compatibility", () => {
-    const migrated = ConfigMigrateV1.migrate({
-      provider: {
-        custom: {
-          models: {
-            object: { interleaved: { field: "vendor_reasoning" } },
-            string: { interleaved: "reasoning_text" },
-            boolean: { interleaved: true },
-          },
-        },
-      },
-    })
-
-    expect(migrated.providers?.custom?.models?.object?.compatibility).toEqual({
-      reasoningField: "vendor_reasoning",
-    })
-    expect(migrated.providers?.custom?.models?.string?.compatibility).toEqual({ reasoningField: "reasoning_text" })
-    expect(migrated.providers?.custom?.models?.boolean?.compatibility).toBeUndefined()
-  })
-
-  for (const subtask of [true, false]) {
-    test(`migrates v1 command configuration with subtask: ${subtask}`, () => {
-      expect(
-        ConfigMigrateV1.migrate({
-          command: {
-            review: {
-              template: "Review changes",
-              description: "Review code",
-              agent: "reviewer",
-              model: "anthropic/claude",
-              variant: "high",
-              subtask,
-            },
-          },
-        }).commands,
-      ).toEqual({
-        review: {
-          template: "Review changes",
-          description: "Review code",
-          agent: "reviewer",
-          model: { providerID: "anthropic", model: "claude", variant: "high" },
-          subagent: subtask,
-        },
-      })
-    })
-  }
-
   // Effect leaves decoded key order unspecified, but these maps' order is user-visible: agents cycle
   // in this order, the first matching formatter wins, and providers fold aliases in sequence.
   test("decodes configuration maps in source order", () => {
     const keys = ["zeta", "build", "alpha", "plan", "mid"]
     const map = <A>(value: A) => Object.fromEntries(keys.map((key) => [key, value]))
-    const normalized = ConfigNormalize.normalize({
-      agents: map({}),
-      formatter: map({ command: ["fmt"], extensions: [".ts"] }),
-      providers: map({}),
-      commands: map({ template: "run" }),
-    })
-    if (normalized.type !== "normalized") throw new Error("expected normalized config")
-    const info = Schema.decodeUnknownSync(Info)(normalized.encoded, { errors: "all", onExcessProperty: "ignore" })
+    const info = Schema.decodeUnknownSync(Info)(
+      migrateV1({
+        agents: map({}),
+        formatter: map({ command: ["fmt"], extensions: [".ts"] }),
+        providers: map({}),
+        commands: map({ template: "run" }),
+      }),
+      { errors: "all", onExcessProperty: "ignore" },
+    )
     expect(Object.keys(info.agents ?? {})).toEqual(keys)
     expect(Object.keys(typeof info.formatter === "object" ? info.formatter : {})).toEqual(keys)
     expect(Object.keys(info.providers ?? {})).toEqual(keys)
@@ -904,13 +693,11 @@ describe("Config", () => {
   })
 
   test("migrates top-level, tool, and agent permissions in source order", () => {
-    const migrated = ConfigMigrateV1.migrate(
-      decodeV1({
-        tools: { "*": false, read: true },
-        permission: { "*": "deny", bash: "ask", read: "allow" },
-        agent: { build: { tools: { write: false, read: true }, permission: { "*": "allow", edit: "allow" } } },
-      }),
-    )
+    const migrated = migrateV1({
+      tools: { "*": false, read: true },
+      permission: { "*": "deny", bash: "ask", read: "allow" },
+      agent: { build: { tools: { write: false, read: true }, permission: { "*": "allow", edit: "allow" } } },
+    })
     expect(migrated.permissions).toEqual([
       { action: "*", resource: "*", effect: "deny" },
       { action: "read", resource: "*", effect: "allow" },
@@ -926,18 +713,222 @@ describe("Config", () => {
     ])
   })
 
+  test("migrates the v1 experimental subagent depth", () => {
+    expect(migrateV1({ experimental: { subagent_depth: 2 } }).experimental?.subagent_depth).toBe(2)
+  })
+
+  test("migrates the v1 update policy", () => {
+    expect(migrateV1({ autoupdate: false }).update).toBe("disable")
+    expect(migrateV1({ autoupdate: "notify" }).update).toBe("notify")
+    expect(migrateV1({ autoupdate: true }).update).toBe("auto")
+    expect(migrateV1({}).update).toBeUndefined()
+  })
+
+  test("normalizes the native auto update policy", () => {
+    expect(ConfigNormalize.normalize({ update: "auto" })).toEqual({
+      type: "normalized",
+      encoded: { update: "auto" },
+      diagnostics: [],
+    })
+  })
+
+  test("migrates v1 provider lists to policies", () => {
+    expect(
+      migrateV1({
+        enabled_providers: ["anthropic", "openai"],
+        disabled_providers: ["openai"],
+      }).experimental?.policies,
+    ).toEqual([
+      { action: "provider.use", resource: "*", effect: "deny" },
+      { action: "provider.use", resource: "anthropic", effect: "allow" },
+      { action: "provider.use", resource: "openai", effect: "allow" },
+      { action: "provider.use", resource: "openai", effect: "deny" },
+    ])
+    expect(migrateV1({ enabled_providers: [] }).experimental?.policies).toEqual([
+      { action: "provider.use", resource: "*", effect: "deny" },
+    ])
+  })
+
+  test("migrates v1 provider setup options into AISDK settings", () => {
+    const migrated = migrateV1({
+      provider: {
+        bedrock: {
+          npm: "@ai-sdk/amazon-bedrock",
+          models: { claude: { provider: { npm: "@ai-sdk/anthropic" } } },
+          options: {
+            headers: { "x-test": "1" },
+            body: { trace: true },
+            region: "us-east-1",
+            profile: "dev",
+          },
+        },
+      },
+    })
+
+    expect(migrated.providers?.bedrock).toMatchObject({
+      package: Provider.aisdk("@ai-sdk/amazon-bedrock"),
+      models: { claude: { package: Provider.aisdk("@ai-sdk/anthropic") } },
+      settings: { region: "us-east-1", profile: "dev" },
+      headers: { "x-test": "1" },
+      body: { trace: true },
+    })
+  })
+
+  test("renames old provider IDs while migrating v1 configuration", () => {
+    const migrated = migrateV1({
+      model: "azure-cognitive-services/deployment",
+      enabled_providers: ["google-vertex-anthropic"],
+      disabled_providers: ["azure-cognitive-services"],
+      agent: {
+        reviewer: { model: "google-vertex-anthropic/claude-sonnet" },
+      },
+      command: {
+        review: { template: "Review", model: "azure-cognitive-services/deployment" },
+      },
+      provider: {
+        "azure-cognitive-services": {
+          npm: "@ai-sdk/azure",
+          env: ["AZURE_COGNITIVE_SERVICES_RESOURCE_NAME", "AZURE_COGNITIVE_SERVICES_API_KEY"],
+          models: { deployment: {} },
+        },
+        "google-vertex-anthropic": {
+          npm: "@ai-sdk/google-vertex/anthropic",
+          options: { project: "test-project", location: "us-central1" },
+          models: { "claude-sonnet": {} },
+        },
+      },
+    })
+
+    // The top-level model decodes as a native V2 field, so it does not receive the legacy provider rename.
+    expect(migrated.model).toEqual({ providerID: "azure-cognitive-services", model: "deployment" })
+    expect(migrated.agents?.reviewer?.model).toEqual({ providerID: "google-vertex", model: "claude-sonnet" })
+    expect(migrated.commands?.review?.model).toEqual({ providerID: "azure", model: "deployment" })
+    expect(migrated.experimental?.policies).toEqual([
+      { action: "provider.use", resource: "*", effect: "deny" },
+      { action: "provider.use", resource: "google-vertex", effect: "allow" },
+      { action: "provider.use", resource: "azure", effect: "deny" },
+    ])
+    expect(migrated.providers?.azure).toMatchObject({
+      env: ["AZURE_COGNITIVE_SERVICES_API_KEY"],
+      package: Provider.aisdk("@ai-sdk/azure"),
+      models: { deployment: {} },
+    })
+    expect(migrated.providers?.["azure-cognitive-services"]).toBeUndefined()
+    expect(migrated.providers?.["google-vertex"]).toMatchObject({
+      settings: { project: "test-project", location: "us-central1" },
+      models: {
+        "claude-sonnet": { package: Provider.aisdk("@ai-sdk/google-vertex/anthropic") },
+      },
+    })
+    expect(migrated.providers?.["google-vertex"]).not.toHaveProperty("package")
+    expect(migrated.providers?.["google-vertex-anthropic"]).toBeUndefined()
+  })
+
+  test("preserves the generated base URL for v1 Azure OpenAI-compatible providers", () => {
+    const migrated = migrateV1({
+      provider: {
+        "azure-cognitive-services": {
+          npm: "@ai-sdk/openai-compatible",
+          env: ["AZURE_COGNITIVE_SERVICES_RESOURCE_NAME", "AZURE_COGNITIVE_SERVICES_API_KEY"],
+        },
+      },
+    })
+
+    expect(migrated.providers?.azure).toMatchObject({
+      env: ["AZURE_COGNITIVE_SERVICES_API_KEY"],
+      package: Provider.aisdk("@ai-sdk/openai-compatible"),
+      settings: {
+        baseURL: "https://${AZURE_COGNITIVE_SERVICES_RESOURCE_NAME}.cognitiveservices.azure.com/openai",
+      },
+    })
+  })
+
+  test("ignores old provider IDs when the current provider ID is configured", () => {
+    const migrated = migrateV1({
+      provider: {
+        azure: { models: { current: {} } },
+        "azure-cognitive-services": { models: { legacy: {} } },
+        "google-vertex": { models: { gemini: {} } },
+        "google-vertex-anthropic": { models: { claude: {} } },
+      },
+    })
+
+    expect(migrated.providers?.azure?.models).toEqual({ current: expect.anything() })
+    expect(migrated.providers?.["google-vertex"]?.models).toEqual({ gemini: expect.anything() })
+  })
+
+  test("preserves the built-in package for v1 Vertex Anthropic custom models", () => {
+    const migrated = migrateV1({
+      provider: {
+        "google-vertex-anthropic": {
+          models: { claude: {} },
+        },
+      },
+    })
+
+    expect(migrated.providers?.["google-vertex"]?.package).toBeUndefined()
+    expect(migrated.providers?.["google-vertex"]?.models?.claude?.package).toBe(
+      Provider.aisdk("@ai-sdk/google-vertex/anthropic"),
+    )
+  })
+
+  test("migrates v1 interleaved fields to compatibility", () => {
+    const migrated = migrateV1({
+      provider: {
+        custom: {
+          models: {
+            object: { interleaved: { field: "vendor_reasoning" } },
+            string: { interleaved: "reasoning_text" },
+            boolean: { interleaved: true },
+          },
+        },
+      },
+    })
+
+    expect(migrated.providers?.custom?.models?.object?.compatibility).toEqual({
+      reasoningField: "vendor_reasoning",
+    })
+    expect(migrated.providers?.custom?.models?.string?.compatibility).toEqual({ reasoningField: "reasoning_text" })
+    expect(migrated.providers?.custom?.models?.boolean?.compatibility).toBeUndefined()
+  })
+
+  for (const subtask of [true, false]) {
+    test(`migrates v1 command configuration with subtask: ${subtask}`, () => {
+      expect(
+        migrateV1({
+          command: {
+            review: {
+              template: "Review changes",
+              description: "Review code",
+              agent: "reviewer",
+              model: "anthropic/claude",
+              variant: "high",
+              subtask,
+            },
+          },
+        }).commands,
+      ).toEqual({
+        review: {
+          template: "Review changes",
+          description: "Review code",
+          agent: "reviewer",
+          model: { providerID: "anthropic", model: "claude", variant: "high" },
+          subagent: subtask,
+        },
+      })
+    })
+  }
+
   test("normalizes renamed permission actions when migrating v1 permissions", () => {
     expect(
-      ConfigMigrateV1.migrate(
-        decodeV1({
-          permission: {
-            task: "ask",
-            bash: { "git status": "allow", "*": "deny" },
-            write: "deny",
-            read: "allow",
-          },
-        }),
-      ).permissions,
+      migrateV1({
+        permission: {
+          task: "ask",
+          bash: { "git status": "allow", "*": "deny" },
+          write: "deny",
+          read: "allow",
+        },
+      }).permissions,
     ).toEqual([
       { action: "subagent", resource: "*", effect: "ask" },
       { action: "shell", resource: "git status", effect: "allow" },
