@@ -1,5 +1,5 @@
 import { EOL } from "os"
-import { Effect, FileSystem } from "effect"
+import { Effect } from "effect"
 import { Commands } from "../../commands"
 import { Runtime } from "../../../framework/runtime"
 import { Sidepanel } from "../../../services/sidepanel"
@@ -7,8 +7,7 @@ import { Sidepanel } from "../../../services/sidepanel"
 export default Runtime.handler(
   Commands.commands.sidepanel.commands.status,
   Effect.fn("cli.sidepanel.status")(function* () {
-    const fs = yield* FileSystem.FileSystem
-    const registered = yield* Effect.filter(Sidepanel.browsers(), (browser) => fs.exists(Sidepanel.manifestPath(browser)))
+    const registered = yield* Sidepanel.registered()
     const connected = yield* Sidepanel.lastConnected()
     process.stdout.write(
       [

@@ -1,6 +1,6 @@
 # Open Extension
 
-opencode in the side panel of Chromium browsers (Chrome, Helium, Brave, Edge, Arc, Vivaldi). Chat with the
+opencode in the side panel of Chromium browsers (Chrome, Edge, Brave, Opera, Vivaldi, Chromium, Helium, Arc). Chat with the
 local opencode service next to any page, let the agent use real tabs, and extend sites with site scripts.
 
 - **Side panel chat** with the desktop app's session timeline, composer, and permission and question docks.
@@ -25,7 +25,8 @@ opencode sidepanel install                    # registers the helper with your b
 3. Click the toolbar icon, or press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>.</kbd>, to open the panel.
 
 `opencode sidepanel install` registers the `ai.opencode.sidepanel` native messaging host for every
-installed Chromium browser. The host is the opencode CLI itself (`opencode sidepanel host`): it starts the
+installed Chromium browser on macOS and Linux (a manifest in each browser's `NativeMessagingHosts`
+directory) and on Windows (per-user registry keys), matching the browsers ChatGPT's extension supports. The host is the opencode CLI itself (`opencode sidepanel host`): it starts the
 background service if needed and returns its URL and password, so the panel connects without
 configuration. The extension also hands the host its opencode plugin (`plugin/open-extension.ts`, the
 `site_scripts` and `browsing` tools), which is written to `~/.config/opencode/plugins/sidepanel.ts`

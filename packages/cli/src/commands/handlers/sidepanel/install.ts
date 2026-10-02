@@ -14,7 +14,7 @@ export default Runtime.handler(
     yield* Service.ensure(yield* ServiceConfig.options())
     const lines = installed.length
       ? ["Registered the side panel helper for:", ...installed.map((browser) => `  ${browser.name}`)]
-      : ["No supported browser found (Chrome, Brave, Edge, Arc, Vivaldi, Helium, Chromium)."]
+      : ["No supported browser found (Chrome, Edge, Brave, Opera, Vivaldi, Chromium, Helium, Arc)."]
     const opened = installed.length ? yield* Sidepanel.openStore(installed) : undefined
     process.stdout.write(
       [
