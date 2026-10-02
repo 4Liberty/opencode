@@ -35,10 +35,10 @@ import { SessionAffinity } from "./affinity.js"
 import { SessionModelTransport } from "./model-transport.js"
 import { SessionProviderContext } from "./provider-context.js"
 import { SessionRunnerModel } from "./runner/model.js"
-import { SessionSchema } from "./schema.js"
+import { Session } from "@opencode/schema/session"
 import { SessionSystemPrompt } from "./system-prompt.js"
 import { toLLMMessages } from "./runner/to-llm-message.js"
-import type { SessionMessage } from "./message.js"
+import type { SessionMessage } from "@opencode/schema/session-message"
 
 const IMAGE_BYTES_TRIGGER = 25 * 1024 * 1024 // 25 MiB
 const IMAGE_BYTES_TARGET = 15 * 1024 * 1024 // 15 MiB
@@ -71,7 +71,7 @@ export interface Prepared<Event = SessionRequest> {
 }
 
 export interface Input {
-  readonly session: SessionSchema.Info
+  readonly session: Session.Info
   readonly agent: Agent.ID
   readonly model: SessionRunnerModel.Resolved
   readonly tools?: Tool.Snapshot

@@ -39,6 +39,7 @@
     "ws": "8.21.0"
   },
   "devDependencies": {
+    "@opencode/schema": "workspace:*",
     "@tsconfig/bun": "catalog:",
     "@types/bun": "catalog:",
     "@types/ws": "8.18.1",

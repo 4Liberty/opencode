@@ -20,13 +20,13 @@ import { FileAccess } from "@opencode/core/file-access"
 import { LocationServiceMap } from "@opencode/core/location-service-map"
 import { Model } from "@opencode/core/model"
 import { Provider } from "@opencode/core/provider"
-import { AbsolutePath } from "@opencode/core/schema"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { Agent } from "@opencode/core/agent"
 import { Job } from "@opencode/core/job"
 import { Session } from "@opencode/core/session"
-import { SessionEvent } from "@opencode/core/session/event"
+import { SessionEvent } from "@opencode/schema/session-event"
 import { SessionExecution } from "@opencode/core/session/execution"
-import { SessionMessage } from "@opencode/core/session/message"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { SessionStore } from "@opencode/core/session/store"
 import { Permission } from "@opencode/core/permission"
 import { PermissionSaved } from "@opencode/core/permission/saved"
@@ -996,7 +996,7 @@ describe("ShellTool", () => {
             Effect.gen(function* () {
               const sessions = yield* Session.Service
               yield* sessions.environment({ sessionID, variables: { AI_AGENT: "outer-agent" } })
-              const command = isWindows ? '[Console]::Out.Write($env:AI_AGENT)' : 'printf %s "$AI_AGENT"'
+              const command = isWindows ? "[Console]::Out.Write($env:AI_AGENT)" : 'printf %s "$AI_AGENT"'
               const settled = yield* executeTool(registry, call({ command }))
 
               expect(settled.status).toBe("completed")
@@ -1362,9 +1362,7 @@ describe("ShellTool", () => {
               expect(settled.status).toBe("completed")
               expect(settled.metadata).toMatchObject({ exit: 7, truncated: false })
               expect(settled.content?.[0]).toEqual({ type: "text", text: "body" })
-              expect(settled.content?.[1]).toMatchObject(
-                Expected.text(expect.stringContaining("Exited with code 7")),
-              )
+              expect(settled.content?.[1]).toMatchObject(Expected.text(expect.stringContaining("Exited with code 7")))
             }),
           ),
         )
@@ -1391,9 +1389,7 @@ describe("ShellTool", () => {
                 if (!content || content.type !== "text") throw new Error("Expected text content")
                 expect(content.text.includes("output-start")).toBe(false)
                 expect(content.text.includes("output-end")).toBe(true)
-                expect(content).toMatchObject(
-                  Expected.text(expect.stringContaining("full output saved to ")),
-                )
+                expect(content).toMatchObject(Expected.text(expect.stringContaining("full output saved to ")))
               }),
             ),
           )

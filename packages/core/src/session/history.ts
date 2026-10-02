@@ -2,8 +2,8 @@ import { and, asc, desc, eq, gte, or, sql } from "drizzle-orm"
 import { Effect, Schema } from "effect"
 import { Database } from "../database/database.js"
 import { MessageDecodeError } from "./error.js"
-import { SessionMessage } from "./message.js"
-import { SessionSchema } from "./schema.js"
+import { SessionMessage } from "@opencode/schema/session-message"
+import { Session } from "@opencode/schema/session"
 import { Instructions } from "../instructions/index.js"
 import { InstructionState } from "./instruction-state.js"
 import { SessionProviderContext } from "./provider-context.js"
@@ -27,7 +27,7 @@ const replayable = (message: SessionMessage.Info, boundary: Boundary) =>
 
 export const latestCompaction = Effect.fnUntraced(function* (
   db: DatabaseService,
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   boundary: Boundary,
 ) {
   return yield* db
@@ -69,17 +69,13 @@ export const decodeMessageRow = (row: typeof SessionMessageTable.$inferSelect) =
     Effect.mapError(
       () =>
         new MessageDecodeError({
-          sessionID: SessionSchema.ID.make(row.session_id),
+          sessionID: Session.ID.make(row.session_id),
           messageID: SessionMessage.ID.make(row.id),
         }),
     ),
   )
 
-const messageEntries = Effect.fnUntraced(function* (
-  db: DatabaseService,
-  sessionID: SessionSchema.ID,
-  boundary: Boundary,
-) {
+const messageEntries = Effect.fnUntraced(function* (db: DatabaseService, sessionID: Session.ID, boundary: Boundary) {
   const compaction = yield* latestCompaction(db, sessionID, boundary)
   const rows = yield* db
     .select()
@@ -109,7 +105,7 @@ const messageEntries = Effect.fnUntraced(function* (
 
 export const load = Effect.fn("SessionHistory.load")(function* (
   db: DatabaseService,
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   boundary: Boundary,
 ) {
   return (yield* messageEntries(db, sessionID, boundary)).map((entry) => entry.message)
@@ -117,7 +113,7 @@ export const load = Effect.fn("SessionHistory.load")(function* (
 
 export const entriesForRunner = Effect.fn("SessionHistory.entriesForRunner")(function* (
   db: DatabaseService,
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   instructions: Instructions.List,
   boundary: Boundary,
 ) {
@@ -136,7 +132,7 @@ export const entriesForRunner = Effect.fn("SessionHistory.entriesForRunner")(fun
 
 export const preview = Effect.fn("SessionHistory.preview")(function* (
   db: DatabaseService,
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   instructions: Instructions.List,
   boundary: Boundary,
 ) {
@@ -164,7 +160,7 @@ export const preview = Effect.fn("SessionHistory.preview")(function* (
 /** Returns the session's first user message. */
 export const firstUserMessage = Effect.fn("SessionHistory.firstUserMessage")(function* (
   db: DatabaseService,
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
 ) {
   const row = yield* db
     .select()

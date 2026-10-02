@@ -6,10 +6,10 @@ import { makeLocationNode } from "@opencode/util/effect/app-node"
 import { Bus } from "../bus.js"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Location } from "../location.js"
-import { SessionEvent } from "./event.js"
+import { SessionEvent } from "@opencode/schema/session-event"
 import { MessageDecodeError } from "./error.js"
-import { SessionMessage } from "./message.js"
-import { SessionSchema } from "./schema.js"
+import { SessionMessage } from "@opencode/schema/session-message"
+import { Session } from "@opencode/schema/session"
 import { SessionStore } from "./store.js"
 
 const InjectedMetadata = Schema.Struct({
@@ -18,7 +18,7 @@ const InjectedMetadata = Schema.Struct({
 
 export interface Interface {
   readonly load: (input: {
-    readonly sessionID: SessionSchema.ID
+    readonly sessionID: Session.ID
     readonly paths: ReadonlyArray<string>
   }) => Effect.Effect<void, MessageDecodeError | FSUtil.Error>
 }
@@ -41,7 +41,7 @@ const layer = Layer.effect(
     // settles: the synthetic message metadata scanned below is the only lasting ledger,
     // so paths whose synthetics drop out of model-visible history (compaction, revert)
     // are re-discovered and re-injected instead of staying silently lost.
-    const inFlight = yield* Ref.make<Map<SessionSchema.ID, Set<string>>>(new Map())
+    const inFlight = yield* Ref.make<Map<Session.ID, Set<string>>>(new Map())
 
     const load = Effect.fn("SessionInstructions.load")(function* (input: Parameters<Interface["load"]>[0]) {
       const claimed = yield* Ref.modify(inFlight, (map) => {
@@ -96,7 +96,7 @@ const layer = Layer.effect(
   }),
 )
 
-function previouslyInjected(store: SessionStore.Interface, sessionID: SessionSchema.ID) {
+function previouslyInjected(store: SessionStore.Interface, sessionID: Session.ID) {
   return Effect.gen(function* () {
     const history = yield* store.context(sessionID)
     return new Set(

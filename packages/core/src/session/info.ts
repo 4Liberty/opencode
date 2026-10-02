@@ -4,25 +4,25 @@ import { Location } from "@opencode/schema/location"
 import { Model } from "@opencode/schema/model"
 import { Project } from "@opencode/schema/project"
 import { Provider } from "@opencode/schema/provider"
-import { AbsolutePath, RelativePath } from "../schema.js"
+import { AbsolutePath, RelativePath } from "@opencode/schema/schema"
 import { Workspace } from "@opencode/schema/workspace"
-import { SessionSchema } from "./schema.js"
+import { Session } from "@opencode/schema/session"
 import type { SessionTable } from "./sql.js"
 import { PersistedRevert } from "@opencode/schema/session-revert"
 import { Money } from "@opencode/schema/money"
 
 const decodeRevert = Schema.decodeUnknownSync(PersistedRevert)
 
-export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.Info {
-  return SessionSchema.Info.make({
-    id: SessionSchema.ID.make(row.id),
+export function fromRow(row: typeof SessionTable.$inferSelect): Session.Info {
+  return Session.Info.make({
+    id: Session.ID.make(row.id),
     projectID: Project.ID.make(row.project_id),
     title: row.title ?? undefined,
-    parentID: row.parent_id ? SessionSchema.ID.make(row.parent_id) : undefined,
+    parentID: row.parent_id ? Session.ID.make(row.parent_id) : undefined,
     fork:
       row.fork_session_id && row.fork_boundary
         ? {
-            sessionID: SessionSchema.ID.make(row.fork_session_id),
+            sessionID: Session.ID.make(row.fork_session_id),
             boundary: row.fork_boundary,
           }
         : undefined,

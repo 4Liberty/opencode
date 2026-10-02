@@ -10,10 +10,10 @@ import { EventTable } from "@opencode/core/event/sql"
 import { Instructions } from "@opencode/core/instructions/index"
 import { Project } from "@opencode/core/project"
 import { ProjectTable } from "@opencode/core/project/sql"
-import { AbsolutePath } from "@opencode/core/schema"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { InstructionState } from "@opencode/core/session/instruction-state"
 import { SessionProjector } from "@opencode/core/session/projector"
-import { SessionSchema } from "@opencode/core/session/schema"
+import { Session } from "@opencode/schema/session"
 import {
   InstructionBlobTable,
   InstructionStateTable,
@@ -40,7 +40,7 @@ const source = (name: string, read: Effect.Effect<string | Instructions.Unavaila
     },
   })
 
-const setup = (sessionID: SessionSchema.ID) =>
+const setup = (sessionID: Session.ID) =>
   Effect.gen(function* () {
     const { db } = yield* Database.Service
     yield* db
@@ -64,7 +64,7 @@ const setup = (sessionID: SessionSchema.ID) =>
     return { db, events: yield* Bus.Service }
   })
 
-const instructionEvents = (db: Database.Interface["db"], sessionID: SessionSchema.ID) =>
+const instructionEvents = (db: Database.Interface["db"], sessionID: Session.ID) =>
   db
     .select()
     .from(EventTable)
@@ -73,7 +73,7 @@ const instructionEvents = (db: Database.Interface["db"], sessionID: SessionSchem
     .all()
     .pipe(Effect.orDie)
 
-const preview = (db: Database.Interface["db"], sessionID: SessionSchema.ID, instructions: Instructions.List) =>
+const preview = (db: Database.Interface["db"], sessionID: Session.ID, instructions: Instructions.List) =>
   Instructions.read(instructions).pipe(
     Effect.flatMap((observed) => InstructionState.preview(db, sessionID, instructions, observed)),
   )
@@ -81,7 +81,7 @@ const preview = (db: Database.Interface["db"], sessionID: SessionSchema.ID, inst
 describe("InstructionState", () => {
   it.effect("observes each source once without publishing events or inserting blobs", () =>
     Effect.gen(function* () {
-      const sessionID = SessionSchema.ID.make("ses_instruction_observe")
+      const sessionID = Session.ID.make("ses_instruction_observe")
       const { db, events } = yield* setup(sessionID)
       const reads = { first: 0, second: 0 }
       const instructions = Instructions.combine([
@@ -136,7 +136,7 @@ describe("InstructionState", () => {
 
   it.effect("commits initial metadata and changed and removed deltas without rereading sources", () =>
     Effect.gen(function* () {
-      const sessionID = SessionSchema.ID.make("ses_instruction_commit")
+      const sessionID = Session.ID.make("ses_instruction_commit")
       const { db, events } = yield* setup(sessionID)
       let current = "initial"
       let retired: string | Instructions.Removed = "retired"
@@ -230,7 +230,7 @@ describe("InstructionState", () => {
 
   it.effect("keeps no-op observations free of events and blobs", () =>
     Effect.gen(function* () {
-      const sessionID = SessionSchema.ID.make("ses_instruction_noop")
+      const sessionID = Session.ID.make("ses_instruction_noop")
       const { db, events } = yield* setup(sessionID)
       const instructions = source("test/context", Effect.succeed("unchanged"))
       yield* InstructionState.prepare(db, events, instructions, sessionID)
@@ -255,7 +255,7 @@ describe("InstructionState", () => {
 
   it.effect("treats a missing state row as a fresh baseline without repairing it", () =>
     Effect.gen(function* () {
-      const sessionID = SessionSchema.ID.make("ses_instruction_generate")
+      const sessionID = Session.ID.make("ses_instruction_generate")
       const { db, events } = yield* setup(sessionID)
       let value = "Initial context"
       const instructions = source(
@@ -290,7 +290,7 @@ describe("InstructionState", () => {
 
   it.effect("trusts the projected state without consulting durable events", () =>
     Effect.gen(function* () {
-      const sessionID = SessionSchema.ID.make("ses_instruction_generate_stale")
+      const sessionID = Session.ID.make("ses_instruction_generate_stale")
       const { db, events } = yield* setup(sessionID)
       let value = "Initial context"
       const instructions = source(
@@ -324,7 +324,7 @@ describe("InstructionState", () => {
 
   it.effect("previews changed and removed instructions from observed blobs", () =>
     Effect.gen(function* () {
-      const sessionID = SessionSchema.ID.make("ses_instruction_generate_delta")
+      const sessionID = Session.ID.make("ses_instruction_generate_delta")
       const { db, events } = yield* setup(sessionID)
       let current = "Initial context"
       let retired: string | Instructions.Removed = "Retired context"
@@ -353,7 +353,7 @@ describe("InstructionState", () => {
 
   it.effect("persists chronological updates as system messages", () =>
     Effect.gen(function* () {
-      const sessionID = SessionSchema.ID.make("ses_instruction_messages")
+      const sessionID = Session.ID.make("ses_instruction_messages")
       const { db, events } = yield* setup(sessionID)
       let value = "Initial context"
       const instructions = source(
@@ -388,7 +388,7 @@ describe("InstructionState", () => {
 
   it.effect("assembles initial instructions without persisting a baseline", () =>
     Effect.gen(function* () {
-      const sessionID = SessionSchema.ID.make("ses_instruction_generate_initial")
+      const sessionID = Session.ID.make("ses_instruction_generate_initial")
       const { db } = yield* setup(sessionID)
       const instructions = source("test/context", Effect.succeed("Initial context"))
 
@@ -404,7 +404,7 @@ describe("InstructionState", () => {
 
   it.effect("retains a committed value when fresh instructions are unavailable", () =>
     Effect.gen(function* () {
-      const sessionID = SessionSchema.ID.make("ses_instruction_generate_unavailable")
+      const sessionID = Session.ID.make("ses_instruction_generate_unavailable")
       const { db, events } = yield* setup(sessionID)
       let value: string | Instructions.Unavailable = "Committed context"
       const instructions = source(
@@ -429,7 +429,7 @@ describe("InstructionState", () => {
 
   it.effect("blocks an unavailable initial instruction without persisting a baseline", () =>
     Effect.gen(function* () {
-      const sessionID = SessionSchema.ID.make("ses_instruction_generate_blocked")
+      const sessionID = Session.ID.make("ses_instruction_generate_blocked")
       const { db } = yield* setup(sessionID)
       const instructions = source("test/context", Effect.succeed(Instructions.unavailable))
 
@@ -445,8 +445,8 @@ describe("InstructionState", () => {
 
   it.effect("keeps prepare equivalent to observe followed by commit", () =>
     Effect.gen(function* () {
-      const observedSessionID = SessionSchema.ID.make("ses_instruction_composed")
-      const preparedSessionID = SessionSchema.ID.make("ses_instruction_prepared")
+      const observedSessionID = Session.ID.make("ses_instruction_composed")
+      const preparedSessionID = Session.ID.make("ses_instruction_prepared")
       const { db, events } = yield* setup(observedSessionID)
       yield* setup(preparedSessionID)
       let value: string | Instructions.Removed = "initial"

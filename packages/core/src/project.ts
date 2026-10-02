@@ -4,7 +4,7 @@ import { Context, Effect, Layer, Schema } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { and, asc, desc, eq, gte, isNull, lte, sql } from "drizzle-orm"
 import path from "path"
-import { AbsolutePath } from "./schema.js"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { Bus } from "./bus.js"
 import { Database } from "./database/database.js"
 import { Worktree } from "@opencode/schema/worktree"
@@ -13,24 +13,27 @@ import { Git } from "./git.js"
 import { AppProcess } from "@opencode/util/process"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { Hash } from "@opencode/util/hash"
-import { ProjectSchema } from "./project/schema.js"
+import { Project } from "@opencode/schema/project"
 import { ProjectTable, upsertProject } from "./project/sql.js"
 import { WorktreeTable } from "./worktree/sql.js"
 
-export const ID = ProjectSchema.ID
-export type ID = ProjectSchema.ID
+export const ID = Project.ID
+export type ID = Project.ID
 
-export const Vcs = ProjectSchema.Vcs
-export type Vcs = ProjectSchema.Vcs
+export const Vcs = Schema.Struct({
+  type: Project.Vcs,
+  store: AbsolutePath,
+})
+export type Vcs = typeof Vcs.Type
 
-export const Current = ProjectSchema.Current
-export type Current = ProjectSchema.Current
+export const Current = Project.Current
+export type Current = Project.Current
 
-export const Info = ProjectSchema.Info
+export const Info = Project.Info
 export interface Info extends Schema.Schema.Type<typeof Info> {}
 
-export const UpdateInput = ProjectSchema.UpdateInput
-export type UpdateInput = ProjectSchema.UpdateInput
+export const UpdateInput = Project.UpdateInput
+export type UpdateInput = Project.UpdateInput
 
 export class NotFoundError extends Schema.TaggedError<NotFoundError>()("Project.NotFoundError", {
   projectID: ID,
@@ -126,7 +129,7 @@ const layer = Layer.effect(
           .returning()
           .get()
           .pipe(Effect.orDie)
-        if (row) yield* bus.publish(ProjectSchema.Event.Updated, fromRow(row))
+        if (row) yield* bus.publish(Project.Event.Updated, fromRow(row))
       }
       if (!project.vcs) return project
       const directories: Array<{ projectID: ID; directory: AbsolutePath; strategy?: string }> = [
@@ -234,7 +237,7 @@ const layer = Layer.effect(
         .pipe(Effect.orDie)
       if (!row) return yield* new NotFoundError({ projectID: input.projectID })
       const project = fromRow(row)
-      yield* bus.publish(ProjectSchema.Event.Updated, project)
+      yield* bus.publish(Project.Event.Updated, project)
       return project
     })
 
@@ -251,7 +254,7 @@ const layer = Layer.effect(
         .returning()
         .get()
         .pipe(Effect.orDie)
-      if (row) yield* bus.publish(ProjectSchema.Event.Updated, fromRow(row))
+      if (row) yield* bus.publish(Project.Event.Updated, fromRow(row))
     })
 
     const cached = Effect.fnUntraced(function* (dir: string) {

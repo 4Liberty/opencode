@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import type { OpenCodeEvent } from "@opencode/client"
-import { SessionMessage } from "@opencode/core/session/message"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { Bus } from "@opencode/core/bus"
 import { Event } from "@opencode/schema/event"
 import { Expected } from "../../../../core/test/lib/session-message"

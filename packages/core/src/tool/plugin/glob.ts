@@ -9,7 +9,7 @@ import { FileSystem } from "../../filesystem.js"
 import { Location } from "../../location.js"
 import { FileAccess } from "../../file-access.js"
 import { Ripgrep } from "../../ripgrep.js"
-import { RelativePath } from "../../schema.js"
+import { RelativePath } from "@opencode/schema/schema"
 import { Permission } from "../../permission.js"
 
 export const name = "glob"

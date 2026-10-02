@@ -10,7 +10,7 @@ import {
 import type { Model } from "@opencode/schema/model"
 import { Option, Schema } from "effect"
 import { fileURLToPath } from "url"
-import { SessionMessage } from "../message.js"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { SessionProviderContext } from "../provider-context.js"
 import type { FileAttachment } from "@opencode/schema/prompt"
 

@@ -19,9 +19,9 @@ import {
 import { Database } from "../database/database.js"
 import { Bus } from "../bus.js"
 import { KeyedMutex } from "../effect/keyed-mutex.js"
-import { SessionEvent } from "./event.js"
-import { SessionMessage } from "./message.js"
-import { SessionSchema } from "./schema.js"
+import { SessionEvent } from "@opencode/schema/session-event"
+import { SessionMessage } from "@opencode/schema/session-message"
+import { Session } from "@opencode/schema/session"
 import { SessionInboxTable, SessionMessageTable } from "./sql.js"
 
 type DatabaseService = Database.Interface["db"]
@@ -56,10 +56,10 @@ const encodeCompaction = Schema.encodeSync(CompactionPayload)
 const decodeMove = Schema.decodeUnknownSync(MovePayload)
 const encodeMove = Schema.encodeSync(MovePayload)
 const decodeMessage = Schema.decodeUnknownSync(SessionMessage.Info)
-const inboxLocks = KeyedMutex.makeUnsafe<SessionSchema.ID>()
-type PendingRef = { readonly id: SessionMessage.ID; readonly sessionID: SessionSchema.ID }
+const inboxLocks = KeyedMutex.makeUnsafe<Session.ID>()
+type PendingRef = { readonly id: SessionMessage.ID; readonly sessionID: Session.ID }
 
-export const serialized = <A, E, R>(sessionID: SessionSchema.ID, effect: Effect.Effect<A, E, R>) =>
+export const serialized = <A, E, R>(sessionID: Session.ID, effect: Effect.Effect<A, E, R>) =>
   inboxLocks.withLock(sessionID)(effect)
 
 export class LifecycleConflict extends Schema.TaggedError<LifecycleConflict>()("SessionInbox.LifecycleConflict", {
@@ -76,7 +76,7 @@ function matches<Type extends Item["type"]>(
 const fromRow = (row: typeof SessionInboxTable.$inferSelect): Info => {
   const base = {
     id: SessionMessage.ID.make(row.id),
-    sessionID: SessionSchema.ID.make(row.session_id),
+    sessionID: Session.ID.make(row.session_id),
     time: { created: DateTime.makeUnsafe(row.time_created) },
   }
   if (row.type === "compaction")
@@ -112,7 +112,7 @@ export const find = Effect.fn("SessionInbox.find")(function* (db: DatabaseServic
 
 const promotedFromMessage = Effect.fn("SessionInbox.promotedFromMessage")(function* (
   db: DatabaseService,
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   id: SessionMessage.ID,
   delivery: Delivery,
 ) {
@@ -154,7 +154,7 @@ export const make = Effect.fn("SessionInbox.make")(function* () {
   /** First admission wins for matching Session and type, without preparing a new payload. */
   const reconcile = Effect.fn("SessionInbox.reconcile")(function* <Type extends Item["type"]>(request: {
     readonly id: SessionMessage.ID
-    readonly sessionID: SessionSchema.ID
+    readonly sessionID: Session.ID
     readonly type: Type
     readonly delivery: Delivery
   }) {
@@ -168,7 +168,7 @@ export const make = Effect.fn("SessionInbox.make")(function* () {
 
   const admit = Effect.fn("SessionInbox.admit")(function* <Type extends Item["type"]>(request: {
     readonly id: SessionMessage.ID
-    readonly sessionID: SessionSchema.ID
+    readonly sessionID: Session.ID
     readonly item: Item & { readonly type: Type }
   }) {
     const existing = yield* reconcile({ ...request, type: request.item.type, delivery: request.item.delivery })
@@ -203,7 +203,7 @@ export const make = Effect.fn("SessionInbox.make")(function* () {
 
   const admitCompaction = Effect.fn("SessionInbox.admitCompaction")(function* (input: {
     readonly id: SessionMessage.ID
-    readonly sessionID: SessionSchema.ID
+    readonly sessionID: Session.ID
     readonly delivery: Delivery
   }) {
     return yield* serialized(
@@ -260,7 +260,7 @@ export const make = Effect.fn("SessionInbox.make")(function* () {
   )
 
   return {
-    list: (sessionID: SessionSchema.ID) => list(db, sessionID),
+    list: (sessionID: Session.ID) => list(db, sessionID),
     reconcile,
     admit,
     admitCompaction,
@@ -279,7 +279,7 @@ export const projectAdmitted = Effect.fn("SessionInbox.projectAdmitted")(functio
   request: {
     readonly enqueuedSeq: number
     readonly id: SessionMessage.ID
-    readonly sessionID: SessionSchema.ID
+    readonly sessionID: Session.ID
     readonly item: Item
     readonly timeCreated: number
   },
@@ -383,7 +383,7 @@ export const projectDeliveryChanged = Effect.fn("SessionInbox.projectDeliveryCha
     }),
 )
 
-export const list = Effect.fn("SessionInbox.list")(function* (db: DatabaseService, sessionID: SessionSchema.ID) {
+export const list = Effect.fn("SessionInbox.list")(function* (db: DatabaseService, sessionID: Session.ID) {
   const rows = yield* db
     .select()
     .from(SessionInboxTable)
@@ -394,7 +394,7 @@ export const list = Effect.fn("SessionInbox.list")(function* (db: DatabaseServic
   return rows.map(fromRow)
 })
 
-export const moveIDs = Effect.fn("SessionInbox.moveIDs")(function* (db: DatabaseService, sessionID: SessionSchema.ID) {
+export const moveIDs = Effect.fn("SessionInbox.moveIDs")(function* (db: DatabaseService, sessionID: Session.ID) {
   return yield* db
     .select({ id: SessionInboxTable.id })
     .from(SessionInboxTable)
@@ -406,7 +406,7 @@ export const moveIDs = Effect.fn("SessionInbox.moveIDs")(function* (db: Database
 
 export const nextPromotable = Effect.fn("SessionInbox.nextPromotable")(function* (
   db: DatabaseService,
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   promotable: Promotable,
 ) {
   const steer = (yield* pendingSteers(db, sessionID))[0]
@@ -426,11 +426,7 @@ export const nextPromotable = Effect.fn("SessionInbox.nextPromotable")(function*
 /** Which pending rows count: "input" means any item in either delivery mode. */
 export type Scope = "input" | Delivery
 
-export const has = Effect.fn("SessionInbox.has")(function* (
-  db: DatabaseService,
-  sessionID: SessionSchema.ID,
-  scope: Scope,
-) {
+export const has = Effect.fn("SessionInbox.has")(function* (db: DatabaseService, sessionID: Session.ID, scope: Scope) {
   const row = yield* db
     .select({ id: SessionInboxTable.id })
     .from(SessionInboxTable)
@@ -458,7 +454,7 @@ const publishMutation = <A, E, R>(input: PendingRef, effect: Effect.Effect<A, E,
 const publish = Effect.fn("SessionInbox.publish")(function* (
   db: DatabaseService,
   bus: Bus.Interface,
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   rows: ReadonlyArray<typeof SessionInboxTable.$inferSelect>,
 ) {
   yield* Effect.forEach(
@@ -496,7 +492,7 @@ const publish = Effect.fn("SessionInbox.publish")(function* (
 export const promote = Effect.fn("SessionInbox.promote")(function* (
   db: DatabaseService,
   bus: Bus.Interface,
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   scope: Promotable,
 ) {
   return yield* serialized(
@@ -530,7 +526,7 @@ export const promote = Effect.fn("SessionInbox.promote")(function* (
   )
 })
 
-const pendingSteers = (db: DatabaseService, sessionID: SessionSchema.ID) =>
+const pendingSteers = (db: DatabaseService, sessionID: Session.ID) =>
   db
     .select()
     .from(SessionInboxTable)

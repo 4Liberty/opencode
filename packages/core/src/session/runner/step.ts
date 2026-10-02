@@ -19,10 +19,10 @@ import { Tool } from "../../tool.js"
 import { ToolOutput } from "../../tool-output.js"
 import { QuestionTool } from "../../tool/plugin/question.js"
 import { StepFailedError } from "../error.js"
-import { SessionEvent } from "../event.js"
-import { SessionMessage } from "../message.js"
+import { SessionEvent } from "@opencode/schema/session-event"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { SessionModelRequest } from "../model-request.js"
-import { SessionSchema } from "../schema.js"
+import { Session } from "@opencode/schema/session"
 import { toSessionError } from "../to-session-error.js"
 import { SessionUsage } from "../usage.js"
 import { SessionRunnerModel } from "./model.js"
@@ -43,7 +43,7 @@ export const Outcome = Data.taggedEnum<Outcome>()
 
 interface Input {
   readonly isLocationClosed: () => boolean
-  readonly sessionID: SessionSchema.ID
+  readonly sessionID: Session.ID
   readonly assistantMessageID: SessionMessage.ID
   readonly agent: Agent.ID
   readonly model: SessionRunnerModel.Resolved

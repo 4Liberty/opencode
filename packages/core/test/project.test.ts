@@ -8,9 +8,9 @@ import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Bus } from "@opencode/core/bus"
 import { Database } from "@opencode/core/database/database"
 import { Project } from "@opencode/core/project"
-import { ProjectSchema } from "@opencode/core/project/schema"
 import { ProjectTable } from "@opencode/core/project/sql"
-import { AbsolutePath } from "@opencode/core/schema"
+import { Event } from "@opencode/schema/project"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { Hash } from "@opencode/util/hash"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
@@ -229,7 +229,7 @@ describe("Project.resolve", () => {
       const project = yield* Project.Service
       const bus = yield* Bus.Service
       const updates: Project.Info[] = []
-      yield* bus.subscribe(ProjectSchema.Event.Updated).pipe(
+      yield* bus.subscribe(Event.Updated).pipe(
         Stream.runForEach((event) => Effect.sync(() => updates.push(event.data))),
         Effect.forkScoped({ startImmediately: true }),
       )
@@ -257,7 +257,7 @@ describe("Project.resolve", () => {
       const initial = yield* project.resolve(abs(before))
       yield* project.update({ projectID: initial.id, name: "Preserved name" })
       const updates: Project.Info[] = []
-      yield* bus.subscribe(ProjectSchema.Event.Updated).pipe(
+      yield* bus.subscribe(Event.Updated).pipe(
         Stream.runForEach((event) => Effect.sync(() => updates.push(event.data))),
         Effect.forkScoped({ startImmediately: true }),
       )
@@ -298,7 +298,7 @@ describe("Project.resolve", () => {
       const bus = yield* Bus.Service
       const initial = yield* project.resolve(abs(main))
       const updates: Project.Info[] = []
-      yield* bus.subscribe(ProjectSchema.Event.Updated).pipe(
+      yield* bus.subscribe(Event.Updated).pipe(
         Stream.runForEach((event) => Effect.sync(() => updates.push(event.data))),
         Effect.forkScoped({ startImmediately: true }),
       )

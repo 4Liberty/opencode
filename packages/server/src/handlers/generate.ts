@@ -1,7 +1,7 @@
 import { Generate } from "@opencode/core/generate"
 import { Location } from "@opencode/core/location"
 import { LocationServiceMap } from "@opencode/core/location-services"
-import { AbsolutePath } from "@opencode/core/schema"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { InvalidRequestError, ServiceUnavailableError } from "@opencode/protocol/errors"
 import { Global } from "@opencode/util/global"
 import { Effect } from "effect"

@@ -10,7 +10,7 @@ import { Location } from "../../location.js"
 import { FileAccess } from "../../file-access.js"
 import { Permission } from "../../permission.js"
 import { Ripgrep } from "../../ripgrep.js"
-import { RelativePath } from "../../schema.js"
+import { RelativePath } from "@opencode/schema/schema"
 
 export const name = "grep"
 

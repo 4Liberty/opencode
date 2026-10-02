@@ -6,7 +6,7 @@ import { Entry, Match } from "@opencode/schema/filesystem"
 import { makeLocationNode } from "@opencode/util/effect/app-node"
 import { collectStream, waitForAbort } from "@opencode/util/process"
 import { Environment } from "./environment/index.js"
-import { NonNegativeInt, PositiveInt, RelativePath } from "./schema.js"
+import { NonNegativeInt, PositiveInt, RelativePath } from "@opencode/schema/schema"
 import { RipgrepBinary } from "./ripgrep/binary.js"
 
 /**

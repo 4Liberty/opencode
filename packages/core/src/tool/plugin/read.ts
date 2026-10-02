@@ -8,7 +8,7 @@ import { FSUtil } from "@opencode/util/fs-util"
 import { Location } from "../../location.js"
 import { FileAccess } from "../../file-access.js"
 import { SessionInstructions } from "../../session/instructions.js"
-import { AbsolutePath } from "../../schema.js"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { ReadToolFileSystem } from "../read-filesystem.js"
 import { Environment } from "../../environment/index.js"
 

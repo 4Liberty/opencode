@@ -5,9 +5,8 @@ import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { Bus } from "../../bus.js"
 import { Job } from "../../job.js"
 import { Session } from "../../session.js"
-import { SessionEvent } from "../event.js"
+import { SessionEvent } from "@opencode/schema/session-event"
 import { SessionExecution } from "../execution.js"
-import { SessionSchema } from "../schema.js"
 import { SessionStore } from "../store.js"
 import { ShellResult } from "../../shell/result.js"
 import { SubagentCompletion } from "../subagent-completion.js"
@@ -74,7 +73,7 @@ export const layer = (options?: Options) =>
       const scope = yield* Effect.scope
       const maxAttempts = options?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS
 
-      const prepareResume = Effect.fnUntraced(function* (sessionID: SessionSchema.ID) {
+      const prepareResume = Effect.fnUntraced(function* (sessionID: Session.ID) {
         // Durable before the resume runs, so a crash inside the resumed turn is
         // counted by the next sweep and the budget cannot be dodged.
         const attempts = yield* store.countResume(sessionID)
@@ -138,7 +137,7 @@ export const layer = (options?: Options) =>
       const recoverSubagent = Effect.fnUntraced(function* (
         background: Job.Background,
         recovery: Extract<Job.Recovery, { kind: "subagent" }>,
-        suspended: ReadonlySet<SessionSchema.ID>,
+        suspended: ReadonlySet<Session.ID>,
       ) {
         const child = yield* store.get(recovery.childSessionID)
         if (!child || child.parentID !== recovery.parentSessionID || !(yield* store.get(recovery.parentSessionID))) {

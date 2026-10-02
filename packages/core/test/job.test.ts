@@ -5,7 +5,7 @@ import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { Integration } from "@opencode/core/integration"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Cause, Deferred, Effect, Exit, Fiber, Scope } from "effect"
-import { SessionSchema } from "@opencode/core/session/schema"
+import { Session } from "@opencode/schema/session"
 import { testEffect } from "./lib/effect"
 
 const it = testEffect(AppNodeBuilder.build(LayerNode.group([Job.node, KV.node])))
@@ -160,7 +160,7 @@ describe("Job", () => {
       const latch = yield* Deferred.make<void>()
       const job = yield* jobs.start({ type: "test", run: Deferred.await(latch).pipe(Effect.as("done")) })
       const waiting = yield* jobs
-        .block({ id: job.id, sessionID: SessionSchema.ID.make("ses_parent") })
+        .block({ id: job.id, sessionID: Session.ID.make("ses_parent") })
         .pipe(Effect.forkIn(yield* Scope.Scope, { startImmediately: true }))
 
       yield* Deferred.succeed(latch, undefined)
@@ -179,7 +179,7 @@ describe("Job", () => {
       const latch = yield* Deferred.make<void>()
       const job = yield* jobs.start({ type: "test", run: Deferred.await(latch).pipe(Effect.as("done")) })
       const waiting = yield* jobs
-        .block({ id: job.id, sessionID: SessionSchema.ID.make("ses_parent") })
+        .block({ id: job.id, sessionID: Session.ID.make("ses_parent") })
         .pipe(Effect.forkIn(yield* Scope.Scope, { startImmediately: true }))
 
       expect(yield* jobs.background(job.id)).toMatchObject({ id: job.id, status: "running" })
@@ -199,8 +199,8 @@ describe("Job", () => {
   it.live("backgrounds only jobs actively blocking a session", () =>
     Effect.gen(function* () {
       const jobs = yield* Job.Service
-      const parent = SessionSchema.ID.make("ses_parent")
-      const other = SessionSchema.ID.make("ses_other")
+      const parent = Session.ID.make("ses_parent")
+      const other = Session.ID.make("ses_other")
       const latch = yield* Deferred.make<void>()
       const first = yield* jobs.start({
         id: "job_first",
@@ -243,7 +243,7 @@ describe("Job", () => {
       const latch = yield* Deferred.make<void>()
       const recovery = {
         kind: "shell" as const,
-        sessionID: SessionSchema.ID.make("ses_background_shell"),
+        sessionID: Session.ID.make("ses_background_shell"),
         shellID: "shell_background",
         command: "echo done",
       }
@@ -278,12 +278,12 @@ describe("Job", () => {
   it.live("persists backgroundAll ownership before releasing a blocked subagent", () =>
     Effect.gen(function* () {
       const jobs = yield* Job.Service
-      const parentSessionID = SessionSchema.ID.make("ses_background_parent")
+      const parentSessionID = Session.ID.make("ses_background_parent")
       const latch = yield* Deferred.make<void>()
       const recovery = {
         kind: "subagent" as const,
         parentSessionID,
-        childSessionID: SessionSchema.ID.make("ses_background_child"),
+        childSessionID: Session.ID.make("ses_background_child"),
         agent: "explore",
         description: "Explore background recovery",
       }
@@ -316,7 +316,7 @@ describe("Job", () => {
         type: "shell",
         recovery: {
           kind: "shell",
-          sessionID: SessionSchema.ID.make("ses_background_error"),
+          sessionID: Session.ID.make("ses_background_error"),
           shellID: "shell_error",
           command: "exit 1",
         },
@@ -341,7 +341,7 @@ describe("Job", () => {
         type: "shell",
         recovery: {
           kind: "shell",
-          sessionID: SessionSchema.ID.make("ses_immediate_error"),
+          sessionID: Session.ID.make("ses_immediate_error"),
           shellID: "shell_immediate_error",
           command: "exit 1",
         },
@@ -365,7 +365,7 @@ describe("Job", () => {
         type: "shell",
         recovery: {
           kind: "shell",
-          sessionID: SessionSchema.ID.make("ses_background_restart"),
+          sessionID: Session.ID.make("ses_background_restart"),
           shellID: "shell_restart",
           command: "sleep 60",
         },
@@ -390,8 +390,8 @@ describe("Job", () => {
         type: "subagent",
         recovery: {
           kind: "subagent",
-          parentSessionID: SessionSchema.ID.make("ses_interrupted_parent"),
-          childSessionID: SessionSchema.ID.make("ses_interrupted_child"),
+          parentSessionID: Session.ID.make("ses_interrupted_parent"),
+          childSessionID: Session.ID.make("ses_interrupted_child"),
           agent: "explore",
           description: "Continue after shutdown",
         },

@@ -10,10 +10,10 @@ import { makeLocationNode } from "@opencode/util/effect/app-node"
 import { isExactRootFallback } from "@opencode/util/session-title-fallback"
 import { llmClient } from "../effect/app-node-platform.js"
 import { SessionContext } from "./context.js"
-import { SessionEvent } from "./event.js"
+import { SessionEvent } from "@opencode/schema/session-event"
 import { SessionHistory } from "./history.js"
 import type { SessionRunnerModel } from "./runner/model.js"
-import { SessionSchema } from "./schema.js"
+import { Session } from "@opencode/schema/session"
 import { SessionUsage } from "./usage.js"
 import { SessionStore } from "./store.js"
 
@@ -24,13 +24,13 @@ const titleChanged = Symbol("Session title changed")
 
 export interface Interface {
   /** Generates an initial title or regenerates one from bounded conversation history. */
-  readonly generate: (sessionID: SessionSchema.ID) => Effect.Effect<void>
+  readonly generate: (sessionID: Session.ID) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionTitle") {}
 
 const truncate = (value: string) => (value.length <= MAX_LENGTH ? value : `${value.slice(0, MAX_LENGTH - 3)}...`)
-export const isUntitled = (session: SessionSchema.Info) =>
+export const isUntitled = (session: Session.Info) =>
   isExactRootFallback({
     title: session.title,
     time: { created: DateTime.toEpochMillis(session.time.created) },
@@ -46,7 +46,7 @@ export const layer = Layer.effect(
     const db = (yield* Database.Service).db
 
     const attempt = Effect.fn("SessionTitle.attempt")(function* (input: {
-      readonly session: SessionSchema.Info
+      readonly session: Session.Info
       readonly agent: Agent.Info
       readonly text: string
       readonly model: SessionRunnerModel.Resolved
@@ -97,7 +97,7 @@ export const layer = Layer.effect(
         .find((line) => line.length > 0)
     })
 
-    const generate = Effect.fn("SessionTitle.generate")(function* (sessionID: SessionSchema.ID) {
+    const generate = Effect.fn("SessionTitle.generate")(function* (sessionID: Session.ID) {
       const session = yield* store.get(sessionID)
       if (!session) return
       const firstUser = yield* SessionHistory.firstUserMessage(db, session.id)

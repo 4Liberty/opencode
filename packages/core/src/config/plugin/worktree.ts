@@ -6,7 +6,7 @@ import path from "path"
 import { Config } from "../../config.js"
 import { Global } from "@opencode/util/global"
 import { Location } from "../../location.js"
-import { AbsolutePath } from "../../schema.js"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { WorktreeStrategies } from "../../worktree/strategies.js"
 import { ConfigEntryObserver } from "./entry-observer.js"
 

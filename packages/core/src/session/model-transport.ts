@@ -16,7 +16,7 @@ import { Cause, Clock, Context, Duration, Effect, Fiber, Layer, Metric, Queue, S
 import { Headers } from "effect/unstable/http"
 import { Socket } from "effect/unstable/socket"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
-import { SessionSchema } from "./schema.js"
+import { Session } from "@opencode/schema/session"
 import { webSocketConstructor } from "../effect/app-node-platform.js"
 
 const ROTATE_AFTER_MS = 55 * 60 * 1000
@@ -74,11 +74,11 @@ export interface Interceptor {
 
 export interface Interface {
   readonly bind: (
-    sessionID: SessionSchema.ID,
+    sessionID: Session.ID,
     interceptor?: Interceptor,
     idleTimeout?: number | false,
   ) => WebSocketChannelExecutor
-  readonly close: (sessionID: SessionSchema.ID) => Effect.Effect<void>
+  readonly close: (sessionID: Session.ID) => Effect.Effect<void>
   readonly closeAll: Effect.Effect<void>
 }
 
@@ -129,8 +129,8 @@ export const makeLayer = (connector: WebSocketConnector) =>
     Service,
     Effect.gen(function* () {
       const scope = yield* Scope.Scope
-      const states = new Map<SessionSchema.ID, State>()
-      const state = (sessionID: SessionSchema.ID) => {
+      const states = new Map<Session.ID, State>()
+      const state = (sessionID: Session.ID) => {
         const current = states.get(sessionID)
         if (current) return current
         const created = { lock: Semaphore.makeUnsafe(1), closed: false, httpFallback: false, streamFailures: 0 }
@@ -507,7 +507,7 @@ export const makeLayer = (connector: WebSocketConnector) =>
       })
 
       const bind = (
-        sessionID: SessionSchema.ID,
+        sessionID: Session.ID,
         interceptor?: Interceptor,
         idleTimeout?: number | false,
       ): WebSocketChannelExecutor => ({
@@ -534,7 +534,7 @@ export const makeLayer = (connector: WebSocketConnector) =>
         },
       })
 
-      const close = Effect.fn("SessionModelTransport.close")(function* (sessionID: SessionSchema.ID) {
+      const close = Effect.fn("SessionModelTransport.close")(function* (sessionID: Session.ID) {
         const owner = states.get(sessionID)
         if (!owner) return
         states.delete(sessionID)

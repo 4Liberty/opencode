@@ -8,7 +8,7 @@ import fuzzysort from "fuzzysort"
 import { FileSystem } from "@opencode/schema/filesystem"
 import { Location } from "../location.js"
 import { Ripgrep } from "../ripgrep.js"
-import { RelativePath } from "../schema.js"
+import { RelativePath } from "@opencode/schema/schema"
 import { Protected } from "./protected.js"
 
 export interface Interface {

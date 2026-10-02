@@ -18,7 +18,7 @@ import { ShellSelect } from "./shell/select.js"
 import type { ShellCreateBefore } from "@opencode/plugin/effect/shell"
 import { PluginHooks } from "./plugin/hooks.js"
 import { SessionEnvironment } from "./session/environment.js"
-import { SessionSchema } from "./session/schema.js"
+import { Session } from "@opencode/schema/session"
 import { Config } from "./config.js"
 import { ToolOutput } from "./tool-output.js"
 import { ShellResult } from "./shell/result.js"
@@ -257,7 +257,7 @@ const layer = () =>
       ) {
         const sessionID = input.metadata?.sessionID
         const sessionEnvironment =
-          location.workspaceID === undefined && Schema.is(SessionSchema.ID)(sessionID)
+          location.workspaceID === undefined && Schema.is(Session.ID)(sessionID)
             ? yield* environments.get(sessionID)
             : undefined
         const invocation: ShellCreateBefore = {

@@ -6,7 +6,7 @@ import path from "path"
 import { Effect, FiberMap, PubSub, Semaphore, Stream } from "effect"
 import { Config } from "../../config.js"
 import { Watcher } from "../../filesystem/watcher.js"
-import { AbsolutePath } from "../../schema.js"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { Skill } from "../../skill.js"
 import { SkillFile } from "./skill-file.js"
 

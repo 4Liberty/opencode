@@ -15,7 +15,7 @@ import { FSUtil } from "@opencode/util/fs-util"
 import { Global } from "@opencode/util/global"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Location } from "@opencode/core/location"
-import { AbsolutePath } from "@opencode/core/schema"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { Skill } from "@opencode/core/skill"
 import { SkillDiscovery } from "@opencode/core/skill/discovery"
 import { WellKnown } from "@opencode/core/wellknown"
@@ -64,9 +64,7 @@ const startEntries = Effect.fnUntraced(function* (
   yield* ConfigCompatibilityPlugin.Plugin.effect(pluginHost).pipe(
     Effect.provide(Config.testLayer(entries, compatibility)),
   )
-  yield* ConfigSkillPlugin.Plugin.effect(
-    pluginHost,
-  ).pipe(
+  yield* ConfigSkillPlugin.Plugin.effect(pluginHost).pipe(
     Effect.provide(Config.testLayer(entries, compatibility)),
     Effect.provideService(SkillDiscovery.Service, discovery),
     Effect.provideService(Global.Service, Global.Service.of({ ...Global.make(), home })),

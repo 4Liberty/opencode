@@ -7,7 +7,7 @@ import { FSUtil } from "@opencode/util/fs-util"
 import { Global } from "@opencode/util/global"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { httpClient } from "@opencode/util/effect/app-node-platform"
-import { AbsolutePath } from "../schema.js"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { Hash } from "@opencode/util/hash"
 
 const skillConcurrency = 4

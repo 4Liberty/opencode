@@ -7,7 +7,7 @@ import { Location } from "@opencode/core/location"
 import { LocationServiceMap } from "@opencode/core/location-service-map"
 import { buildLocationServiceMap } from "@opencode/core/location-services"
 import { Project } from "@opencode/core/project"
-import { AbsolutePath } from "@opencode/core/schema"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { tmpdir } from "../../fixture/tmpdir"
 import { testEffect } from "../../lib/effect"
 

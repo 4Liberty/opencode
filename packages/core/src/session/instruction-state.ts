@@ -5,14 +5,14 @@ import { Effect, Option, Schema } from "effect"
 import type { Database } from "../database/database.js"
 import type { Bus } from "../bus.js"
 import { Instructions } from "../instructions/index.js"
-import { SessionEvent } from "./event.js"
-import { SessionSchema } from "./schema.js"
+import { SessionEvent } from "@opencode/schema/session-event"
+import { Session } from "@opencode/schema/session"
 import { InstructionBlobTable, InstructionStateTable } from "./sql.js"
 
 type DatabaseService = Database.Interface["db"]
 
 export interface Observation extends Instructions.Admission {
-  readonly sessionID: SessionSchema.ID
+  readonly sessionID: Session.ID
   readonly initial: boolean
   readonly previous: Instructions.Values
   readonly current: Instructions.Values
@@ -21,7 +21,7 @@ export interface Observation extends Instructions.Admission {
 export const observe = Effect.fn("InstructionState.observe")(function* (
   db: DatabaseService,
   instructions: Instructions.List,
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
 ): Effect.fn.Return<Observation, Instructions.InitializationBlocked> {
   const [observed, stored] = yield* Effect.all([Instructions.read(instructions), find(db, sessionID)], {
     concurrency: "unbounded",
@@ -81,14 +81,14 @@ export const prepare = Effect.fn("InstructionState.prepare")(function* (
   db: DatabaseService,
   bus: Bus.Interface,
   instructions: Instructions.List,
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
 ) {
   yield* commit(db, bus, instructions, yield* observe(db, instructions, sessionID))
 })
 
 export const apply = Effect.fn("InstructionState.apply")(function* (
   db: DatabaseService,
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   seq: number,
   delta: Instructions.Delta,
 ) {
@@ -118,7 +118,7 @@ export const apply = Effect.fn("InstructionState.apply")(function* (
 
 export const initialize = Effect.fn("InstructionState.initialize")(function* (
   db: DatabaseService,
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   seq: number,
   values: Instructions.Values,
 ) {
@@ -138,7 +138,7 @@ export const initialize = Effect.fn("InstructionState.initialize")(function* (
 
 export const advanceEpoch = Effect.fn("InstructionState.advanceEpoch")(function* (
   db: DatabaseService,
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   epochStart: number,
 ) {
   yield* db
@@ -153,7 +153,7 @@ export const advanceEpoch = Effect.fn("InstructionState.advanceEpoch")(function*
     .pipe(Effect.orDie)
 })
 
-export const reset = Effect.fn("InstructionState.reset")(function* (db: DatabaseService, sessionID: SessionSchema.ID) {
+export const reset = Effect.fn("InstructionState.reset")(function* (db: DatabaseService, sessionID: Session.ID) {
   yield* db
     .delete(InstructionStateTable)
     .where(eq(InstructionStateTable.session_id, sessionID))
@@ -164,7 +164,7 @@ export const reset = Effect.fn("InstructionState.reset")(function* (db: Database
 /** Renders the epoch baseline shown at the start of every model request. */
 export const initial = Effect.fn("InstructionState.initial")(function* (
   db: DatabaseService,
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   instructions: Instructions.List,
 ) {
   const state = yield* find(db, sessionID)
@@ -174,16 +174,13 @@ export const initial = Effect.fn("InstructionState.initial")(function* (
 })
 
 /** The current instruction values, used to seed a fork's baseline. */
-export const current = Effect.fn("InstructionState.current")(function* (
-  db: DatabaseService,
-  sessionID: SessionSchema.ID,
-) {
+export const current = Effect.fn("InstructionState.current")(function* (db: DatabaseService, sessionID: Session.ID) {
   return (yield* find(db, sessionID))?.current_values
 })
 
 export const preview = Effect.fn("InstructionState.preview")(function* (
   db: DatabaseService,
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   instructions: Instructions.List,
   observed: Instructions.ReadResult,
 ) {
@@ -215,7 +212,7 @@ const observeAgainst = Effect.fnUntraced(function* (observed: Instructions.ReadR
   }
 })
 
-const find = Effect.fnUntraced(function* (db: DatabaseService, sessionID: SessionSchema.ID) {
+const find = Effect.fnUntraced(function* (db: DatabaseService, sessionID: Session.ID) {
   return yield* db
     .select()
     .from(InstructionStateTable)

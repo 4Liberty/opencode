@@ -3,21 +3,21 @@ export * as SessionErrors from "./error.js"
 import { Schema } from "effect"
 import { Agent } from "@opencode/schema/agent"
 import { Skill } from "@opencode/schema/skill"
-import { SessionMessage } from "./message.js"
-import { SessionSchema } from "./schema.js"
+import { SessionMessage } from "@opencode/schema/session-message"
+import { Session } from "@opencode/schema/session"
 import { SessionError } from "@opencode/schema/session-error"
 
 export class NotFoundError extends Schema.TaggedError<NotFoundError>()("Session.NotFoundError", {
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
 }) {}
 
 export class MessageNotFoundError extends Schema.TaggedError<MessageNotFoundError>()("Session.MessageNotFoundError", {
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   messageID: SessionMessage.ID,
 }) {}
 
 export class ForkEmptyError extends Schema.TaggedError<ForkEmptyError>()("Session.ForkEmptyError", {
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
 }) {
   override get message() {
     return `Cannot fork empty session: ${this.sessionID}`
@@ -25,7 +25,7 @@ export class ForkEmptyError extends Schema.TaggedError<ForkEmptyError>()("Sessio
 }
 
 export class MessageDecodeError extends Schema.TaggedError<MessageDecodeError>()("Session.MessageDecodeError", {
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   messageID: SessionMessage.ID,
 }) {
   override get message() {
@@ -34,7 +34,7 @@ export class MessageDecodeError extends Schema.TaggedError<MessageDecodeError>()
 }
 
 export class AgentNotFoundError extends Schema.TaggedError<AgentNotFoundError>()("Session.AgentNotFoundError", {
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   agent: Agent.ID,
 }) {
   override get message() {
@@ -51,14 +51,14 @@ export class StepFailedError extends Schema.TaggedError<StepFailedError>()("Sess
 }
 
 export class PromptConflictError extends Schema.TaggedError<PromptConflictError>()("Session.PromptConflictError", {
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   messageID: SessionMessage.ID,
 }) {}
 
 export class SyntheticConflictError extends Schema.TaggedError<SyntheticConflictError>()(
   "Session.SyntheticConflictError",
   {
-    sessionID: SessionSchema.ID,
+    sessionID: Session.ID,
     inputID: SessionMessage.ID,
   },
 ) {}
@@ -71,17 +71,17 @@ export class AttachmentError extends Schema.TaggedError<AttachmentError>()("Sess
 export class CompactionConflictError extends Schema.TaggedError<CompactionConflictError>()(
   "Session.CompactionConflictError",
   {
-    sessionID: SessionSchema.ID,
+    sessionID: Session.ID,
     inputID: SessionMessage.ID,
   },
 ) {}
 
 export class BusyError extends Schema.TaggedError<BusyError>()("Session.BusyError", {
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
 }) {}
 
 export class InboxConflictError extends Schema.TaggedError<InboxConflictError>()("Session.InboxConflictError", {
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   inboxID: SessionMessage.ID,
 }) {}
 

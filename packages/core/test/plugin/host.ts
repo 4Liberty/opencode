@@ -7,7 +7,7 @@ import { Location } from "@opencode/core/location"
 import { Model } from "@opencode/core/model"
 import { Project } from "@opencode/core/project"
 import { Provider } from "@opencode/core/provider"
-import { AbsolutePath } from "@opencode/core/schema"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { WebSearch } from "@opencode/core/websearch"
 import { Effect, Stream } from "effect"
 
@@ -230,13 +230,15 @@ export function providerHost(providers: Provider.Interface): Plugin.Context["pro
   return {
     list: () => providers.available().pipe(Effect.map(located)),
     get: (input) =>
-      providers.get(Provider.ID.make(input.providerID)).pipe(
-        Effect.flatMap((provider) =>
-          provider === undefined
-            ? Effect.fail(new Error(`Provider not found: ${input.providerID}`))
-            : Effect.succeed(located(provider)),
+      providers
+        .get(Provider.ID.make(input.providerID))
+        .pipe(
+          Effect.flatMap((provider) =>
+            provider === undefined
+              ? Effect.fail(new Error(`Provider not found: ${input.providerID}`))
+              : Effect.succeed(located(provider)),
+          ),
         ),
-      ),
     reload: providers.reload,
     transform: (callback) =>
       providers.transform((editor) =>

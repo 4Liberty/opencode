@@ -1,7 +1,7 @@
 import { Agent } from "@opencode/core/agent"
 import { CodeModeCatalog } from "@opencode/core/codemode/catalog"
 import type { Permission } from "@opencode/core/permission"
-import { SessionMessage } from "@opencode/core/session/message"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { toSessionError } from "@opencode/core/session/to-session-error"
 import type { SessionError } from "@opencode/schema/session-error"
 import { Tool } from "@opencode/core/tool"

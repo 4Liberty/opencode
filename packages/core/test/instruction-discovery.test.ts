@@ -8,7 +8,7 @@ import { ConfigInstructionPlugin } from "@opencode/core/config/plugin/instructio
 import { Watcher } from "@opencode/core/filesystem/watcher"
 import { InstructionDiscovery } from "@opencode/core/instruction-discovery"
 import { Location } from "@opencode/core/location"
-import { AbsolutePath } from "@opencode/core/schema"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Global } from "@opencode/util/global"
 import { LayerNode } from "@opencode/util/effect/layer-node"

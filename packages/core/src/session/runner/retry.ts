@@ -7,9 +7,9 @@ import { SessionError } from "@opencode/schema/session-error"
 import { Clock, Duration, Effect, Pull, Schedule } from "effect"
 import { Bus } from "../../bus.js"
 import type { PluginHooks } from "../../plugin/hooks.js"
-import { SessionEvent } from "../event.js"
-import { SessionMessage } from "../message.js"
-import { SessionSchema } from "../schema.js"
+import { SessionEvent } from "@opencode/schema/session-event"
+import { SessionMessage } from "@opencode/schema/session-message"
+import { Session } from "@opencode/schema/session"
 
 export { isRetryable }
 
@@ -61,7 +61,7 @@ const MAX_TIMEOUT_RETRIES = 3
 
 const isTimeout = (error: AIError) => error.reason._tag === "Transport" && error.reason.code === "Timeout"
 
-export const policy = (sessionID: SessionSchema.ID) =>
+export const policy = (sessionID: Session.ID) =>
   Effect.gen(function* () {
     const step = yield* Schedule.toStep(schedule)
     let attempt = 1
@@ -91,7 +91,7 @@ export const policy = (sessionID: SessionSchema.ID) =>
       })
   })
 
-export const make = (bus: Bus.Interface, sessionID: SessionSchema.ID) =>
+export const make = (bus: Bus.Interface, sessionID: Session.ID) =>
   Effect.gen(function* () {
     const decide = yield* policy(sessionID)
     const wait = (input: {

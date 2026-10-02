@@ -10,7 +10,7 @@ import { LocationServiceMap } from "./location-service-map.js"
 import { Permission } from "./permission.js"
 import { Project } from "./project.js"
 import { Rpc } from "./rpc.js"
-import { SessionEvent } from "./session/event.js"
+import { SessionEvent } from "@opencode/schema/session-event"
 
 const isSessionEvent = Schema.is(SessionEvent.Durable)
 

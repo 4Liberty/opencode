@@ -10,18 +10,18 @@ import { Instructions } from "@opencode/core/instructions/index"
 import { PluginHooks } from "@opencode/core/plugin/hooks"
 import { Project } from "@opencode/core/project"
 import { ProjectTable } from "@opencode/core/project/sql"
-import { AbsolutePath } from "@opencode/core/schema"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { SessionCompaction } from "@opencode/core/session/compaction"
-import { SessionEvent } from "@opencode/core/session/event"
+import { SessionEvent } from "@opencode/schema/session-event"
 import { SessionHistory } from "@opencode/core/session/history"
 import { SessionInbox } from "@opencode/core/session/inbox"
 import { InstructionState } from "@opencode/core/session/instruction-state"
-import { SessionMessage } from "@opencode/core/session/message"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { SessionModelRequest } from "@opencode/core/session/model-request"
 import { SessionProjector } from "@opencode/core/session/projector"
 import { SessionProviderContext } from "@opencode/core/session/provider-context"
 import { SessionRunnerModel } from "@opencode/core/session/runner/model"
-import { SessionSchema } from "@opencode/core/session/schema"
+import { Session } from "@opencode/schema/session"
 import { SessionStore } from "@opencode/core/session/store"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { DateTime, Deferred, Effect, Fiber, Schema } from "effect"
@@ -147,7 +147,7 @@ const setup = Effect.fnUntraced(function* (options: { endpoint?: boolean } = {})
       compaction: { type: "native" },
     },
   )
-  const sessionID = SessionSchema.ID.create()
+  const sessionID = Session.ID.create()
   yield* db
     .insert(ProjectTable)
     .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })

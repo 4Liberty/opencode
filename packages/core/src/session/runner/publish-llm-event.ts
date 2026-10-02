@@ -6,16 +6,16 @@ import type { Snapshot } from "@opencode/schema/snapshot"
 import { Effect, Fiber, Iterable } from "effect"
 import { isReadonlyArrayNonEmpty } from "effect/Array"
 import { Bus } from "../../bus.js"
-import { SessionEvent } from "../event.js"
-import { SessionMessage } from "../message.js"
-import { SessionSchema } from "../schema.js"
+import { SessionEvent } from "@opencode/schema/session-event"
+import { SessionMessage } from "@opencode/schema/session-message"
+import { Session } from "@opencode/schema/session"
 import { SessionError } from "@opencode/schema/session-error"
 import { Money } from "@opencode/schema/money"
 import { SessionUsage } from "../usage.js"
 import type { Tool } from "../../tool.js"
 
 type Input = {
-  readonly sessionID: SessionSchema.ID
+  readonly sessionID: Session.ID
   readonly agent: Agent.ID
   readonly model: Model.Ref
   readonly providerMetadataKey: string

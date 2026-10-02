@@ -6,23 +6,23 @@ import { Database } from "../database/database.js"
 import { Job } from "../job.js"
 import { Instance } from "../instance/service.js"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
-import { SessionEvent } from "./event.js"
+import { SessionEvent } from "@opencode/schema/session-event"
 import { SessionRunCoordinator } from "./run-coordinator.js"
 import { SessionRunner } from "./runner/index.js"
-import { SessionSchema } from "./schema.js"
+import { Session } from "@opencode/schema/session"
 import { SessionStore } from "./store.js"
 import { toSessionError } from "./to-session-error.js"
 import { SessionInbox } from "./inbox.js"
 
 export interface Interface {
   /** Snapshots active execution owned by this process. */
-  readonly active: Effect.Effect<ReadonlySet<SessionSchema.ID>>
+  readonly active: Effect.Effect<ReadonlySet<Session.ID>>
   /** Checks process-local ownership, including interruption cleanup and terminal settlement. */
-  readonly isActive: (sessionID: SessionSchema.ID) => Effect.Effect<boolean>
+  readonly isActive: (sessionID: Session.ID) => Effect.Effect<boolean>
   /** Starts execution while idle or joins the active execution. */
-  readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, SessionRunner.RunError>
+  readonly resume: (sessionID: Session.ID) => Effect.Effect<void, SessionRunner.RunError>
   /** Registers newly recorded work. Repeated wakeups may coalesce. */
-  readonly wake: (sessionID: SessionSchema.ID) => Effect.Effect<void>
+  readonly wake: (sessionID: Session.ID) => Effect.Effect<void>
   /**
    * Interrupt active work owned by this process. Idle interruption is a no-op. Resolves once
    * the interruption is accepted; cleanup settles asynchronously in the execution fiber.
@@ -31,7 +31,7 @@ export interface Interface {
    * rather than fresh work admitted during its cleanup.
    */
   readonly interrupt: (
-    sessionID: SessionSchema.ID,
+    sessionID: Session.ID,
     options?: {
       readonly resume?: boolean
       readonly reason?: "user" | "inactivity"
@@ -39,7 +39,7 @@ export interface Interface {
     },
   ) => Effect.Effect<boolean>
   /** Resolves once this process owns no active execution for the Session. Returns immediately when idle and never starts work. */
-  readonly awaitIdle: (sessionID: SessionSchema.ID) => Effect.Effect<void>
+  readonly awaitIdle: (sessionID: Session.ID) => Effect.Effect<void>
 }
 
 /** Routes execution from a Session ID to its selected instance's runner. */
@@ -62,7 +62,7 @@ export const layer = Layer.effect(
     const bus = yield* Bus.Service
     const jobs = yield* Job.Service
     const db = (yield* Database.Service).db
-    const reportLifecycle = <A>(sessionID: SessionSchema.ID, effect: Effect.Effect<A>) =>
+    const reportLifecycle = <A>(sessionID: Session.ID, effect: Effect.Effect<A>) =>
       effect.pipe(
         Effect.tapCause((cause) =>
           Cause.hasInterruptsOnly(cause)
@@ -78,14 +78,14 @@ export const layer = Layer.effect(
     // preserves the claim so the next server start resumes the turn. A claim that survives with no
     // terminal is the signature of a process that died without teardown (crash, SIGKILL, eviction);
     // recovery is a property of the database, never of a shutdown hook that may not run.
-    const claimOnCommit = (sessionID: SessionSchema.ID) => ({
+    const claimOnCommit = (sessionID: Session.ID) => ({
       commit: () => store.claim(sessionID),
     })
-    const releaseOnCommit = (sessionID: SessionSchema.ID) => ({
+    const releaseOnCommit = (sessionID: Session.ID) => ({
       commit: () => store.release(sessionID),
     })
     const drain = Effect.fnUntraced(function* (
-      sessionID: SessionSchema.ID,
+      sessionID: Session.ID,
       force: boolean,
       continuation?: SessionRunner.Continuation,
       promotable: SessionInbox.Promotable = "input",
@@ -108,7 +108,7 @@ export const layer = Layer.effect(
         Reloaded: (result) => drain(sessionID, result.force, result.continuation, promotable),
       })
     })
-    const coordinator = yield* SessionRunCoordinator.make<SessionSchema.ID, SessionRunner.RunError, InterruptReason>({
+    const coordinator = yield* SessionRunCoordinator.make<Session.ID, SessionRunner.RunError, InterruptReason>({
       started: (sessionID) =>
         reportLifecycle(
           sessionID,

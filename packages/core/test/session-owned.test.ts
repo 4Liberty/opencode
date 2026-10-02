@@ -20,17 +20,17 @@ import { Location } from "../src/location.js"
 import { Plugin } from "../src/plugin.js"
 import { PluginHooks } from "../src/plugin/hooks.js"
 import { ProjectTable } from "../src/project/sql.js"
-import { AbsolutePath, RelativePath } from "../src/schema.js"
+import { AbsolutePath, RelativePath } from "@opencode/schema/schema"
+import { SessionID } from "@opencode/schema/session-id"
 import { InboxConflictError, NotFoundError, PromptConflictError } from "../src/session/error.js"
-import { SessionEvent } from "../src/session/event.js"
+import { SessionEvent } from "@opencode/schema/session-event"
 import { SessionExecution } from "../src/session/execution.js"
 import { SessionInbox } from "../src/session/inbox.js"
-import { SessionMessage } from "../src/session/message.js"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { SessionPrompt } from "../src/session/prompt.js"
 import { SessionProjector } from "../src/session/projector.js"
 import { SessionRevert } from "../src/session/revert.js"
 import { SessionRunCoordinator } from "../src/session/run-coordinator.js"
-import { SessionSchema } from "../src/session/schema.js"
 import { Session } from "../src/session/session.js"
 import { SessionTable } from "../src/session/sql.js"
 import { SessionStore } from "../src/session/store.js"
@@ -56,8 +56,8 @@ const it = testEffect(
     },
   ),
 )
-const sessionID = SessionSchema.ID.make("ses_owned")
-const otherID = SessionSchema.ID.make("ses_owned_other")
+const sessionID = SessionID.make("ses_owned")
+const otherID = SessionID.make("ses_owned_other")
 const source = Location.Ref.make({ directory: AbsolutePath.make("/project") })
 const skillInfo = Skill.Info.make({
   id: Skill.ID.make("guide"),
@@ -94,10 +94,10 @@ const setup = Effect.fnUntraced(function* (options?: {
   const hooks = yield* PluginHooks.Service.pipe(Effect.provide(LayerNode.compile(PluginHooks.node)))
   const locations: Location.Ref[] = []
   const activationWaits: Location.Ref[] = []
-  const resumes: SessionSchema.ID[] = []
-  const wakes: Array<{ sessionID: SessionSchema.ID; pending: SessionMessage.ID[]; enqueued: number }> = []
+  const resumes: SessionID[] = []
+  const wakes: Array<{ sessionID: SessionID; pending: SessionMessage.ID[]; enqueued: number }> = []
   const execution = SessionExecution.Service.of({
-    active: Effect.succeed(new Set<SessionSchema.ID>()),
+    active: Effect.succeed(new Set<SessionID>()),
     isActive: () => Effect.succeed(false),
     resume: (id) =>
       Effect.sync(() => {
@@ -409,7 +409,7 @@ describe("Session-owned handles", () => {
           events.push(event)
         }),
       )
-      const missingID = SessionSchema.ID.make("ses_missing_skill")
+      const missingID = SessionID.make("ses_missing_skill")
       expect(
         yield* fixture.sessions.forSession(missingID).skill({ skill: skillInfo.id }).pipe(Effect.flip),
       ).toMatchObject({ _tag: "Session.NotFoundError", sessionID: missingID })
@@ -439,7 +439,7 @@ describe("Session-owned handles", () => {
       const scope = yield* Scope.Scope
       const host = yield* Scope.fork(scope, "sequential")
       const calls: string[] = []
-      const stopped: SessionSchema.ID[] = []
+      const stopped: SessionID[] = []
       const execution = yield* SessionExecution.Service.pipe(Effect.provide(SessionExecution.noopLayer))
       const fixture = yield* setup({
         execution: {
@@ -601,7 +601,7 @@ describe("Session-owned handles", () => {
       expect(yield* handle.inbox()).toMatchObject([{ id: steer.id, delivery: "queue" }])
       yield* second.cancelInbox(steer.id)
       expect(yield* handle.inbox()).toEqual([])
-      const missingID = SessionSchema.ID.make("ses_owned_missing")
+      const missingID = SessionID.make("ses_owned_missing")
       const missing = yield* fixture.sessions.forSession(missingID).inbox().pipe(Effect.flip)
       expect(missing).toBeInstanceOf(NotFoundError)
       expect(missing).toMatchObject({ _tag: "Session.NotFoundError", sessionID: missingID })
@@ -614,10 +614,10 @@ describe("Session-owned handles", () => {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
       const joining = yield* Deferred.make<void>()
-      const drains: SessionSchema.ID[] = []
-      const resumes: SessionSchema.ID[] = []
-      const interrupts: Array<{ sessionID: SessionSchema.ID; options?: { readonly resume?: boolean } }> = []
-      const coordinator = yield* SessionRunCoordinator.make<SessionSchema.ID, never>({
+      const drains: SessionID[] = []
+      const resumes: SessionID[] = []
+      const interrupts: Array<{ sessionID: SessionID; options?: { readonly resume?: boolean } }> = []
+      const coordinator = yield* SessionRunCoordinator.make<SessionID, never>({
         drain: (id) =>
           Effect.sync(() => void drains.push(id)).pipe(
             Effect.andThen(Deferred.succeed(started, undefined)),
@@ -968,7 +968,7 @@ describe("SessionInbox command contracts", () => {
         { sessionID, item: { type: "user", payload: { text: "Retry" }, delivery: "queue" } },
         { sessionID, item: { type: "synthetic", payload: { text: "Other type" }, delivery: "steer" } },
         { sessionID: otherID, item: { type: "user", payload: { text: "Other Session" }, delivery: "steer" } },
-      ] satisfies Array<{ sessionID: SessionSchema.ID; item: SessionInbox.Item }>
+      ] satisfies Array<{ sessionID: SessionID; item: SessionInbox.Item }>
       const results = yield* Effect.forEach(
         requests,
         (request, index) => (index % 2 === 0 ? admission : other).admit({ id, ...request }).pipe(Effect.exit),

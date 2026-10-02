@@ -5,23 +5,23 @@ import { Effect, Schema } from "effect"
 import { Database } from "../database/database.js"
 import { Bus } from "../bus.js"
 import { Instance } from "../instance/service.js"
-import { RelativePath } from "../schema.js"
+import { RelativePath } from "@opencode/schema/schema"
 import { Snapshot } from "../snapshot.js"
-import { SessionEvent } from "./event.js"
+import { SessionEvent } from "@opencode/schema/session-event"
 import { MessageNotFoundError } from "./error.js"
-import { SessionMessage } from "./message.js"
-import { SessionSchema } from "./schema.js"
+import { SessionMessage } from "@opencode/schema/session-message"
+import { Session } from "@opencode/schema/session"
 import { SessionMessageTable } from "./sql.js"
 
 export { MessageNotFoundError }
 
 interface BoundaryInput {
-  readonly sessionID: SessionSchema.ID
+  readonly sessionID: Session.ID
   readonly messageID: SessionMessage.ID
 }
 
 export const stage = Effect.fn("SessionRevert.stage")(function* (input: {
-  session: SessionSchema.Info
+  session: Session.Info
   messageID: SessionMessage.ID
   files?: boolean
 }) {
@@ -49,7 +49,7 @@ export const stage = Effect.fn("SessionRevert.stage")(function* (input: {
       messageID: input.messageID,
       snapshot: original,
       files,
-    } satisfies SessionSchema.Info["revert"]
+    } satisfies Session.Info["revert"]
     yield* bus.publish(SessionEvent.RevertEvent.Staged, {
       sessionID: input.session.id,
       revert,
@@ -58,7 +58,7 @@ export const stage = Effect.fn("SessionRevert.stage")(function* (input: {
   }).pipe(instances.provide(input.session))
 })
 
-export const clear = Effect.fn("SessionRevert.clear")(function* (session: SessionSchema.Info) {
+export const clear = Effect.fn("SessionRevert.clear")(function* (session: Session.Info) {
   const instances = yield* Instance.Service
   const bus = yield* Bus.Service
   yield* Effect.gen(function* () {
@@ -75,7 +75,7 @@ export const clear = Effect.fn("SessionRevert.clear")(function* (session: Sessio
   }).pipe(instances.provide(session))
 })
 
-export const commit = Effect.fn("SessionRevert.commit")(function* (bus: Bus.Interface, session: SessionSchema.Info) {
+export const commit = Effect.fn("SessionRevert.commit")(function* (bus: Bus.Interface, session: Session.Info) {
   if (!session.revert) return
   yield* bus.publish(SessionEvent.RevertEvent.Committed, {
     sessionID: session.id,

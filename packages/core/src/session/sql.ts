@@ -2,12 +2,11 @@ import { sqliteTable, text, integer, index, primaryKey, real, uniqueIndex } from
 import { sql } from "drizzle-orm"
 import { directoryColumn, pathColumn } from "../database/path.js"
 import { ProjectTable } from "../project/sql.js"
-import type { SessionMessage } from "./message.js"
+import type { SessionMessage } from "@opencode/schema/session-message"
 import type { SessionInbox } from "./inbox.js"
 import type { FileDiff } from "@opencode/schema/file-diff"
 import type { Permission } from "@opencode/schema/permission"
 import type { Project } from "@opencode/schema/project"
-import type { SessionSchema } from "./schema.js"
 import type { Workspace } from "@opencode/schema/workspace"
 import { Timestamps } from "../database/schema.sql.js"
 import type { Instruction } from "@opencode/schema/instruction"
@@ -22,14 +21,14 @@ type SessionMessageData = DistributiveOmit<(typeof SessionMessage.Info)["Encoded
 export const SessionTable = sqliteTable(
   "session_v2",
   {
-    id: text().$type<SessionSchema.ID>().primaryKey(),
+    id: text().$type<Session.ID>().primaryKey(),
     project_id: text()
       .$type<Project.ID>()
       .notNull()
       .references(() => ProjectTable.id, { onDelete: "cascade" }),
     workspace_id: text().$type<Workspace.ID>(),
-    parent_id: text().$type<SessionSchema.ID>(),
-    fork_session_id: text().$type<SessionSchema.ID>(),
+    parent_id: text().$type<Session.ID>(),
+    fork_session_id: text().$type<Session.ID>(),
     fork_boundary: text({ mode: "json" }).$type<Session.ForkBoundary>(),
     slug: text().notNull(),
     directory: directoryColumn().notNull(),
@@ -81,7 +80,7 @@ export const SessionMessageTable = sqliteTable(
   {
     id: text().$type<SessionMessage.ID>().primaryKey(),
     session_id: text()
-      .$type<SessionSchema.ID>()
+      .$type<Session.ID>()
       .notNull()
       .references(() => SessionTable.id, { onDelete: "cascade" }),
     type: text().$type<SessionMessage.Type>().notNull(),
@@ -102,7 +101,7 @@ export const SessionPendingTable = sqliteTable(
   {
     id: text().$type<SessionMessage.ID>().primaryKey(),
     session_id: text()
-      .$type<SessionSchema.ID>()
+      .$type<Session.ID>()
       .notNull()
       .references(() => SessionTable.id, { onDelete: "cascade" }),
     type: text().$type<SessionInbox.Info["type"]>().notNull(),
@@ -127,7 +126,7 @@ export const SessionInboxTable = sqliteTable(
   {
     id: text().$type<SessionMessage.ID>().primaryKey(),
     session_id: text()
-      .$type<SessionSchema.ID>()
+      .$type<Session.ID>()
       .notNull()
       .references(() => SessionTable.id, { onDelete: "cascade" }),
     type: text().$type<SessionInbox.Info["type"]>().notNull(),
@@ -148,7 +147,7 @@ export const InstructionEntryTable = sqliteTable(
   "instruction_entry",
   {
     session_id: text()
-      .$type<SessionSchema.ID>()
+      .$type<Session.ID>()
       .notNull()
       .references(() => SessionTable.id, { onDelete: "cascade" }),
     key: text().notNull(),
@@ -166,7 +165,7 @@ export const InstructionBlobTable = sqliteTable("instruction_blob", {
 
 export const InstructionStateTable = sqliteTable("instruction_state", {
   session_id: text()
-    .$type<SessionSchema.ID>()
+    .$type<Session.ID>()
     .primaryKey()
     .references(() => SessionTable.id, { onDelete: "cascade" }),
   epoch_start: integer().notNull(),

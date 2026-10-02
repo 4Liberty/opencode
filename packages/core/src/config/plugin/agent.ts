@@ -16,7 +16,7 @@ import { Permission } from "../../permission.js"
 import type { FileAccess } from "../../file-access.js"
 import type { ReadTool } from "../../tool/plugin/read.js"
 import type { EditTool } from "../../tool/plugin/edit.js"
-import { AbsolutePath } from "../../schema.js"
+import { AbsolutePath } from "@opencode/schema/schema"
 
 const legacySources = [
   { pattern: "{agent,agents}/**/*.md", primary: false },

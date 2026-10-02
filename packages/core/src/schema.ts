@@ -1,16 +1,4 @@
 import { Schema } from "effect"
-import {
-  AbsolutePath,
-  DateTimeUtcFromMillis,
-  NonNegativeInt,
-  optional,
-  PositiveInt,
-  RelativePath,
-  statics,
-} from "@opencode/schema/schema"
-
-export { AbsolutePath, DateTimeUtcFromMillis, NonNegativeInt, optional, PositiveInt, RelativePath, statics }
-
 /**
  * Strip `readonly` from a nested type. Stand-in for `effect`'s `Types.DeepMutable`
  * until `effect:core/x228my` ("Types.DeepMutable widens unknown to `{}`") lands.

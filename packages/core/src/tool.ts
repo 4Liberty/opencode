@@ -12,8 +12,8 @@ import { CodeModeTool } from "./codemode/tool.js"
 import { Image } from "./image.js"
 import { Permission } from "./permission.js"
 import { PluginHooks } from "./plugin/hooks.js"
-import { SessionMessage } from "./session/message.js"
-import { SessionSchema } from "./session/schema.js"
+import { SessionMessage } from "@opencode/schema/session-message"
+import { Session } from "@opencode/schema/session"
 import { State } from "./state.js"
 import { definition, effectiveName, execute, normalizedName, normalizeContent } from "./tool/runtime.js"
 import { Wildcard } from "./util/wildcard.js"
@@ -52,7 +52,7 @@ export interface Snapshot {
   readonly definitions: ReadonlyArray<ToolDefinition>
   readonly codeModeCatalog?: CodeModeCatalog.Inventory
   readonly execute: (input: {
-    readonly sessionID: SessionSchema.ID
+    readonly sessionID: Session.ID
     readonly agent: Agent.ID
     readonly messageID: SessionMessage.ID
     readonly call: ToolCall
@@ -308,7 +308,8 @@ function registrationError(tool: Tool.Info) {
     if (error) return error
   }
   const name = normalizedName(tool)
-  if (!/^[A-Za-z0-9_-]{1,128}$/.test(name)) return new RegistrationError({ name, message: `Invalid tool name: ${name}` })
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(name))
+    return new RegistrationError({ name, message: `Invalid tool name: ${name}` })
   const id = effectiveName(tool)
   if (tool.options?.codemode === false && id === "execute")
     return new RegistrationError({ name: id, message: 'Tool name "execute" is reserved for CodeMode' })

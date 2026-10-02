@@ -4,7 +4,7 @@ import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Bus } from "@opencode/core/bus"
 import { Form } from "@opencode/core/form"
-import { SessionSchema } from "@opencode/core/session/schema"
+import { Session } from "@opencode/schema/session"
 import { testEffect } from "./lib/effect"
 
 const forms = AppNodeBuilder.build(LayerNode.group([Bus.node, Form.node]))
@@ -13,7 +13,7 @@ const it = testEffect(forms)
 const formID = Form.ID.create("frm_test")
 const input = {
   id: formID,
-  sessionID: SessionSchema.ID.make("ses_test"),
+  sessionID: Session.ID.make("ses_test"),
   title: "Test form",
   fields: [{ key: "name", type: "string", required: true }],
 } satisfies Form.CreateInput

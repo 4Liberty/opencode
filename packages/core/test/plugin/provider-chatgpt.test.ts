@@ -23,7 +23,7 @@ import { ChatGPTPlugin, fetchModels, verifyIDToken } from "@opencode/core/plugin
 import { OpenAIPlugin } from "@opencode/core/plugin/provider/openai"
 import { Project } from "@opencode/core/project"
 import { Provider } from "@opencode/core/provider"
-import { AbsolutePath } from "@opencode/core/schema"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { SessionModelRequest } from "@opencode/core/session/model-request"
 import { SessionModelTransport } from "@opencode/core/session/model-transport"
 import { SessionRunnerModel } from "@opencode/core/session/runner/model"
@@ -251,7 +251,11 @@ describe("ChatGPTPlugin", () => {
       yield* addPlugin()
       yield* addLegacyPlugin()
       const integrations = yield* Integration.Service
-      expect((yield* integrations.get(Integration.ID.make("openai")))?.methods.map((method) => method.type === "oauth" && method.id)).toEqual([
+      expect(
+        (yield* integrations.get(Integration.ID.make("openai")))?.methods.map(
+          (method) => method.type === "oauth" && method.id,
+        ),
+      ).toEqual([
         Integration.MethodID.make("chatgpt-token-sharing"),
         Integration.MethodID.make("chatgpt-browser"),
         Integration.MethodID.make("chatgpt-headless"),
@@ -662,17 +666,17 @@ describe("ChatGPTPlugin", () => {
         }),
       })
       yield* Deferred.await(requested).pipe(Effect.timeout("2 seconds"))
-      expect((yield* models.available()).filter((model) => model.providerID === Provider.ID.openai).map((model) => model.id)).toEqual([
-        Model.ID.make("gpt-5.5"),
-        Model.ID.make("gpt-6-astra"),
-      ])
+      expect(
+        (yield* models.available()).filter((model) => model.providerID === Provider.ID.openai).map((model) => model.id),
+      ).toEqual([Model.ID.make("gpt-5.5"), Model.ID.make("gpt-6-astra")])
       const storage = PluginHost.storage(kv, ChatGPTPlugin.id)
       expect(yield* storage.get("models:oaiapp_issued")).toBeUndefined()
 
       yield* Deferred.succeed(release, undefined)
       const available = yield* models.available().pipe(
         Effect.repeat({
-          until: (current) => current.some((model) => model.providerID === Provider.ID.openai && model.id === "gpt-6-future"),
+          until: (current) =>
+            current.some((model) => model.providerID === Provider.ID.openai && model.id === "gpt-6-future"),
           schedule: Schedule.spaced("10 millis"),
         }),
         Effect.timeout("2 seconds"),
@@ -788,7 +792,12 @@ describe("ChatGPTPlugin", () => {
         "gpt-6.1-sol",
       ])
         expect(yield* models.get(Provider.ID.openai, Model.ID.make(id))).toBeUndefined()
-      expect((yield* models.available()).filter((model) => model.providerID === Provider.ID.openai).map((model) => model.id).sort()).toEqual(
+      expect(
+        (yield* models.available())
+          .filter((model) => model.providerID === Provider.ID.openai)
+          .map((model) => model.id)
+          .sort(),
+      ).toEqual(
         [
           "gpt-5.5",
           "gpt-5.5-fast",

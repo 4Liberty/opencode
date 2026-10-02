@@ -7,7 +7,7 @@ import { Bus } from "./bus.js"
 import { Location } from "./location.js"
 import { Agent } from "./agent.js"
 import { SessionErrors } from "./session/error.js"
-import { SessionSchema } from "./session/schema.js"
+import { Session } from "@opencode/schema/session"
 import { SessionStore } from "./session/store.js"
 import { Wildcard } from "./util/wildcard.js"
 import { PermissionSaved } from "./permission/saved.js"
@@ -106,7 +106,7 @@ export interface Interface {
   readonly assert: (input: AssertInput) => Effect.Effect<void, Error | SessionErrors.NotFoundError>
   readonly reply: (input: ReplyInput) => Effect.Effect<void, NotFoundError>
   readonly get: (id: ID) => Effect.Effect<Request | undefined>
-  readonly forSession: (sessionID: SessionSchema.ID) => Effect.Effect<ReadonlyArray<Request>>
+  readonly forSession: (sessionID: Session.ID) => Effect.Effect<ReadonlyArray<Request>>
   readonly list: () => Effect.Effect<ReadonlyArray<Request>>
 }
 
@@ -155,7 +155,7 @@ const layer = Layer.effect(
       )
     })
 
-    const configured = Effect.fnUntraced(function* (sessionID: SessionSchema.ID, agentID?: Agent.ID) {
+    const configured = Effect.fnUntraced(function* (sessionID: Session.ID, agentID?: Agent.ID) {
       const session = yield* sessions.get(sessionID)
       if (!session) return yield* new SessionErrors.NotFoundError({ sessionID })
       const agent = yield* agents.resolve(agentID ?? session.agent)
@@ -332,7 +332,7 @@ const layer = Layer.effect(
       return pending.get(id)?.request
     })
 
-    const forSession = Effect.fn("Permission.forSession")(function* (sessionID: SessionSchema.ID) {
+    const forSession = Effect.fn("Permission.forSession")(function* (sessionID: Session.ID) {
       return Array.from(pending.values(), (item) => item.request).filter((request) => request.sessionID === sessionID)
     })
 

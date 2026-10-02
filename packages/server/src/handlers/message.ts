@@ -1,4 +1,4 @@
-import { SessionMessage } from "@opencode/core/session/message"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { Session } from "@opencode/core/session"
 import { Effect, Schema } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"

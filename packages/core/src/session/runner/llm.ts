@@ -9,14 +9,14 @@ import { LocationLifecycle } from "../../location-lifecycle.js"
 import { InstructionState } from "../instruction-state.js"
 import { SessionCompaction } from "../compaction.js"
 import { SessionContext } from "../context.js"
-import { SessionEvent } from "../event.js"
+import { SessionEvent } from "@opencode/schema/session-event"
 import { SessionInbox } from "../inbox.js"
 import { SessionHistory } from "../history.js"
 import { SessionProviderContext } from "../provider-context.js"
 import { SessionModelRequest } from "../model-request.js"
 import { SessionModelTransport } from "../model-transport.js"
-import { SessionMessage } from "../message.js"
-import { SessionSchema } from "../schema.js"
+import { SessionMessage } from "@opencode/schema/session-message"
+import { Session } from "@opencode/schema/session"
 import { SessionStore } from "../store.js"
 import { SessionMessageTable } from "../sql.js"
 import { SessionTitle } from "../title.js"
@@ -49,7 +49,7 @@ const layer = Layer.effect(
     const title = yield* SessionTitle.Service
     const steps = yield* SessionStep.make
     // Title generation starts once input is visible and must not delay model execution.
-    const titles = yield* FiberMap.make<SessionSchema.ID, void, never>()
+    const titles = yield* FiberMap.make<Session.ID, void, never>()
 
     const drain = Effect.fn("SessionRunner.drain")(function* (input: Parameters<Interface["drain"]>[0]) {
       const sessionID = input.sessionID
@@ -195,7 +195,7 @@ const layer = Layer.effect(
       }
     })
 
-    const prepareContext = Effect.fn("SessionRunner.prepareContext")(function* (sessionID: SessionSchema.ID) {
+    const prepareContext = Effect.fn("SessionRunner.prepareContext")(function* (sessionID: Session.ID) {
       const selected = yield* context.select(sessionID)
       // A blocked initial instruction baseline must leave admitted input pending.
       yield* InstructionState.prepare(db, bus, selected.instructions, sessionID)
@@ -296,9 +296,7 @@ const layer = Layer.effect(
       }
     })
 
-    const settleStaleCompactions = Effect.fn("SessionRunner.settleStaleCompactions")(function* (
-      sessionID: SessionSchema.ID,
-    ) {
+    const settleStaleCompactions = Effect.fn("SessionRunner.settleStaleCompactions")(function* (sessionID: Session.ID) {
       // A process death skips compaction finalizers. Include orphans behind a
       // completed checkpoint, and settle newest first to match event projection.
       const rows = yield* db
@@ -326,9 +324,7 @@ const layer = Layer.effect(
       }
     })
 
-    const settleStaleToolCalls = Effect.fn("SessionRunner.settleStaleToolCalls")(function* (
-      sessionID: SessionSchema.ID,
-    ) {
+    const settleStaleToolCalls = Effect.fn("SessionRunner.settleStaleToolCalls")(function* (sessionID: Session.ID) {
       for (const message of yield* store.context(sessionID)) {
         if (message.type !== "assistant") continue
         for (const tool of message.content) {

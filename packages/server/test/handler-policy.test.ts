@@ -1,5 +1,5 @@
 import { Session } from "@opencode/core/session"
-import { SessionMessage } from "@opencode/core/session/message"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { SessionNotFoundError, UnknownError } from "@opencode/protocol/errors"
 import { expect, test } from "bun:test"
 import { Effect, Logger, References } from "effect"

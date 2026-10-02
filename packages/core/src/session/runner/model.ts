@@ -6,11 +6,11 @@ import { Model } from "@opencode/schema/model"
 import { Provider } from "@opencode/schema/provider"
 import { Context, Effect, Layer, Schema } from "effect"
 import { ModelResolver } from "../../model-resolver.js"
-import { SessionSchema } from "../schema.js"
+import { Session } from "@opencode/schema/session"
 
 export class ModelNotSelectedError extends Schema.TaggedError<ModelNotSelectedError>()(
   "SessionRunnerModel.ModelNotSelectedError",
-  { sessionID: SessionSchema.ID },
+  { sessionID: Session.ID },
 ) {
   override get message() {
     return `No model is available for session ${this.sessionID}`
@@ -35,7 +35,7 @@ export type Resolved = ModelResolver.Resolved
 export interface Interface {
   /** Availability is sampled lazily for each explicitly selected model resolution. */
   readonly resolve: (
-    session: SessionSchema.Info,
+    session: Session.Info,
     available: () => Effect.Effect<ReadonlyArray<Model.Info>>,
   ) => Effect.Effect<Resolved, Error>
 }

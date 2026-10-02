@@ -26,7 +26,7 @@ import { ConfigPluginV1 } from "../v1/config/plugin.js"
 import { ConfigProviderV1 } from "../v1/config/provider.js"
 import { ConfigV1 } from "../v1/config/config.js"
 import { ConfigMigrateV1 } from "../v1/config/migrate.js"
-import { PositiveInt } from "../schema.js"
+import { PositiveInt } from "@opencode/schema/schema"
 
 export interface Diagnostic {
   readonly kind: "conflict" | "invalid" | "unsupported"

@@ -9,7 +9,7 @@ import { Watcher } from "../../filesystem/watcher.js"
 import { InstructionDiscovery } from "../../instruction-discovery.js"
 import { Instructions } from "../../instructions/index.js"
 import { Location } from "../../location.js"
-import { AbsolutePath } from "../../schema.js"
+import { AbsolutePath } from "@opencode/schema/schema"
 
 type Loaded =
   | { readonly type: "available"; readonly files: InstructionDiscovery.File[] }

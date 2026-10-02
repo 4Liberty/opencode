@@ -3,7 +3,7 @@ export * as SubagentCompletion from "./subagent-completion.js"
 import { Effect } from "effect"
 import type { Job } from "../job.js"
 import type { Session } from "../session.js"
-import type { SessionMessage } from "./message.js"
+import type { SessionMessage } from "@opencode/schema/session-message"
 
 export const NO_TEXT = "Subagent completed without a text response."
 

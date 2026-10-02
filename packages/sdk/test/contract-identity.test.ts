@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test"
 import { Location as CoreLocation } from "@opencode/core/location"
 import { SessionInbox as CoreSessionInbox } from "@opencode/core/session/inbox"
-import { SessionMessage as CoreSessionMessage } from "@opencode/core/session/message"
 import { Agent } from "@opencode/schema/agent"
 import { Config } from "@opencode/schema/config"
 import { Event } from "@opencode/schema/event"
@@ -81,8 +80,6 @@ test("Core and Server reuse the authoritative Schema and Protocol values", () =>
   expect(CoreSessionInbox.Item).toBe(SessionInbox.Item)
   expect(CoreSessionInbox.User).toBe(SessionInbox.User)
   expect(CoreSessionInbox.Synthetic).toBe(SessionInbox.Synthetic)
-  expect(CoreSessionMessage.Info).toBe(SessionMessage.Info)
-  expect(CoreSessionMessage.AssistantText).toBe(SessionMessage.AssistantText)
   expect(Api.groups["server.session"].identifier).toBe("server.session")
   expect(Api.groups["server.project"].identifier).toBe("server.project")
   expect(Object.keys(ClientApi.groups)).toEqual(Object.keys(Api.groups))

@@ -4,8 +4,8 @@ import { Cause, Effect, Layer, Option, Schema, Semaphore } from "effect"
 import { Database } from "./database.js"
 import { SessionMessageTable, SessionTable } from "../session/sql.js"
 import { SessionV1 } from "@opencode/schema/session-v1"
-import { SessionMessage } from "../session/message.js"
-import { SessionSchema } from "../session/schema.js"
+import { SessionMessage } from "@opencode/schema/session-message"
+import { Session } from "@opencode/schema/session"
 import { KVTable } from "../kv/sql.js"
 import { EventSequenceTable } from "../event/sql.js"
 import { eq, sql } from "drizzle-orm"
@@ -625,7 +625,7 @@ export function run(options: Options = {}): Effect.Effect<RunResult, never, Data
               const next = yield* tx
                 .select()
                 .from(SessionTable)
-                .where(eq(SessionTable.id, SessionSchema.ID.make(nextID.id)))
+                .where(eq(SessionTable.id, Session.ID.make(nextID.id)))
                 .get()
               if (!next) return yield* Effect.die(new Error(`Failed to copy V1 session ${nextID.id}`))
               const sourceMessages = yield* tx.all<SourceMessage>(
@@ -644,7 +644,7 @@ export function run(options: Options = {}): Effect.Effect<RunResult, never, Data
                   .insert(SessionMessageTable)
                   .values({
                     id: SessionMessage.ID.make(message.id),
-                    session_id: SessionSchema.ID.make(message.session_id),
+                    session_id: Session.ID.make(message.session_id),
                     type: message.type,
                     seq: message.seq,
                     time_created: message.time_created,
@@ -781,7 +781,7 @@ function importNextDatabase(
               const existing = yield* tx
                 .select({ id: SessionTable.id })
                 .from(SessionTable)
-                .where(eq(SessionTable.id, SessionSchema.ID.make(session.id)))
+                .where(eq(SessionTable.id, Session.ID.make(session.id)))
                 .get()
               if (existing) return
               yield* tx.run(sql`
@@ -808,7 +808,7 @@ function importNextDatabase(
                   .insert(SessionMessageTable)
                   .values({
                     id: SessionMessage.ID.make(message.id),
-                    session_id: SessionSchema.ID.make(message.session_id),
+                    session_id: Session.ID.make(message.session_id),
                     type: message.type as SessionMessage.Type,
                     seq: message.seq,
                     time_created: message.time_created,

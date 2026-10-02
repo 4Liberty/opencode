@@ -1,7 +1,7 @@
 import { castDraft, produce, type WritableDraft } from "immer"
 import { DateTime, Effect, Match, pipe, Schema } from "effect"
-import { SessionEvent } from "./event.js"
-import { SessionMessage } from "./message.js"
+import { SessionEvent } from "@opencode/schema/session-event"
+import { SessionMessage } from "@opencode/schema/session-message"
 
 export interface Adapter {
   readonly getAgent: () => Effect.Effect<SessionMessage.AgentSelected["agent"] | undefined>

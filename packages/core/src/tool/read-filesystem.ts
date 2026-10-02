@@ -9,7 +9,7 @@ import { Environment } from "../environment/index.js"
 import type { Files } from "../environment/index.js"
 import { FileSystem } from "../filesystem.js"
 import { Mime } from "../mime.js"
-import { AbsolutePath, NonNegativeInt, PositiveInt, RelativePath } from "../schema.js"
+import { AbsolutePath, NonNegativeInt, PositiveInt, RelativePath } from "@opencode/schema/schema"
 
 export const MAX_READ_LINES = 2_000
 export const MAX_READ_BYTES = 50 * 1024

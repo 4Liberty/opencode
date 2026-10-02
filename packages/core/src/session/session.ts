@@ -5,6 +5,7 @@ import type { Agent } from "@opencode/schema/agent"
 import type { Model } from "@opencode/schema/model"
 import type { Permission } from "@opencode/schema/permission"
 import { Event } from "@opencode/schema/event"
+import { Session } from "@opencode/schema/session"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Bus } from "../bus.js"
 import { Database } from "../database/database.js"
@@ -20,15 +21,14 @@ import {
   PromptConflictError,
   SyntheticConflictError,
 } from "./error.js"
-import { SessionEvent } from "./event.js"
+import { SessionEvent } from "@opencode/schema/session-event"
 import { SessionExecution } from "./execution.js"
 import { SessionInbox } from "./inbox.js"
-import { SessionMessage } from "./message.js"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { SessionPrompt } from "./prompt.js"
 import { SessionRevert } from "./revert.js"
 import { SessionShell } from "./shell.js"
 import { SessionSkill } from "./skill.js"
-import { SessionSchema } from "./schema.js"
 import { SessionStore } from "./store.js"
 
 type PromptRequest = SessionPrompt.Input & {
@@ -50,16 +50,16 @@ export const make = Effect.fn("Session.make")(function* () {
   const fs = yield* FSUtil.Service
   const scope = yield* Scope.Scope
 
-  const get = Effect.fn("Session.get")(function* (sessionID: SessionSchema.ID) {
+  const get = Effect.fn("Session.get")(function* (sessionID: Session.ID) {
     const session = yield* store.get(sessionID)
     if (!session) return yield* new NotFoundError({ sessionID })
     return session
   })
-  const message = Effect.fn("Session.message")(function* (sessionID: SessionSchema.ID, messageID: SessionMessage.ID) {
+  const message = Effect.fn("Session.message")(function* (sessionID: Session.ID, messageID: SessionMessage.ID) {
     const stored = yield* store.message(messageID)
     return stored?.sessionID === sessionID ? stored.message : undefined
   })
-  const view = Effect.fn("Session.view")(function* (sessionID: SessionSchema.ID, input: { idle: number }) {
+  const view = Effect.fn("Session.view")(function* (sessionID: Session.ID, input: { idle: number }) {
     const session = yield* get(sessionID)
     if (
       session.time.idle === undefined ||
@@ -69,35 +69,29 @@ export const make = Effect.fn("Session.make")(function* () {
       return
     yield* bus.publish(SessionEvent.Viewed, { sessionID, idle: input.idle })
   })
-  const rename = Effect.fn("Session.rename")(function* (sessionID: SessionSchema.ID, input: { title: string }) {
+  const rename = Effect.fn("Session.rename")(function* (sessionID: Session.ID, input: { title: string }) {
     yield* get(sessionID)
     yield* bus.publish(SessionEvent.Renamed, { sessionID, title: input.title })
   })
   const setMetadata = Effect.fn("Session.setMetadata")(function* (
-    sessionID: SessionSchema.ID,
-    input: { metadata: SessionSchema.Metadata },
+    sessionID: Session.ID,
+    input: { metadata: Session.Metadata },
   ) {
     yield* get(sessionID)
     yield* bus.publish(SessionEvent.MetadataUpdated, { sessionID, metadata: input.metadata })
   })
   const setPermissions = Effect.fn("Session.setPermissions")(function* (
-    sessionID: SessionSchema.ID,
+    sessionID: Session.ID,
     input: { permissions: Permission.Ruleset },
   ) {
     yield* get(sessionID)
     yield* bus.publish(SessionEvent.Permissions, { sessionID, permissions: input.permissions })
   })
-  const switchAgent = Effect.fn("Session.switchAgent")(function* (
-    sessionID: SessionSchema.ID,
-    input: { agent: Agent.ID },
-  ) {
+  const switchAgent = Effect.fn("Session.switchAgent")(function* (sessionID: Session.ID, input: { agent: Agent.ID }) {
     const session = yield* get(sessionID)
     yield* bus.publish(SessionEvent.AgentSelected, { sessionID, agent: input.agent, previous: session.agent })
   })
-  const switchModel = Effect.fn("Session.switchModel")(function* (
-    sessionID: SessionSchema.ID,
-    input: { model: Model.Ref },
-  ) {
+  const switchModel = Effect.fn("Session.switchModel")(function* (sessionID: Session.ID, input: { model: Model.Ref }) {
     const session = yield* get(sessionID)
     if (
       session.model?.providerID === input.model.providerID &&
@@ -108,11 +102,11 @@ export const make = Effect.fn("Session.make")(function* () {
     yield* bus.publish(SessionEvent.ModelSelected, { sessionID, model: input.model, previous: session.model })
   })
   const mutatePending = (
-    sessionID: SessionSchema.ID,
+    sessionID: Session.ID,
     inboxID: SessionMessage.ID,
     mutation: (input: {
       readonly id: SessionMessage.ID
-      readonly sessionID: SessionSchema.ID
+      readonly sessionID: Session.ID
     }) => Effect.Effect<void, SessionInbox.LifecycleConflict>,
   ) =>
     mutation({ sessionID, id: inboxID }).pipe(
@@ -124,26 +118,23 @@ export const make = Effect.fn("Session.make")(function* () {
       ),
     )
 
-  const inbox = Effect.fn("Session.inbox")(function* (sessionID: SessionSchema.ID) {
+  const inbox = Effect.fn("Session.inbox")(function* (sessionID: Session.ID) {
     yield* get(sessionID)
     return yield* admission.list(sessionID)
   })
   const cancelInbox = Effect.fn("Session.cancelInbox")(
-    (sessionID: SessionSchema.ID, inboxID: SessionMessage.ID) => mutatePending(sessionID, inboxID, admission.cancel),
+    (sessionID: Session.ID, inboxID: SessionMessage.ID) => mutatePending(sessionID, inboxID, admission.cancel),
     Effect.uninterruptible,
   )
-  const steerInbox = Effect.fn("Session.steerInbox")(function* (
-    sessionID: SessionSchema.ID,
-    inboxID: SessionMessage.ID,
-  ) {
+  const steerInbox = Effect.fn("Session.steerInbox")(function* (sessionID: Session.ID, inboxID: SessionMessage.ID) {
     yield* mutatePending(sessionID, inboxID, admission.steer)
     yield* execution.wake(sessionID)
   }, Effect.uninterruptible)
   const queueInbox = Effect.fn("Session.queueInbox")(
-    (sessionID: SessionSchema.ID, inboxID: SessionMessage.ID) => mutatePending(sessionID, inboxID, admission.queue),
+    (sessionID: Session.ID, inboxID: SessionMessage.ID) => mutatePending(sessionID, inboxID, admission.queue),
     Effect.uninterruptible,
   )
-  const prompt = Effect.fn("Session.prompt")((sessionID: SessionSchema.ID, input: PromptRequest) =>
+  const prompt = Effect.fn("Session.prompt")((sessionID: Session.ID, input: PromptRequest) =>
     Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
         const session = yield* get(sessionID)
@@ -178,7 +169,7 @@ export const make = Effect.fn("Session.make")(function* () {
     ),
   )
   const shell = Effect.fn("Session.shell")(function* (
-    sessionID: SessionSchema.ID,
+    sessionID: Session.ID,
     input: { id?: SessionMessage.ID; command: string },
   ) {
     const session = yield* get(sessionID)
@@ -222,7 +213,7 @@ export const make = Effect.fn("Session.make")(function* () {
     yield* Fiber.join(running)
   })
   const skill = Effect.fn("Session.skill")(function* (
-    sessionID: SessionSchema.ID,
+    sessionID: Session.ID,
     input: { messageID?: SessionMessage.ID; skill: Skill.ID; resume?: boolean },
   ) {
     const session = yield* get(sessionID)
@@ -245,7 +236,7 @@ export const make = Effect.fn("Session.make")(function* () {
         .pipe(Effect.ignore, Effect.forkIn(scope, { startImmediately: true }), Effect.asVoid)
   })
   const compact = Effect.fn("Session.compact")(function* (
-    sessionID: SessionSchema.ID,
+    sessionID: Session.ID,
     input: { id?: SessionMessage.ID; delivery?: SessionInbox.Delivery },
   ) {
     const session = yield* get(sessionID)
@@ -263,17 +254,17 @@ export const make = Effect.fn("Session.make")(function* () {
     yield* execution.wake(sessionID)
     return admitted
   })
-  const wait = Effect.fn("Session.wait")(function* (sessionID: SessionSchema.ID) {
+  const wait = Effect.fn("Session.wait")(function* (sessionID: Session.ID) {
     yield* get(sessionID)
     yield* execution.awaitIdle(sessionID)
   })
-  const resume = Effect.fn("Session.resume")(function* (sessionID: SessionSchema.ID) {
+  const resume = Effect.fn("Session.resume")(function* (sessionID: Session.ID) {
     yield* get(sessionID)
     yield* execution.resume(sessionID)
   })
   const synthetic = Effect.fn("Session.synthetic")(
     (
-      sessionID: SessionSchema.ID,
+      sessionID: Session.ID,
       input: {
         id?: SessionMessage.ID
         text: string
@@ -313,12 +304,11 @@ export const make = Effect.fn("Session.make")(function* () {
         }),
       ),
   )
-  const interrupt = Effect.fn("Session.interrupt")(
-    (sessionID: SessionSchema.ID, options?: { readonly resume?: boolean }) =>
-      Effect.uninterruptible(execution.interrupt(sessionID, options)),
+  const interrupt = Effect.fn("Session.interrupt")((sessionID: Session.ID, options?: { readonly resume?: boolean }) =>
+    Effect.uninterruptible(execution.interrupt(sessionID, options)),
   )
   const stage = Effect.fn("Session.revert.stage")(function* (
-    sessionID: SessionSchema.ID,
+    sessionID: Session.ID,
     input: { messageID: SessionMessage.ID; files?: boolean },
   ) {
     const session = yield* get(sessionID)
@@ -329,7 +319,7 @@ export const make = Effect.fn("Session.make")(function* () {
       Effect.provideService(Bus.Service, bus),
     )
   })
-  const clear = Effect.fn("Session.revert.clear")(function* (sessionID: SessionSchema.ID) {
+  const clear = Effect.fn("Session.revert.clear")(function* (sessionID: Session.ID) {
     const session = yield* get(sessionID)
     if (yield* execution.isActive(sessionID)) return yield* new BusyError({ sessionID })
     yield* SessionRevert.clear(session).pipe(
@@ -338,7 +328,7 @@ export const make = Effect.fn("Session.make")(function* () {
     )
     return yield* execution.wake(sessionID)
   })
-  const commit = Effect.fn("Session.revert.commit")(function* (sessionID: SessionSchema.ID) {
+  const commit = Effect.fn("Session.revert.commit")(function* (sessionID: Session.ID) {
     const session = yield* get(sessionID)
     if (yield* execution.isActive(sessionID)) return yield* new BusyError({ sessionID })
     return yield* SessionRevert.commit(bus, session)
@@ -368,7 +358,7 @@ export const make = Effect.fn("Session.make")(function* () {
     revert,
   }
 
-  const forSession = (sessionID: SessionSchema.ID) => {
+  const forSession = (sessionID: Session.ID) => {
     const get = operations.get.bind(undefined, sessionID)
     const message = operations.message.bind(undefined, sessionID)
     const view = operations.view.bind(undefined, sessionID)

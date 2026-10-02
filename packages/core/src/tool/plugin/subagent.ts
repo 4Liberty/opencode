@@ -10,13 +10,12 @@ import { Job } from "../../job.js"
 import { Model } from "../../model.js"
 import { Permission } from "../../permission.js"
 import { Session } from "../../session.js"
-import { SessionSchema } from "../../session/schema.js"
 import { SubagentCompletion } from "../../session/subagent-completion.js"
 import { SubagentJob } from "../../session/subagent-job.js"
 
 export const name = "subagent"
 
-const backgroundResult = (sessionID: SessionSchema.ID) => ({
+const backgroundResult = (sessionID: Session.ID) => ({
   sessionID,
   status: "running" as const,
   output: [
@@ -37,7 +36,7 @@ export const Input = Schema.Struct({
     description:
       'NEVER set this unless the user explicitly asks for a particular model or variant. The value is written as "providerID/modelID", or "providerID/modelID#variant" to include a variant. Do not guess the ID: look the model up with the models tool, filtering to your own provider first.',
   }),
-  sessionID: Schema.optionalKey(SessionSchema.ID).annotate({
+  sessionID: Schema.optionalKey(Session.ID).annotate({
     description:
       "Continue a specific previous subagent conversation by passing its sessionID. Calls without a sessionID start a new conversation.",
   }),
@@ -48,7 +47,7 @@ export const Input = Schema.Struct({
 })
 
 export const Output = Schema.Struct({
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   status: Schema.Literals(["completed", "running"]),
   output: Schema.String,
 })

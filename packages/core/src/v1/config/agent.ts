@@ -1,7 +1,7 @@
 export * as ConfigAgentV1 from "./agent.js"
 
 import { Schema, SchemaGetter } from "effect"
-import { PositiveInt } from "../../schema.js"
+import { PositiveInt } from "@opencode/schema/schema"
 import { ConfigPermissionV1 } from "./permission.js"
 
 const Color = Schema.Union([

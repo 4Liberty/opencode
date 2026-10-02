@@ -3,7 +3,7 @@ import { Effect, Layer } from "effect"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { Location } from "@opencode/core/location"
 import { Project } from "@opencode/core/project"
-import { AbsolutePath } from "@opencode/core/schema"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { Workspace } from "@opencode/core/workspace"
 import { testEffect } from "./lib/effect"
 

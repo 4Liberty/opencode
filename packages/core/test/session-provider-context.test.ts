@@ -8,17 +8,17 @@ import { EventTable } from "@opencode/core/event/sql"
 import { Instructions } from "@opencode/core/instructions/index"
 import { Project } from "@opencode/core/project"
 import { ProjectTable } from "@opencode/core/project/sql"
-import { AbsolutePath } from "@opencode/core/schema"
-import { SessionEvent } from "@opencode/core/session/event"
+import { AbsolutePath } from "@opencode/schema/schema"
+import { SessionEvent } from "@opencode/schema/session-event"
 import { SessionHistory } from "@opencode/core/session/history"
 import { SessionInbox } from "@opencode/core/session/inbox"
 import { InstructionState } from "@opencode/core/session/instruction-state"
-import { SessionMessage } from "@opencode/core/session/message"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { SessionProjector } from "@opencode/core/session/projector"
 import { SessionProviderContext } from "@opencode/core/session/provider-context"
 import { SessionRunnerModel } from "@opencode/core/session/runner/model"
 import { toLLMMessages } from "@opencode/core/session/runner/to-llm-message"
-import { SessionSchema } from "@opencode/core/session/schema"
+import { Session } from "@opencode/schema/session"
 import { InstructionStateTable, SessionTable } from "@opencode/core/session/sql"
 import { SessionStore } from "@opencode/core/session/store"
 import { LayerNode } from "@opencode/util/effect/layer-node"
@@ -45,7 +45,7 @@ const replacement = [
   ),
 ]
 const providerContext = SessionProviderContext.encode(target, replacement)
-const sessionID = SessionSchema.ID.make("ses_provider_context")
+const sessionID = Session.ID.make("ses_provider_context")
 
 // Frozen serialized data, deliberately not constructed using today's Message API.
 const legacyContext = Schema.decodeUnknownSync(SessionProviderContext.Info)({

@@ -4,12 +4,12 @@ import { EffectDrizzleSqlite } from "@opencode/core/database/drizzle"
 import { Database } from "@opencode/core/database/database"
 import { DatabaseMigration } from "@opencode/core/database/migration"
 import { V1Migration } from "@opencode/core/database/v1-migration"
-import { SessionMessage } from "@opencode/core/session/message"
-import { SessionSchema } from "@opencode/core/session/schema"
+import { SessionMessage } from "@opencode/schema/session-message"
+import { Session } from "@opencode/schema/session"
 import { SessionTable } from "@opencode/core/session/sql"
 import { Project } from "@opencode/core/project"
 import { ProjectTable } from "@opencode/core/project/sql"
-import { AbsolutePath } from "@opencode/core/schema"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { Global } from "@opencode/util/global"
 import { Effect, Fiber, Layer, Logger, Schedule, Schema, Scope } from "effect"
 import { eq, sql } from "drizzle-orm"
@@ -31,7 +31,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, SqlClient | Scope.Scope | Global.
 const session = (
   overrides: Partial<V1Migration.TransformInput["session"]> = {},
 ): V1Migration.TransformInput["session"] => ({
-  id: SessionSchema.ID.make("ses_test"),
+  id: Session.ID.make("ses_test"),
   project_id: Project.ID.global,
   workspace_id: null,
   parent_id: null,
@@ -1000,7 +1000,7 @@ describe("V1Migration database workflow", () => {
           yield* db
             .select({ directory: SessionTable.directory })
             .from(SessionTable)
-            .where(eq(SessionTable.id, SessionSchema.ID.make("ses_next")))
+            .where(eq(SessionTable.id, Session.ID.make("ses_next")))
             .get(),
         ).toEqual({ directory: process.platform === "win32" ? "C:\\Users\\sewer" : "C:/Users/sewer" })
         expect(yield* db.all(sql`SELECT id, seq, data FROM session_message WHERE session_id = 'ses_next'`)).toEqual([

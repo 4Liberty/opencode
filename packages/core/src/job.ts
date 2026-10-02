@@ -4,8 +4,8 @@ import { Array, Cause, Clock, Context, Deferred, Effect, Exit, Layer, Schema, Sc
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { Identifier } from "./id/id.js"
 import { KV } from "./kv.js"
-import { SessionMessage } from "./session/message.js"
-import { SessionSchema } from "./session/schema.js"
+import { SessionMessage } from "@opencode/schema/session-message"
+import { Session } from "@opencode/schema/session"
 
 const Background = Schema.Struct({
   id: Schema.String,
@@ -13,14 +13,14 @@ const Background = Schema.Struct({
   recovery: Schema.Union([
     Schema.Struct({
       kind: Schema.Literal("shell"),
-      sessionID: SessionSchema.ID,
+      sessionID: Session.ID,
       shellID: Schema.String,
       command: Schema.String,
     }),
     Schema.Struct({
       kind: Schema.Literal("subagent"),
-      parentSessionID: SessionSchema.ID,
-      childSessionID: SessionSchema.ID,
+      parentSessionID: Session.ID,
+      childSessionID: Session.ID,
       agent: Schema.String,
       description: Schema.String,
     }),
@@ -56,7 +56,7 @@ type Active = {
   done: Deferred.Deferred<Info>
   backgrounded: Deferred.Deferred<Info>
   scope: Scope.Closeable
-  blockingSessions: Map<SessionSchema.ID, number>
+  blockingSessions: Map<Session.ID, number>
   isBackgrounded: boolean
   consumed: boolean
   recovery?: Recovery
@@ -115,13 +115,13 @@ export type WaitResult = {
 
 export type BlockInput = {
   id: string
-  sessionID: SessionSchema.ID
+  sessionID: Session.ID
 }
 
 export type BlockResult = { type: "finished"; info: Info } | { type: "backgrounded"; info: Info }
 
 export type BackgroundAllInput = {
-  sessionID: SessionSchema.ID
+  sessionID: Session.ID
   type?: string
 }
 
@@ -156,11 +156,11 @@ function errorText(cause: Cause.Cause<unknown>) {
   return Cause.prettyErrors(cause).map(render).join("\n") || "Unknown error"
 }
 
-function incrementSession(input: Map<SessionSchema.ID, number>, sessionID: SessionSchema.ID) {
+function incrementSession(input: Map<Session.ID, number>, sessionID: Session.ID) {
   return new Map(input).set(sessionID, (input.get(sessionID) ?? 0) + 1)
 }
 
-function decrementSession(input: Map<SessionSchema.ID, number>, sessionID: SessionSchema.ID) {
+function decrementSession(input: Map<Session.ID, number>, sessionID: Session.ID) {
   const count = input.get(sessionID)
   if (count === undefined) return input
   const next = new Map(input)
@@ -224,7 +224,7 @@ export const make = Effect.gen(function* () {
             : "error"
         const next = {
           ...job,
-          blockingSessions: new Map<SessionSchema.ID, number>(),
+          blockingSessions: new Map<Session.ID, number>(),
           info: {
             ...job.info,
             status,
@@ -278,7 +278,7 @@ export const make = Effect.gen(function* () {
               done,
               backgrounded,
               scope,
-              blockingSessions: new Map<SessionSchema.ID, number>(),
+              blockingSessions: new Map<Session.ID, number>(),
               isBackgrounded: false,
               consumed: false,
               recovery: input.recovery,
@@ -360,7 +360,7 @@ export const make = Effect.gen(function* () {
     const next = {
       ...job,
       isBackgrounded: true,
-      blockingSessions: new Map<SessionSchema.ID, number>(),
+      blockingSessions: new Map<Session.ID, number>(),
       info: {
         ...job.info,
         ...(job.recovery ? { notificationID: job.info.notificationID ?? SessionMessage.ID.create() } : {}),
@@ -420,7 +420,7 @@ export const make = Effect.gen(function* () {
         if (job.info.status !== "running") return [{ info: snapshot(job), generation: job.scope }, jobs]
         const next = {
           ...job,
-          blockingSessions: new Map<SessionSchema.ID, number>(),
+          blockingSessions: new Map<Session.ID, number>(),
           info: {
             ...job.info,
             status: "cancelled" as const,

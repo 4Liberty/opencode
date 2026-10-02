@@ -5,7 +5,7 @@ import { Effect } from "effect"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Global } from "@opencode/util/global"
 import { Location } from "../location.js"
-import { AbsolutePath } from "../schema.js"
+import { AbsolutePath } from "@opencode/schema/schema"
 import type { Options } from "../config.js"
 
 export const names = ["opencode.json", "opencode.jsonc"]

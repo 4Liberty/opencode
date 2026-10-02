@@ -23,7 +23,7 @@ import { Permission } from "@opencode/schema/permission"
 import { Pty } from "@opencode/schema/pty"
 import { Reference } from "@opencode/schema/reference"
 import { Skill } from "@opencode/schema/skill"
-import { AbsolutePath, optional, statics } from "@opencode/schema/schema"
+import { AbsolutePath } from "@opencode/schema/schema"
 
 test("Core reuses the canonical shared schemas", async () => {
   const schemaAgent = await import("@opencode/schema/agent")
@@ -45,9 +45,7 @@ test("Core reuses the canonical shared schemas", async () => {
     coreProvider,
     coreReference,
     coreSessionInbox,
-    coreSessionMessage,
     coreSkill,
-    coreSchema,
     coreWorkspace,
   ] = await Promise.all([
     import("@opencode/core/command"),
@@ -62,13 +60,11 @@ test("Core reuses the canonical shared schemas", async () => {
     import("@opencode/core/v1/permission"),
     import("@opencode/core/worktree"),
     import("@opencode/core/pty"),
-    import("@opencode/core/project/schema"),
+    import("@opencode/core/project"),
     import("@opencode/core/provider"),
     import("@opencode/core/reference"),
     import("@opencode/core/session/inbox"),
-    import("@opencode/core/session/message"),
     import("@opencode/core/skill"),
-    import("@opencode/core/schema"),
     import("@opencode/core/workspace"),
   ])
 
@@ -134,34 +130,11 @@ test("Core reuses the canonical shared schemas", async () => {
     [coreSessionInbox.Item, SessionInbox.Item],
     [coreSessionInbox.User, SessionInbox.User],
     [coreSessionInbox.Synthetic, SessionInbox.Synthetic],
-    [coreSessionMessage.ID, SessionMessage.ID],
-    [coreSessionMessage.AssistantRetry, SessionMessage.AssistantRetry],
-    [coreSessionMessage.AgentSelected, SessionMessage.AgentSelected],
-    [coreSessionMessage.ModelSelected, SessionMessage.ModelSelected],
-    [coreSessionMessage.LocationSwitched, SessionMessage.LocationSwitched],
-    [coreSessionMessage.User, SessionMessage.User],
-    [coreSessionMessage.Synthetic, SessionMessage.Synthetic],
-    [coreSessionMessage.System, SessionMessage.System],
-    [coreSessionMessage.Shell, SessionMessage.Shell],
-    [coreSessionMessage.ToolStateStreaming, SessionMessage.ToolStateStreaming],
-    [coreSessionMessage.ToolStateRunning, SessionMessage.ToolStateRunning],
-    [coreSessionMessage.ToolStateCompleted, SessionMessage.ToolStateCompleted],
-    [coreSessionMessage.ToolStateError, SessionMessage.ToolStateError],
-    [coreSessionMessage.ToolState, SessionMessage.ToolState],
-    [coreSessionMessage.AssistantTool, SessionMessage.AssistantTool],
-    [coreSessionMessage.AssistantText, SessionMessage.AssistantText],
-    [coreSessionMessage.AssistantReasoning, SessionMessage.AssistantReasoning],
-    [coreSessionMessage.AssistantContent, SessionMessage.AssistantContent],
-    [coreSessionMessage.Assistant, SessionMessage.Assistant],
-    [coreSessionMessage.Compaction, SessionMessage.Compaction],
-    [coreSessionMessage.Info, SessionMessage.Info],
     [coreSkill.DirectorySource, Skill.DirectorySource],
     [coreSkill.UrlSource, Skill.UrlSource],
     [coreSkill.EmbeddedSource, Skill.EmbeddedSource],
     [coreSkill.Source, Skill.Source],
     [coreSkill.Info, Skill.Info],
-    [coreSchema.optional, optional],
-    [coreSchema.statics, statics],
     [coreWorkspace.ID, Workspace.ID],
   ]
   for (const [core, shared] of schemas) expect(core).toBe(shared)

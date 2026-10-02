@@ -2,7 +2,7 @@ export * as SessionRunner from "./index.js"
 
 import type { AIError } from "@opencode/ai"
 import { Context, Data, Effect } from "effect"
-import { SessionSchema } from "../schema.js"
+import { Session } from "@opencode/schema/session"
 import type { Promotable } from "../inbox.js"
 import type { AgentNotFoundError, MessageDecodeError, StepFailedError } from "../error.js"
 import { SessionRunnerModel } from "./model.js"
@@ -29,7 +29,7 @@ export const DrainResult = Data.taggedEnum<DrainResult>()
 export interface Interface {
   /** Drains eligible durable work, returning transient state when execution must continue at a new Location. */
   readonly drain: (input: {
-    readonly sessionID: SessionSchema.ID
+    readonly sessionID: Session.ID
     readonly force: boolean
     readonly continuation?: Continuation
     /** "steer" settles the active intent without promoting queued next-turn work. */

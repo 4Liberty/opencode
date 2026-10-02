@@ -11,7 +11,7 @@ import { makeLocationNode } from "@opencode/util/effect/app-node"
 import { Context, Deferred, Effect, JsonSchema, Layer, Schema, SchemaRepresentation, Stream } from "effect"
 import { Bus } from "./bus.js"
 import { Location } from "./location.js"
-import { optional, statics } from "./schema.js"
+import { optional, statics } from "@opencode/schema/schema"
 
 export interface Interface {
   readonly register: RpcDomain["register"]

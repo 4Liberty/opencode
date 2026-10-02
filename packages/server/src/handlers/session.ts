@@ -22,7 +22,7 @@ import {
   SessionBusyError,
   SkillNotFoundError,
 } from "@opencode/protocol/errors"
-import { AbsolutePath } from "@opencode/core/schema"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { failedMessageDecode, failedSnapshot, missingMessage, missingSession } from "./session-error"
 
 const DefaultSessionsLimit = 50

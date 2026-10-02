@@ -12,13 +12,13 @@ import { SessionHistory } from "./history.js"
 import { SessionProviderContext } from "./provider-context.js"
 import { SessionModelRequest } from "./model-request.js"
 import type { SessionRunnerModel } from "./runner/model.js"
-import type { SessionSchema } from "./schema.js"
+import type { Session } from "@opencode/schema/session"
 
 export type Error = AgentNotFoundError | Instructions.InitializationBlocked | SessionRunnerModel.Error | AIError
 
 /** Generates text from current Session context without mutating the Session. */
 export const generate = Effect.fn("SessionGenerate.generate")(function* (input: {
-  session: SessionSchema.Info
+  session: Session.Info
   prompt: string
 }) {
   const instances = yield* Instance.Service

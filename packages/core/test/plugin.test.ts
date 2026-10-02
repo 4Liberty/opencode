@@ -9,7 +9,6 @@ import { Integration } from "@opencode/core/integration"
 import { Plugin } from "@opencode/core/plugin"
 import { PluginModule } from "@opencode/core/plugin/module"
 import { Session } from "@opencode/core/session"
-import { SessionSchema } from "@opencode/core/session/schema"
 import { Watcher } from "@opencode/core/filesystem/watcher"
 import { fromPromise } from "@opencode/plugin/promise/adapter"
 import { testEffect } from "./lib/effect"
@@ -476,7 +475,7 @@ it.effect("creates child sessions from a plugin at the parent's location", () =>
   Effect.gen(function* () {
     const plugins = yield* Plugin.Service
     const sessions = yield* Session.Service
-    const created = yield* Deferred.make<{ parentID: SessionSchema.ID; childID: SessionSchema.ID }>()
+    const created = yield* Deferred.make<{ parentID: Session.ID; childID: Session.ID }>()
     yield* plugins.activate([
       {
         id: "child-session",
@@ -526,7 +525,7 @@ it.effect("reloading a plugin replaces its command implementation", () =>
       ])
     const request = {
       name: "greet",
-      invocation: { sessionID: SessionSchema.ID.make("ses_plugin"), prompt: { text: "" }, delivery: "steer" as const },
+      invocation: { sessionID: Session.ID.make("ses_plugin"), prompt: { text: "" }, delivery: "steer" as const },
     }
 
     yield* load("1", "before")

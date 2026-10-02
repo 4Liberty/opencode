@@ -1,5 +1,5 @@
 import { FileSystem } from "@opencode/core/filesystem"
-import { RelativePath } from "@opencode/core/schema"
+import { RelativePath } from "@opencode/schema/schema"
 import { FileNotFoundError } from "@opencode/protocol/errors"
 import { Effect } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"

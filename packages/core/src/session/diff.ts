@@ -8,12 +8,12 @@ import { LocationServiceMap } from "../location-service-map.js"
 import { Snapshot } from "../snapshot.js"
 import { PATCH_CONTEXT_LINES } from "../vcs/patch.js"
 import { MessageNotFoundError } from "./error.js"
-import { SessionMessage } from "./message.js"
-import { SessionSchema } from "./schema.js"
+import { SessionMessage } from "@opencode/schema/session-message"
+import { Session } from "@opencode/schema/session"
 import { SessionMessageTable } from "./sql.js"
 
 export class TurnRangeError extends Schema.TaggedError<TurnRangeError>()("Session.TurnRangeError", {
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   field: Schema.Literals(["from", "to"]),
   message: Schema.String,
 }) {}
@@ -39,7 +39,7 @@ export const turn = Effect.fn("SessionDiff.turn")(function* (
   db: Database.Interface["db"],
   locations: Context.Service.Shape<typeof LocationServiceMap.Service>,
   input: {
-    readonly session: SessionSchema.Info
+    readonly session: Session.Info
     /** The process is currently executing this Session. */
     readonly active: boolean
     readonly from?: SessionMessage.ID

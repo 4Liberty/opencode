@@ -7,7 +7,7 @@ import { Bus } from "../src/bus"
 import { SdkPlugins } from "../src/plugin/sdk"
 import { Location } from "../src/location"
 import { LocationServiceMap } from "../src/location-service-map"
-import { AbsolutePath } from "../src/schema"
+import { AbsolutePath } from "@opencode/schema/schema"
 
 const args = process.argv.slice(2)
 const iterationsIndex = args.indexOf("--iterations")

@@ -5,7 +5,7 @@ import { makeLocationNode } from "@opencode/util/effect/app-node"
 import { createPatch } from "diff"
 import { Bus } from "./bus.js"
 import { Instructions } from "./instructions/index.js"
-import { AbsolutePath } from "./schema.js"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { State } from "./state.js"
 
 export class File extends Schema.Class<File>("InstructionDiscovery.File")({

@@ -7,7 +7,7 @@ import { Global } from "@opencode/util/global"
 import { Bus } from "./bus.js"
 import { Repository } from "./repository.js"
 import { RepositoryCache } from "./repository-cache.js"
-import { AbsolutePath } from "./schema.js"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { State } from "./state.js"
 
 export const LocalSource = Reference.LocalSource

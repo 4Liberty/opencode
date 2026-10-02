@@ -20,21 +20,21 @@ import { AgentNotFoundError } from "./error.js"
 import { SessionHistory } from "./history.js"
 import { SessionProviderContext } from "./provider-context.js"
 import { InstructionEntry } from "./instruction-entry.js"
-import { SessionMessage } from "./message.js"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { SessionModelRequest } from "./model-request.js"
 import { SessionRunnerModel } from "./runner/model.js"
-import { SessionSchema } from "./schema.js"
+import { Session } from "@opencode/schema/session"
 import { SessionStore } from "./store.js"
 
 export interface Selection {
-  readonly session: SessionSchema.Info
+  readonly session: Session.Info
   readonly agent: Agent.Selection & { readonly info: Agent.Info }
   readonly instructions: Instructions.List
   readonly tools: Tool.Snapshot
 }
 
 export interface Loaded {
-  readonly session: SessionSchema.Info
+  readonly session: Session.Info
   readonly agent: Agent.Selection & { readonly info: Agent.Info }
   readonly model: SessionRunnerModel.Resolved
   readonly initial: string
@@ -50,14 +50,12 @@ export interface Loaded {
  */
 export interface Interface {
   /** Selects the Session, agent, instructions, and tools used by subsequent work. */
-  readonly select: (sessionID: SessionSchema.ID) => Effect.Effect<Selection, AgentNotFoundError>
+  readonly select: (sessionID: Session.ID) => Effect.Effect<Selection, AgentNotFoundError>
   /** Resolves the model and active history for that selection. */
   readonly load: (selection: Selection) => Effect.Effect<Loaded, SessionRunnerModel.Error>
-  readonly resolveModel: (
-    session: SessionSchema.Info,
-  ) => Effect.Effect<SessionRunnerModel.Resolved, SessionRunnerModel.Error>
+  readonly resolveModel: (session: Session.Info) => Effect.Effect<SessionRunnerModel.Resolved, SessionRunnerModel.Error>
   /** Selects auxiliary title capabilities without instruction or tool preflight. */
-  readonly selectTitle: (session: SessionSchema.Info) => Effect.Effect<
+  readonly selectTitle: (session: Session.Info) => Effect.Effect<
     | {
         readonly agent: Agent.Info
         readonly primary: SessionRunnerModel.Resolved | undefined
@@ -90,9 +88,9 @@ const layer = Layer.effect(
     const store = yield* SessionStore.Service
     const registry = yield* Tool.Service
 
-    const resolveModel = (session: SessionSchema.Info) => models.resolve(session, model.available)
+    const resolveModel = (session: Session.Info) => models.resolve(session, model.available)
 
-    const selectTitle = Effect.fn("SessionContext.selectTitle")(function* (session: SessionSchema.Info) {
+    const selectTitle = Effect.fn("SessionContext.selectTitle")(function* (session: Session.Info) {
       const agent = yield* agents.get(Agent.ID.make("title"))
       if (!agent) return
       const primary = yield* resolveModel(session).pipe(Effect.orElseSucceed(() => undefined))
@@ -118,7 +116,7 @@ const layer = Layer.effect(
       return { agent, primary, selected }
     })
 
-    const select = Effect.fn("SessionContext.select")(function* (sessionID: SessionSchema.ID) {
+    const select = Effect.fn("SessionContext.select")(function* (sessionID: Session.ID) {
       const session = yield* store.get(sessionID)
       if (!session) return yield* Effect.die(new Error(`Session not found: ${sessionID}`))
       if (session.location.directory !== location.directory || session.location.workspaceID !== location.workspaceID)

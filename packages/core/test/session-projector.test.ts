@@ -12,10 +12,10 @@ import { Model } from "@opencode/core/model"
 import { Project } from "@opencode/core/project"
 import { ProjectTable } from "@opencode/core/project/sql"
 import { Provider } from "@opencode/core/provider"
-import { AbsolutePath, RelativePath } from "@opencode/core/schema"
+import { AbsolutePath, RelativePath } from "@opencode/schema/schema"
 import { Session } from "@opencode/core/session"
-import { SessionEvent } from "@opencode/core/session/event"
-import { SessionMessage } from "@opencode/core/session/message"
+import { SessionEvent } from "@opencode/schema/session-event"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { Money } from "@opencode/schema/money"
 import { SessionProjector } from "@opencode/core/session/projector"
 import { SessionExecution } from "@opencode/core/session/execution"
@@ -23,12 +23,7 @@ import { fromRow } from "@opencode/core/session/info"
 import { SessionInbox } from "@opencode/core/session/inbox"
 import { SessionStore } from "@opencode/core/session/store"
 import { Shell } from "@opencode/schema/shell"
-import {
-  InstructionStateTable,
-  SessionInboxTable,
-  SessionMessageTable,
-  SessionTable,
-} from "@opencode/core/session/sql"
+import { InstructionStateTable, SessionInboxTable, SessionMessageTable, SessionTable } from "@opencode/core/session/sql"
 import { testEffect } from "./lib/effect"
 import { Snapshot } from "@opencode/core/snapshot"
 

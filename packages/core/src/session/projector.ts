@@ -8,8 +8,8 @@ import { Bus } from "../bus.js"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { Agent } from "@opencode/schema/agent"
 import { Model } from "@opencode/schema/model"
-import { SessionEvent } from "./event.js"
-import { SessionMessage } from "./message.js"
+import { SessionEvent } from "@opencode/schema/session-event"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { SessionMessageUpdater } from "./message-updater.js"
 import { SessionInbox } from "./inbox.js"
 import { Workspace } from "@opencode/schema/workspace"
@@ -21,8 +21,8 @@ import { FSUtil } from "@opencode/util/fs-util"
 import { Money } from "@opencode/schema/money"
 import { Worktree } from "@opencode/schema/worktree"
 import { Project } from "@opencode/schema/project"
-import { AbsolutePath, RelativePath } from "../schema.js"
-import type { SessionSchema } from "./schema.js"
+import { AbsolutePath, RelativePath } from "@opencode/schema/schema"
+import type { Session } from "@opencode/schema/session"
 import { ProjectTable } from "../project/sql.js"
 
 type DatabaseService = Database.Interface["db"]
@@ -55,7 +55,7 @@ const forkTitle = (value?: string) => {
   return `${value} (fork #1)`
 }
 
-function applyUsage(db: DatabaseService, sessionID: SessionSchema.ID, value: Usage) {
+function applyUsage(db: DatabaseService, sessionID: Session.ID, value: Usage) {
   return db
     .update(SessionTable)
     .set({
@@ -75,7 +75,7 @@ function applyUsage(db: DatabaseService, sessionID: SessionSchema.ID, value: Usa
 const publishSessionUsage = Effect.fn("SessionProjector.publishUsage")(function* (
   db: DatabaseService,
   bus: Bus.Interface,
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
 ) {
   const row = yield* db
     .select({

@@ -6,7 +6,7 @@ import { InstructionEntry } from "@opencode/schema/instruction-entry"
 import { Database } from "../database/database.js"
 import { makeLocationNode } from "@opencode/util/effect/app-node"
 import { Instructions } from "../instructions/index.js"
-import { SessionSchema } from "./schema.js"
+import { Session } from "@opencode/schema/session"
 import { InstructionEntryTable } from "./sql.js"
 
 export const Key = InstructionEntry.Key
@@ -21,10 +21,7 @@ export const ValueTooLargeError = InstructionEntry.ValueTooLargeError
 type DatabaseService = Database.Interface["db"]
 const InsertBatchSize = 10
 
-export const snapshot = Effect.fn("InstructionEntry.snapshot")(function* (
-  db: DatabaseService,
-  sessionID: SessionSchema.ID,
-) {
+export const snapshot = Effect.fn("InstructionEntry.snapshot")(function* (db: DatabaseService, sessionID: Session.ID) {
   return yield* db
     .select({
       key: InstructionEntryTable.key,
@@ -40,7 +37,7 @@ export const snapshot = Effect.fn("InstructionEntry.snapshot")(function* (
 
 export const initialize = Effect.fn("InstructionEntry.initialize")(function* (
   db: DatabaseService,
-  sessionID: SessionSchema.ID,
+  sessionID: Session.ID,
   entries: Snapshot,
   created: number,
 ) {
@@ -67,15 +64,15 @@ export const initialize = Effect.fn("InstructionEntry.initialize")(function* (
 })
 
 export interface Interface {
-  readonly list: (sessionID: SessionSchema.ID) => Effect.Effect<ReadonlyArray<Info>>
+  readonly list: (sessionID: Session.ID) => Effect.Effect<ReadonlyArray<Info>>
   readonly put: (input: {
-    readonly sessionID: SessionSchema.ID
+    readonly sessionID: Session.ID
     readonly key: Key
     readonly value: Schema.Json
   }) => Effect.Effect<void, InstructionEntry.ValueTooLargeError>
-  readonly remove: (input: { readonly sessionID: SessionSchema.ID; readonly key: Key }) => Effect.Effect<void>
+  readonly remove: (input: { readonly sessionID: Session.ID; readonly key: Key }) => Effect.Effect<void>
   /** Produces one Instructions source per stored entry, keyed `api/<key>`. */
-  readonly load: (sessionID: SessionSchema.ID) => Effect.Effect<Instructions.List>
+  readonly load: (sessionID: Session.ID) => Effect.Effect<Instructions.List>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/InstructionEntry") {}
@@ -108,7 +105,7 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const { db } = yield* Database.Service
 
-    const rows = Effect.fnUntraced(function* (sessionID: SessionSchema.ID, includeRemoved: boolean) {
+    const rows = Effect.fnUntraced(function* (sessionID: Session.ID, includeRemoved: boolean) {
       return yield* db
         .select({
           key: InstructionEntryTable.key,
@@ -127,7 +124,7 @@ const layer = Layer.effect(
         .pipe(Effect.orDie)
     })
 
-    const list = Effect.fn("InstructionEntry.list")(function* (sessionID: SessionSchema.ID) {
+    const list = Effect.fn("InstructionEntry.list")(function* (sessionID: Session.ID) {
       return (yield* rows(sessionID, false)).map((row) => ({ key: row.key, value: row.value }))
     })
 
@@ -170,7 +167,7 @@ const layer = Layer.effect(
         .pipe(Effect.orDie)
     })
 
-    const load = Effect.fn("InstructionEntry.load")(function* (sessionID: SessionSchema.ID) {
+    const load = Effect.fn("InstructionEntry.load")(function* (sessionID: Session.ID) {
       return Instructions.combine((yield* rows(sessionID, true)).map(source))
     })
 

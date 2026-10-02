@@ -11,7 +11,7 @@ import { Location } from "@opencode/core/location"
 import { Model } from "@opencode/core/model"
 import { ModelResolver } from "@opencode/core/model-resolver"
 import { Provider } from "@opencode/core/provider"
-import { AbsolutePath } from "@opencode/core/schema"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { location } from "./fixture/location"
 import { testEffect } from "./lib/effect"
 
@@ -201,8 +201,7 @@ describe("Provider and Model", () => {
       yield* settle(
         Ref.get(log).pipe(
           Effect.map(
-            (types) =>
-              types.lastIndexOf(Model.Event.Updated.type) > types.lastIndexOf(Credential.Event.Updated.type),
+            (types) => types.lastIndexOf(Model.Event.Updated.type) > types.lastIndexOf(Credential.Event.Updated.type),
           ),
         ),
       )

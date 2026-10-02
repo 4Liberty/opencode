@@ -28,15 +28,15 @@ import { ID } from "@opencode/core/model"
 import { Project } from "@opencode/core/project"
 import { Provider } from "@opencode/core/provider"
 import { ReferenceInstructions } from "@opencode/core/reference/instructions"
-import { AbsolutePath } from "@opencode/core/schema"
-import { SessionEvent } from "@opencode/core/session/event"
+import { AbsolutePath } from "@opencode/schema/schema"
+import { SessionEvent } from "@opencode/schema/session-event"
 import { SessionContext } from "@opencode/core/session/context"
 import { SessionGenerate } from "@opencode/core/session/generate"
 import { InstructionState } from "@opencode/core/session/instruction-state"
-import { SessionMessage } from "@opencode/core/session/message"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { SessionProjector } from "@opencode/core/session/projector"
 import { SessionRunnerModel } from "@opencode/core/session/runner/model"
-import { SessionSchema } from "@opencode/core/session/schema"
+import { Session } from "@opencode/schema/session"
 import {
   InstructionBlobTable,
   InstructionStateTable,
@@ -57,7 +57,7 @@ import { testEffect } from "./lib/effect"
 const requests: LLMRequest[] = []
 const options: Array<StreamOptions | undefined> = []
 let instruction: string | Instructions.Unavailable = "Initial context"
-const sessionID = SessionSchema.ID.make("ses_generate_test")
+const sessionID = Session.ID.make("ses_generate_test")
 
 const model = LanguageModel.make({ id: "generate-model", provider: "test", route: OpenAIChat.route })
 const client = Layer.mock(LLMClient.Service)({
@@ -163,7 +163,7 @@ const it = testEffect(
   ),
 )
 
-const durableState = (db: Database.Interface["db"], sessionID: SessionSchema.ID) =>
+const durableState = (db: Database.Interface["db"], sessionID: Session.ID) =>
   Effect.all({
     sequence: Bus.latestSequence(db, sessionID),
     bus: db

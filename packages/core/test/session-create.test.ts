@@ -21,14 +21,14 @@ import { Model } from "@opencode/core/model"
 import { Project } from "@opencode/core/project"
 import { ProjectTable } from "@opencode/core/project/sql"
 import { Provider } from "@opencode/core/provider"
-import { AbsolutePath, RelativePath } from "@opencode/core/schema"
+import { AbsolutePath, RelativePath } from "@opencode/schema/schema"
 import { Session } from "@opencode/core/session"
-import { SessionMessage } from "@opencode/core/session/message"
+import { SessionMessage } from "@opencode/schema/session-message"
 import { SessionProjector } from "@opencode/core/session/projector"
 import { SessionExecution } from "@opencode/core/session/execution"
 import { SessionInbox } from "@opencode/core/session/inbox"
 import { InstructionEntry } from "@opencode/core/session/instruction-entry"
-import { SessionEvent } from "@opencode/core/session/event"
+import { SessionEvent } from "@opencode/schema/session-event"
 import { SessionTable } from "@opencode/core/session/sql"
 import { SessionStore } from "@opencode/core/session/store"
 import { SessionTransfer } from "@opencode/core/session/transfer"
@@ -809,9 +809,10 @@ describe("Session.create", () => {
       const session = yield* Session.Service
       const parent = yield* session.create({ location })
 
-      expect(
-        yield* session.fork({ sessionID: parent.id }).pipe(Effect.flip),
-      ).toMatchObject({ _tag: "Session.ForkEmptyError", sessionID: parent.id })
+      expect(yield* session.fork({ sessionID: parent.id }).pipe(Effect.flip)).toMatchObject({
+        _tag: "Session.ForkEmptyError",
+        sessionID: parent.id,
+      })
     }),
   )
 

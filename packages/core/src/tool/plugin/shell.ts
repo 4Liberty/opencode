@@ -11,9 +11,8 @@ import { Environment } from "../../environment/index.js"
 import { Job } from "../../job.js"
 import { FileAccess } from "../../file-access.js"
 import { Permission } from "../../permission.js"
-import { NonNegativeInt } from "../../schema.js"
+import { NonNegativeInt } from "@opencode/schema/schema"
 import { Session } from "../../session.js"
-import { SessionSchema } from "../../session/schema.js"
 import { Shell } from "../../shell.js"
 import { ShellParse } from "../../shell/parse.js"
 import { ShellSelect } from "../../shell/select.js"
@@ -153,7 +152,7 @@ export const Plugin = {
 
     const notifyWhenDone = Effect.fn("ShellTool.notifyWhenDone")(
       function* (
-        sessionID: SessionSchema.ID,
+        sessionID: Session.ID,
         id: string,
         shellID: string,
         command: string,

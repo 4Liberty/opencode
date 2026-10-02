@@ -1,6 +1,6 @@
 import { Location } from "@opencode/core/location"
 import { LocationServiceMap } from "@opencode/core/location-services"
-import { AbsolutePath } from "@opencode/core/schema"
+import { AbsolutePath } from "@opencode/schema/schema"
 import { Session } from "@opencode/core/session"
 import { InvalidRequestError } from "@opencode/protocol/errors"
 import { Effect, Layer, Schema } from "effect"

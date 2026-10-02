@@ -1,7 +1,7 @@
 export * as ConfigAttachmentV1 from "./attachment.js"
 
 import { Schema } from "effect"
-import { PositiveInt } from "../../schema.js"
+import { PositiveInt } from "@opencode/schema/schema"
 
 export const Image = Schema.Struct({
   auto_resize: Schema.optional(Schema.Boolean).annotate({

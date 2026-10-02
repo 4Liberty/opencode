@@ -3,7 +3,7 @@ import { AIError, ProviderInternalError, TransportError } from "@opencode/ai"
 import { Agent } from "@opencode/schema/agent"
 import { Model } from "@opencode/schema/model"
 import { Provider } from "@opencode/core/provider"
-import { SessionSchema } from "@opencode/core/session/schema"
+import { Session } from "@opencode/schema/session"
 import { SessionRunnerRetry } from "@opencode/core/session/runner/retry"
 import { toSessionError } from "@opencode/core/session/to-session-error"
 import { Effect } from "effect"
@@ -26,7 +26,7 @@ const input = (cause: AIError) => ({
 // Decisions for `count` consecutive failures of the same cause within one step.
 const decisions = (cause: AIError, count: number) =>
   Effect.gen(function* () {
-    const policy = yield* SessionRunnerRetry.policy(SessionSchema.ID.make("ses_retry"))
+    const policy = yield* SessionRunnerRetry.policy(Session.ID.make("ses_retry"))
     const results: boolean[] = []
     for (let i = 0; i < count; i++) results.push((yield* policy(input(cause))).retry)
     return results

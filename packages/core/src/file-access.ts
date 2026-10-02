@@ -8,7 +8,7 @@ import path from "path"
 import { Location } from "./location.js"
 import { Permission } from "./permission.js"
 import { Project } from "./project.js"
-import { AbsolutePath } from "./schema.js"
+import { AbsolutePath } from "@opencode/schema/schema"
 import type { SessionErrors } from "./session/error.js"
 import type { Tool } from "./tool.js"
 
