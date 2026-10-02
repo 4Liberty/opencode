@@ -866,6 +866,25 @@ describe("Config", () => {
     })
   }
 
+  // Effect leaves decoded key order unspecified, but these maps' order is user-visible: agents cycle
+  // in this order, the first matching formatter wins, and providers fold aliases in sequence.
+  test("decodes configuration maps in source order", () => {
+    const keys = ["zeta", "build", "alpha", "plan", "mid"]
+    const map = <A>(value: A) => Object.fromEntries(keys.map((key) => [key, value]))
+    const normalized = ConfigNormalize.normalize({
+      agents: map({}),
+      formatter: map({ command: ["fmt"], extensions: [".ts"] }),
+      providers: map({}),
+      commands: map({ template: "run" }),
+    })
+    if (normalized.type !== "normalized") throw new Error("expected normalized config")
+    const info = Schema.decodeUnknownSync(Info)(normalized.encoded, { errors: "all", onExcessProperty: "ignore" })
+    expect(Object.keys(info.agents ?? {})).toEqual(keys)
+    expect(Object.keys(typeof info.formatter === "object" ? info.formatter : {})).toEqual(keys)
+    expect(Object.keys(info.providers ?? {})).toEqual(keys)
+    expect(Object.keys(info.commands ?? {})).toEqual(keys)
+  })
+
   test("decodes v1 permissions in source order at every level", () => {
     const decode = Schema.decodeUnknownSync(ConfigPermissionV1.Info)
     expect(decode({ "*": "allow", custom: "deny", bash: { "git *": "ask", "*": "deny" }, edit: "deny" })).toEqual([
