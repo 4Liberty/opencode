@@ -1,0 +1,60 @@
+# Open Extension
+
+opencode in the side panel of Chromium browsers (Chrome, Helium, Brave, Edge, Arc, Vivaldi). Chat with the
+local opencode service next to any page, let the agent use real tabs, and extend sites with site scripts.
+
+- **Side panel chat** with the desktop app's session timeline, composer, and permission and question docks.
+- **Browser control:** the built-in `browser.*` tools drive the tabs the agent opens and the tabs you share,
+  with a visible agent cursor. Agent tabs are grouped as "opencode".
+- **Site scripts:** userscripts the extension injects itself (`chrome.userScripts`), installed from replies or
+  by the agent with your approval, toggled live per site.
+- **Browsing data:** history, bookmarks, top sites, and recently closed tabs, after you allow it per
+  conversation.
+
+## Install
+
+```sh
+cd packages/open-extension
+bun run build          # outputs dist/
+bun run host:install   # native host + opencode plugin
+```
+
+1. Open the browser's extensions page, turn on **Developer mode**, choose **Load unpacked**, and select
+   `packages/open-extension/dist`. The manifest key keeps the extension ID stable
+   (`afeafocngkodbmaipcngoamamfmekgfo`).
+2. For site scripts, choose **Details** on Open Extension and turn on **Allow user scripts**.
+3. Click the toolbar icon, or press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>.</kbd>, to open the panel.
+
+`host:install` registers the `ai.opencode.open_extension` native messaging host for every installed
+Chromium browser. The host runs `opencode service start` and `opencode service get password`, so the panel
+finds the background service without configuration. It also bundles the opencode plugin that adds the
+`site_scripts` and `browsing` tools into `~/.config/opencode/plugins/open-extension.js`. Without the host,
+the panel offers a manual URL and password form.
+
+## How it connects
+
+| Piece | Talks to | Over |
+| --- | --- | --- |
+| Side panel (`src/sidepanel`) | opencode service | `@opencode/client` HTTP and the event stream |
+| Side panel | background worker | one `chrome.runtime` port (`src/shared/protocol.ts`) |
+| Background (`src/background`) | `opencode.browser` plugin | `experimental.browser` RPC, attach v4, per session |
+| Background | tabs | `chrome.debugger` (CDP), `chrome.tabs`, `chrome.userScripts` |
+| Background | `open-extension` plugin (`plugin/`) | `open-extension.relay` RPC, while a panel is open |
+
+The background implements the same browser contract as the desktop pane
+(`packages/gui-extensions/src/browser`): the server plugin owns tools and permissions, the extension owns
+tabs and runs commands. Page operations, diagnostics, and profiling are ported from that package; keep them
+in step. Showing a session in the panel attaches its browser, which replaces another client's attachment for
+that session.
+
+Not available from an extension: heap snapshots (Chrome does not expose `HeapProfiler` to extensions) and
+Lighthouse. CPU profiles are rebuilt from the v8 sampling profiler's trace events.
+
+## Development
+
+```sh
+bun run dev       # rebuilds dist/ on change; reload the extension to pick it up
+bun typecheck
+```
+
+Rerun `bun run host:install` after changing `host/` or `plugin/`.
