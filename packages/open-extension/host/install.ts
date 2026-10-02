@@ -63,7 +63,15 @@ const installed = await Promise.all(
     }),
 )
 
+// The opencode plugin that gives agents site_scripts tools; opencode loads it from its config directory.
+const plugins = path.join(process.env.OPENCODE_CONFIG_DIR ?? path.join(process.env.XDG_CONFIG_HOME ?? path.join(home, ".config"), "opencode"), "plugins")
+const plugin = await Bun.build({ entrypoints: [path.join(import.meta.dir, "../plugin/open-extension.ts")], target: "bun" })
+if (!plugin.success) throw new AggregateError(plugin.logs, "Could not bundle the opencode plugin.")
+await mkdir(plugins, { recursive: true })
+await Bun.write(path.join(plugins, "open-extension.js"), plugin.outputs[0])
+
 console.log(`Extension ID: ${extensionID}`)
+console.log(`opencode plugin: ${path.join(plugins, "open-extension.js")}`)
 console.log(`Host: ${wrapper} (opencode: ${opencode})`)
 console.log(installed.length ? `Registered for:\n${installed.map((dir) => `  ${dir}`).join("\n")}` : "No supported browsers found.")
 

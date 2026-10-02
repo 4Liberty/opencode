@@ -1,14 +1,21 @@
 // Service worker: routes side panel requests, tracks tabs, and owns each session's browser.
 import { PANEL_PORT, type ActiveTab, type ToBackground, type ToPanel } from "../shared/protocol"
+import type { ScriptsCommand } from "../shared/scripts-rpc"
+import { hostLabel, type SiteScript, type SiteScriptApproval, type SiteScriptDraft } from "../shared/site-script"
 import { shareable } from "./policy"
+import { createScriptsLink } from "./scripts-link"
 import { createService } from "./service"
 import { createSessionBrowser, type SessionBrowser } from "./session-browser"
+import { createSiteScripts } from "./site-scripts"
 
 type Panel = { port: chrome.runtime.Port; windowID?: number; sessionID?: string }
 
 const panels = new Set<Panel>()
 const browsers = new Map<string, Promise<SessionBrowser>>()
 const service = createService((state) => broadcast(() => true, { type: "service", state }))
+const scripts = createSiteScripts((state) => broadcast(() => true, { type: "scripts", state }))
+const approvals = new Map<string, { approval: SiteScriptApproval; answer: (approve: boolean) => void }>()
+const link = createScriptsLink({ service, run: runScriptsCommand })
 let keepalive: ReturnType<typeof setInterval> | undefined
 
 void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
@@ -25,6 +32,8 @@ chrome.runtime.onConnect.addListener((port) => {
   })
   port.onDisconnect.addListener(() => {
     panels.delete(panel)
+    // Site script requests are relayed while a panel is open, since only a panel can approve them.
+    if (panels.size === 0) link.stop()
     void release(panel.sessionID)
   })
 })
@@ -34,6 +43,9 @@ async function receive(panel: Panel, message: ToBackground) {
     case "panel.hello": {
       panel.windowID = message.windowID
       post(panel, { type: "service", state: service.state() })
+      post(panel, { type: "scripts", state: scripts.state() })
+      post(panel, { type: "approvals", approvals: pendingApprovals() })
+      link.start()
       await service.get().catch(() => undefined)
       await sendActiveTab(message.windowID)
       return
@@ -90,7 +102,101 @@ async function receive(panel: Panel, message: ToBackground) {
     case "tab.focus":
       await (await browsers.get(message.sessionID))?.focus(message.tabID)
       return
+    case "scripts.install": {
+      const script = await scripts.install(message.draft)
+      post(panel, { type: "notice", message: `Installed "${script.name}". Reload ${sites(script)} to run it.` })
+      return
+    }
+    case "scripts.setEnabled":
+      await scripts.setEnabled(message.id, message.enabled)
+      return
+    case "scripts.remove":
+      await scripts.remove(message.id)
+      return
+    case "scripts.refresh":
+      await scripts.reconcile()
+      return
+    case "approval.reply": {
+      const pending = approvals.get(message.id)
+      if (!pending) return
+      approvals.delete(message.id)
+      broadcastApprovals()
+      pending.answer(message.approve)
+      return
+    }
   }
+}
+
+/** Runs a site_scripts tool call relayed from the opencode plugin. */
+async function runScriptsCommand(command: ScriptsCommand, signal: AbortSignal): Promise<unknown> {
+  switch (command.action) {
+    case "list": {
+      const state = scripts.state()
+      return {
+        allowed: state.available,
+        ...(state.error ? { note: state.error } : {}),
+        scripts: (await scripts.list()).map(summary),
+      }
+    }
+    case "get":
+      return scripts.get(command.id)
+    case "install": {
+      if (!(await approve(command.draft, signal))) throw new Error("The user declined to install this site script.")
+      const script = await scripts.install(command.draft)
+      return { ...summary(script), note: `Installed. Reload ${sites(script)} to run it, then verify on the page.` }
+    }
+    case "remove":
+      return summary(await scripts.remove(command.id))
+    case "set_enabled":
+      return summary(await scripts.setEnabled(command.id, command.enabled))
+  }
+}
+
+/** Asks every open panel; the first answer wins. A cancelled tool call withdraws the request. */
+async function approve(draft: SiteScriptDraft, signal: AbortSignal) {
+  if (panels.size === 0)
+    throw new Error("The Open Extension side panel is closed. Ask the user to open it so they can approve the script.")
+  const approval = await scripts.preview(draft, crypto.randomUUID())
+  return new Promise<boolean>((resolve) => {
+    const withdraw = () => {
+      if (!approvals.delete(approval.id)) return
+      broadcastApprovals()
+      resolve(false)
+    }
+    approvals.set(approval.id, {
+      approval,
+      answer: (approved) => {
+        signal.removeEventListener("abort", withdraw)
+        resolve(approved)
+      },
+    })
+    signal.addEventListener("abort", withdraw, { once: true })
+    broadcastApprovals()
+  })
+}
+
+function pendingApprovals() {
+  return Array.from(approvals.values(), (pending) => pending.approval)
+}
+
+function broadcastApprovals() {
+  broadcast(() => true, { type: "approvals", approvals: pendingApprovals() })
+}
+
+function summary(script: SiteScript) {
+  return {
+    id: script.id,
+    name: script.name,
+    ...(script.description ? { description: script.description } : {}),
+    matches: script.matches,
+    ...(script.excludeMatches?.length ? { excludeMatches: script.excludeMatches } : {}),
+    runAt: script.runAt,
+    enabled: script.enabled,
+  }
+}
+
+function sites(script: SiteScript) {
+  return [...new Set(script.matches.map(hostLabel))].join(", ")
 }
 
 function ensure(sessionID: string, location: { directory: string; workspaceID?: string }, windowID?: number) {

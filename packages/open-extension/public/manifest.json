@@ -25,9 +25,10 @@
     "webNavigation",
     "storage",
     "nativeMessaging",
-    "alarms"
+    "alarms",
+    "userScripts"
   ],
-  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "host_permissions": ["<all_urls>"],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   }

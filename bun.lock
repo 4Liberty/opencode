@@ -625,6 +625,7 @@
         "solid-js": "catalog:",
       },
       "devDependencies": {
+        "@opencode/plugin": "workspace:*",
         "@tailwindcss/vite": "4.3.3",
         "@tsconfig/node22": "catalog:",
         "@types/bun": "catalog:",

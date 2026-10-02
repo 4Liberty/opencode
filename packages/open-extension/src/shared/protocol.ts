@@ -1,6 +1,8 @@
 // Messages between the side panel and the background service worker. Each panel holds one long-lived
 // `chrome.runtime.connect({ name: PANEL_PORT })` port; the open port also keeps the worker alive.
 
+import type { SiteScriptApproval, SiteScriptDraft, SiteScriptsState } from "./site-script"
+
 export const PANEL_PORT = "open-extension.panel"
 
 export type ServiceInfo = { url: string; password: string; source: "host" | "manual" }
@@ -63,6 +65,14 @@ export type ToBackground =
   | { type: "tab.share"; sessionID: string; chromeTabID: number }
   | { type: "tab.unshare"; sessionID: string; tabID: string }
   | { type: "tab.focus"; sessionID: string; tabID: string }
+  /** The user installed a script from the panel (for example a userscript in a reply); no approval needed. */
+  | { type: "scripts.install"; draft: SiteScriptDraft }
+  | { type: "scripts.setEnabled"; id: string; enabled: boolean }
+  | { type: "scripts.remove"; id: string }
+  /** Re-check whether site scripts are allowed, after the user changes the browser setting. */
+  | { type: "scripts.refresh" }
+  /** The user's answer to an agent's install request. */
+  | { type: "approval.reply"; id: string; approve: boolean }
 
 export type ToPanel =
   | { type: "service"; state: ServiceState }
@@ -70,3 +80,8 @@ export type ToPanel =
   | { type: "activeTab"; tab: ActiveTab | null }
   /** A panel request failed, for example sharing a tab the browser will not let extensions debug. */
   | { type: "error"; message: string }
+  | { type: "scripts"; state: SiteScriptsState }
+  /** Agent install requests waiting for the user, oldest first. Any open panel may answer. */
+  | { type: "approvals"; approvals: SiteScriptApproval[] }
+  /** A panel-initiated script change succeeded; for confirmation toasts. */
+  | { type: "notice"; message: string }

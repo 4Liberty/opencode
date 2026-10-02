@@ -49,7 +49,7 @@ export function createBackground() {
       if (message.type === "service") return setState("service", message.state)
       if (message.type === "browser") return setState("browser", message.state)
       if (message.type === "error") return toastError("Open Extension")(message.message)
-      setState("activeTab", message.tab)
+      if (message.type === "activeTab") setState("activeTab", message.tab)
     })
     next.onDisconnect.addListener(() => {
       // Reading lastError marks it handled; a worker restart is expected, not an error.
