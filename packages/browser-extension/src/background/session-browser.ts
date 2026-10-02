@@ -39,7 +39,7 @@ type Connection = {
 // Session context the agent sees as <context key="..."> blocks, so it knows where it runs and what the
 // user is looking at. Without it agents reach for other browser automation and miss the shared tabs.
 const GUIDANCE = [
-  "You are running inside opencode Browser, opencode's side panel in the user's web browser.",
+  "You are running inside OpenCode Browser, opencode's side panel in the user's web browser.",
   "The browser.* tools control the user's real browser: tabs you open with browser.tabs.open and tabs the user shares from the panel (browser.tabs.list shows them). Use them for anything in the user's browser instead of other browser automation such as the browser-control skill or CLI.",
   "The user watches the tabs you use, and pointer actions show a cursor in the page. Move around a site the way a person would: find links and buttons with browser.snapshot or browser.find, then use browser.click, browser.fill, and browser.press. Use browser.navigate only to open a new site or an exact URL the user gave, and browser.evaluate to read data, not to click or navigate.",
   "If you need the page the user is looking at and it is not shared, ask them to click Share tab in the panel, or open the URL yourself with browser.tabs.open.",
@@ -296,7 +296,7 @@ export async function createSessionBrowser(input: {
         type: "failure",
         code: "unsupported",
         message:
-          "opencode Browser does not support the requested browser operation. Ask the user to update the extension, or use another operation.",
+          "OpenCode Browser does not support the requested browser operation. Ask the user to update the extension, or use another operation.",
       })
       return requests.delete(requestID)
     }

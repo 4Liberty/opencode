@@ -10,8 +10,8 @@ export default Runtime.handler(
     const removed = yield* BrowserExtension.uninstall()
     process.stdout.write(
       (removed.length
-        ? `Removed the opencode Browser helper from: ${removed.map((browser) => browser.name).join(", ")}`
-        : "The opencode Browser helper was not registered.") +
+        ? `Removed the OpenCode Browser helper from: ${removed.map((browser) => browser.name).join(", ")}`
+        : "The OpenCode Browser helper was not registered.") +
         EOL +
         "Remove the extension itself from your browser's extensions page." +
         EOL,

@@ -48,7 +48,7 @@ export function Setup(props: { state: Exclude<ServiceState, { status: "ready" }>
             }
           >
             <p class="mt-1 text-[13px] leading-5 text-v2-text-text-muted">
-              opencode Browser reaches opencode through a small helper. Run this once in a terminal. It installs the
+              OpenCode Browser reaches opencode through a small helper. Run this once in a terminal. It installs the
               helper and starts opencode.
             </p>
           </Show>

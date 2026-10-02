@@ -9,7 +9,7 @@ export type RelayStatus =
   | "offline"
   | "connecting"
   | "connected"
-  /** The relay runs but refused this extension (an older relay that does not know opencode Browser). */
+  /** The relay runs but refused this extension (an older relay that does not know OpenCode Browser). */
   | "rejected"
   /** Another extension (usually the old Browser Control extension) holds this profile's connection. */
   | "conflict"

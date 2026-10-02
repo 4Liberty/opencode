@@ -1,4 +1,4 @@
-// The Browser Control relay link. opencode Browser replaces Browser Control's own extension: it connects to
+// The Browser Control relay link. OpenCode Browser replaces Browser Control's own extension: it connects to
 // the local relay (ws://127.0.0.1:19989/extension) and runs its commands, so the relay's CLI, MCP server,
 // and Playwright `execute` drive tabs through this extension. Ported from anomalyco/browser-control
 // extension/src/background.ts; the relay's protocol is in ../browser-control/protocol.ts.
@@ -116,7 +116,7 @@ export function createBrowserControl(input: {
           version: chrome.runtime.getManifest().version,
           protocolVersion: extensionProtocolVersion,
           profileId: profile.id,
-          profileName: profile.name ?? "opencode Browser",
+          profileName: profile.name ?? "OpenCode Browser",
         },
       }),
     )
@@ -264,7 +264,7 @@ export function createBrowserControl(input: {
       const text = error instanceof Error ? error.message : String(error)
       throw new Error(
         /invoked|activeTab/i.test(text)
-          ? `${text}. Click the opencode Browser toolbar icon on this tab once before recording.`
+          ? `${text}. Click the OpenCode Browser toolbar icon on this tab once before recording.`
           : text,
       )
     })

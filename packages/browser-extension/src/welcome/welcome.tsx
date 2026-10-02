@@ -154,7 +154,7 @@ function Page() {
       <div class="flex w-full max-w-[560px] flex-col">
         <Logo class="block aspect-[234/42] w-[124px] self-start" />
         <h1 class="mt-6 text-[22px] font-[530] leading-7 tracking-[-0.3px] text-v2-text-text-base">
-          Welcome to opencode Browser
+          Welcome to OpenCode Browser
         </h1>
         <p class="mt-1.5 max-w-[480px] text-[14px] leading-[22px] text-v2-text-text-muted">
           Chat with opencode in a side panel, let agents work in your tabs, and reshape sites with site scripts.
@@ -190,7 +190,7 @@ function Page() {
               </Match>
               <Match when={failure()?.hostMissing}>
                 <Description>
-                  opencode Browser reaches opencode through a small helper. Run this once in a terminal. It installs the
+                  OpenCode Browser reaches opencode through a small helper. Run this once in a terminal. It installs the
                   helper and starts opencode.
                 </Description>
                 <CommandBlock command={INSTALL_COMMAND} class="mt-3" />
@@ -304,7 +304,7 @@ function Page() {
             </div>
             <p class="mt-3 flex items-start gap-1.5 text-12-regular leading-[18px] text-v2-text-text-faint">
               <PuzzleIcon />
-              <span>Pin opencode Browser from the extensions menu to open it in one click.</span>
+              <span>Pin OpenCode Browser from the extensions menu to open it in one click.</span>
             </p>
           </Step>
         </ol>

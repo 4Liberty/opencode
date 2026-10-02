@@ -1,4 +1,4 @@
-# opencode Browser
+# OpenCode Browser
 
 opencode in the side panel of Chromium browsers (Chrome, Edge, Brave, Opera, Vivaldi, Chromium, Helium, Arc). Chat with the
 local opencode service next to any page, let the agent use real tabs, and extend sites with site scripts.
@@ -21,7 +21,7 @@ opencode browser install                    # registers the helper with your bro
 1. Open the browser's extensions page, turn on **Developer mode**, choose **Load unpacked**, and select
    `packages/browser-extension/dist`. The manifest key keeps the extension ID stable
    (`afeafocngkodbmaipcngoamamfmekgfo`).
-2. For site scripts, choose **Details** on opencode Browser and turn on **Allow user scripts**.
+2. For site scripts, choose **Details** on OpenCode Browser and turn on **Allow user scripts**.
 3. Click the toolbar icon, or press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>.</kbd>, to open the panel.
 
 `opencode browser install` registers the `ai.opencode.browser` native messaging host for every

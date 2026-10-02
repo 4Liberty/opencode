@@ -231,7 +231,7 @@ async function runRelayCommand(command: RelayCommand, signal: AbortSignal): Prom
 async function allowBrowsing(sessionID: string, reason: AccessRequest["reason"], signal: AbortSignal) {
   if (await granted(sessionID)) return true
   if (panels.size === 0)
-    throw new Error("The opencode Browser side panel is closed. Ask the user to open it so they can allow access.")
+    throw new Error("The OpenCode Browser side panel is closed. Ask the user to open it so they can allow access.")
   // Parallel calls from one session share a single prompt.
   const existing = Array.from(accessRequests.values()).find((pending) => pending.request.sessionID === sessionID)
   const answer = existing
@@ -292,7 +292,7 @@ async function updateBadges(tabs?: chrome.tabs.Tab[]) {
       await chrome.action
         .setTitle({
           tabId: tab.id,
-          title: relay?.title ?? (count ? `opencode Browser · ${count} site script${count === 1 ? "" : "s"} on this page` : "opencode Browser"),
+          title: relay?.title ?? (count ? `OpenCode Browser · ${count} site script${count === 1 ? "" : "s"} on this page` : "OpenCode Browser"),
         })
         .catch(() => undefined)
     }),
@@ -305,7 +305,7 @@ const BADGE_COLORS: Record<string, string> = { default: "#3b3b3b", RUN: "#b45309
 /** Asks every open panel; the first answer wins. A cancelled tool call withdraws the request. */
 async function approve(draft: SiteScriptDraft, signal: AbortSignal) {
   if (panels.size === 0)
-    throw new Error("The opencode Browser side panel is closed. Ask the user to open it so they can approve the script.")
+    throw new Error("The OpenCode Browser side panel is closed. Ask the user to open it so they can approve the script.")
   const approval = await scripts.preview(draft, crypto.randomUUID())
   return new Promise<boolean>((resolve) => {
     const withdraw = () => {

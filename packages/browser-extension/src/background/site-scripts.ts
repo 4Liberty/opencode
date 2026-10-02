@@ -180,7 +180,7 @@ export function createSiteScripts(changed: (state: SiteScriptsState) => void) {
 /** chrome.userScripts, or an error explaining how to turn it on. */
 async function userScripts() {
   const unavailable = new Error(
-    'Site scripts are turned off. Open the browser\'s extensions page, choose Details on opencode Browser, and turn on "Allow user scripts".',
+    'Site scripts are turned off. Open the browser\'s extensions page, choose Details on OpenCode Browser, and turn on "Allow user scripts".',
   )
   const api = chrome.userScripts
   if (!api) throw unavailable

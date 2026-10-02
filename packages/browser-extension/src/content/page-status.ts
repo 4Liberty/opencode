@@ -106,7 +106,7 @@ function anchor(host: HTMLElement) {
   host.dataset.anchor = "cursor"
 }
 
-/** Browser Control's relay draws its own purple cursor; give it opencode Browser's look. */
+/** Browser Control's relay draws its own purple cursor; give it OpenCode Browser's look. */
 function styleRelayCursor() {
   if (document.getElementById(CURSOR_STYLE_ID)) return
   const style = document.createElement("style")

@@ -1,4 +1,4 @@
-// Site scripts: JavaScript that opencode Browser injects into matching pages with chrome.userScripts,
+// Site scripts: JavaScript that OpenCode Browser injects into matching pages with chrome.userScripts,
 // the API Tampermonkey and Violentmonkey use under Manifest V3. Shared by the background worker,
 // the side panel, and (as plain JSON) the opencode plugin that lets agents install them.
 

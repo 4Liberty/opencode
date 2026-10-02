@@ -1,5 +1,5 @@
 // The Browser Control relay's extension protocol (version 2), ported from anomalyco/browser-control
-// src/protocol.ts and src/recording-protocol.ts. opencode Browser speaks it so the relay, its CLI, and
+// src/protocol.ts and src/recording-protocol.ts. OpenCode Browser speaks it so the relay, its CLI, and
 // its MCP server drive tabs through this extension. Keep it in step with the relay.
 
 type JsonPrimitive = string | number | boolean | null

@@ -104,7 +104,7 @@ export function UserScriptsSteps(props: { onCheck: () => void; class?: string })
   return (
     <div class={`flex flex-col gap-2.5 ${props.class ?? ""}`}>
       <p class="text-12-regular leading-[18px] text-v2-text-text-muted">
-        On opencode Browser's details page, turn on{" "}
+        On OpenCode Browser's details page, turn on{" "}
         <span class="font-[530] text-v2-text-text-base">Allow user scripts</span>. Some browsers ask for{" "}
         <span class="font-[530] text-v2-text-text-base">Developer mode</span> first, at the top of the extensions
         page.
@@ -132,18 +132,18 @@ const problems: Record<RelayProblem, { title: string; short: string; body: strin
   conflict: {
     title: "The Browser Control extension is also installed",
     short: "Browser Control extension conflict",
-    body: "It holds Browser Control's connection, so agents can't reach opencode Browser. Turn it off or remove it, then reconnect.",
+    body: "It holds Browser Control's connection, so agents can't reach OpenCode Browser. Turn it off or remove it, then reconnect.",
   },
   rejected: {
     title: "Browser Control refused to connect",
     short: "Browser Control refused to connect",
-    body: "Its relay is older than opencode Browser. Restart it, and update Browser Control if this keeps happening:",
+    body: "Its relay is older than OpenCode Browser. Restart it, and update Browser Control if this keeps happening:",
     command: "browser-control relay restart",
   },
   incompatible: {
     title: "Browser Control needs an update",
     short: "Browser Control needs an update",
-    body: "Browser Control and opencode Browser speak different versions. Update Browser Control, then restart its relay:",
+    body: "Browser Control and OpenCode Browser speak different versions. Update Browser Control, then restart its relay:",
     command: "browser-control relay restart",
   },
 }

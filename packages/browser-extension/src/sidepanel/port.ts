@@ -69,7 +69,7 @@ export function createBackground() {
     next.onMessage.addListener((message: ToPanel) => {
       if (message.type === "service") return setState("service", message.state)
       if (message.type === "browser") return setState("browser", message.state)
-      if (message.type === "error") return toastError("opencode Browser")(message.message)
+      if (message.type === "error") return toastError("OpenCode Browser")(message.message)
       if (message.type === "notice") return showToast({ variant: "success", description: message.message })
       if (message.type === "scripts") return setState("scripts", reconcile(message.state))
       if (message.type === "approvals") return setState("approvals", message.approvals)

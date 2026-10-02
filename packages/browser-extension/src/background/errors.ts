@@ -49,7 +49,7 @@ export function unsupported(action: Browser.Action): Extract<Browser.Outcome, { 
   return {
     type: "failure",
     code: "unsupported",
-    message: `browser.${action.type} is not available in opencode Browser yet. Use another browser operation, or ask the user to run it from the opencode desktop app.`,
+    message: `browser.${action.type} is not available in OpenCode Browser yet. Use another browser operation, or ask the user to run it from the opencode desktop app.`,
   }
 }
 

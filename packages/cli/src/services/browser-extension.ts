@@ -1,6 +1,6 @@
 export * as BrowserExtension from "./browser-extension"
 
-// The opencode Browser extension (packages/browser-extension) finds the background service
+// The OpenCode Browser extension (packages/browser-extension) finds the background service
 // through a Chrome native messaging host: `opencode browser host`. This module registers that host
 // for installed Chromium browsers. The extension ships its own opencode plugin and hands it to the
 // host, so the plugin always matches the installed extension version.
@@ -116,7 +116,7 @@ export const install = Effect.fn("cli.browser.install")(function* () {
     JSON.stringify(
       {
         name: HOST_NAME,
-        description: "opencode Browser: finds the opencode background service",
+        description: "OpenCode Browser: finds the opencode background service",
         path: files.wrapper,
         type: "stdio",
         allowed_origins: EXTENSION_IDS.map((id) => `chrome-extension://${id}/`),
@@ -209,7 +209,7 @@ export const configureBrowserControl = Effect.fn("cli.browser.configureBrowserCo
   const fs = yield* FileSystem.FileSystem
   const file = yield* Effect.promise(() => resolveConfigPath(global.config))
   const text = yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => "{}"))
-  // Lets a Browser Control relay that predates opencode Browser accept this extension's connection.
+  // Lets a Browser Control relay that predates OpenCode Browser accept this extension's connection.
   const origins = EXTENSION_IDS.map((id) => `chrome-extension://${id}`).join(",")
   const existing = yield* browserControlConfigured()
   const servers = ((parse(text) ?? {}) as { mcp?: { servers?: Record<string, { environment?: Record<string, string> }> } })
