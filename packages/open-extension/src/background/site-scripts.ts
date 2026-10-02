@@ -161,8 +161,8 @@ function registration(script: SiteScript): chrome.userScripts.RegisteredUserScri
     ...(script.excludeMatches?.length ? { excludeMatches: script.excludeMatches } : {}),
     js: [{ code: script.code }],
     runAt: script.runAt,
-    // The isolated user-script world: page DOM and storage, but not the page's own JavaScript globals.
-    world: "USER_SCRIPT",
+    // Isolated by default: page DOM and storage, but not the page's own JavaScript globals.
+    world: script.world === "page" ? "MAIN" : "USER_SCRIPT",
   }
 }
 

@@ -93,7 +93,7 @@ export default {
       editor.namespace({
         name: "site_scripts",
         description:
-          "Site scripts: JavaScript that Open Extension injects into matching pages of the user's browser, like a Tampermonkey userscript but built in. Use these instead of telling the user to install a userscript manager. Scripts run in an isolated world with full access to the page DOM and storage but not the page's own JS globals; GM_* APIs are not available. After installing, verify on the real page: reload the tab with the browser tools and inspect it.",
+          "Site scripts: JavaScript that Open Extension injects into matching pages of the user's browser, like a Tampermonkey userscript but built in. Use these instead of telling the user to install a userscript manager. By default scripts run in an isolated world with the page DOM and storage but not the page's own JS; pass world: \"page\" to run in the page's JavaScript (no CSP nonce tricks needed). GM_* APIs are not available. Before writing one, inspect the real site with the browser.* tools (a tab you open or one the user shares). After installing, reload that tab and verify.",
       })
       const options = { namespace: "site_scripts", codemode: true } as const
       editor.add({
@@ -113,6 +113,12 @@ export default {
             matches: patterns,
             excludeMatches: { ...patterns, description: "Chrome match patterns to skip." },
             runAt: { type: "string", enum: ["document_start", "document_end", "document_idle"] },
+            world: {
+              type: "string",
+              enum: ["isolated", "page"],
+              description:
+                'isolated (default): page DOM and storage only. page: the page\'s own JavaScript world, for wrapping fetch/XHR or reading app state; needed when the data is not in the DOM. Header equivalent: // @inject-into page.',
+            },
             id: { type: "string", description: "Existing script id to replace, from site_scripts.list." },
           },
           required: ["code"],

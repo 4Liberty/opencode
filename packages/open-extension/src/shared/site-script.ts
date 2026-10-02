@@ -3,6 +3,8 @@
 // the side panel, and (as plain JSON) the opencode plugin that lets agents install them.
 
 export type RunAt = "document_start" | "document_end" | "document_idle"
+/** isolated: the user-script world (page DOM, not page JS). page: the page's own JavaScript world. */
+export type World = "isolated" | "page"
 
 export type SiteScript = {
   id: string
@@ -12,6 +14,8 @@ export type SiteScript = {
   matches: string[]
   excludeMatches?: string[]
   runAt: RunAt
+  /** Defaults to isolated. */
+  world?: World
   code: string
   enabled: boolean
   created: number
@@ -28,6 +32,7 @@ export type SiteScriptDraft = {
   matches?: string[]
   excludeMatches?: string[]
   runAt?: RunAt
+  world?: World
   code: string
   sessionID?: string
 }
@@ -43,7 +48,7 @@ export type SiteScriptsState = {
 export type SiteScriptApproval = {
   id: string
   script: Required<Pick<SiteScript, "name" | "matches" | "runAt" | "code">> &
-    Pick<SiteScript, "description" | "excludeMatches" | "sessionID">
+    Pick<SiteScript, "description" | "excludeMatches" | "sessionID" | "world">
   /** The installed script this would replace. */
   replaces?: Pick<SiteScript, "id" | "name">
   warnings: string[]
@@ -61,6 +66,8 @@ export function parseHeader(code: string) {
   }))
   const values = (key: string) => entries.filter((entry) => entry.key === key && entry.value).map((entry) => entry.value)
   const runAt = values("run-at")[0]?.replace(/-/g, "_")
+  // Violentmonkey's key for choosing the page world.
+  const injectInto = values("inject-into")[0]
   const grants = values("grant").filter((grant) => grant !== "none")
   return {
     name: values("name")[0],
@@ -68,6 +75,7 @@ export function parseHeader(code: string) {
     matches: values("match"),
     excludeMatches: values("exclude-match"),
     runAt: runAts.find((item) => item === runAt),
+    world: injectInto === "page" ? ("page" as const) : undefined,
     warnings: [
       ...(grants.length ? [`Ignored @grant ${grants.join(", ")}: GM_* APIs are not available.`] : []),
       ...(values("include").length || values("exclude").length
@@ -87,17 +95,24 @@ export function resolveDraft(draft: SiteScriptDraft) {
   const name = (draft.name || header?.name || hostLabel(matches[0])).slice(0, 200)
   const excludeMatches = draft.excludeMatches?.length ? draft.excludeMatches : header?.excludeMatches
   const description = draft.description || header?.description
+  const world = draft.world ?? header?.world
   return {
     script: {
       name,
       matches,
       runAt: draft.runAt ?? header?.runAt ?? "document_idle",
+      ...(world === "page" ? { world } : {}),
       code: draft.code,
       ...(description ? { description } : {}),
       ...(excludeMatches?.length ? { excludeMatches } : {}),
       ...(draft.sessionID ? { sessionID: draft.sessionID } : {}),
     },
-    warnings: header?.warnings ?? [],
+    warnings: [
+      ...(header?.warnings ?? []),
+      ...(world === "page"
+        ? ["Runs in the page's own JavaScript, so it can read and change the site's code and data, and the site can see it."]
+        : []),
+    ],
   }
 }
 

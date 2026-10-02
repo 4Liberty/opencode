@@ -33,6 +33,15 @@ type Connection = {
   send: (task: () => Promise<unknown>) => void
 }
 
+// Session context the agent sees as <context key="..."> blocks, so it knows where it runs and what the
+// user is looking at. Without it agents reach for other browser automation and miss the shared tabs.
+const GUIDANCE = [
+  "You are running inside Open Extension, opencode's side panel in the user's web browser.",
+  "The browser.* tools control the user's real browser: tabs you open with browser.tabs.open and tabs the user shares from the panel (browser.tabs.list shows them). Use them for anything in the user's browser instead of other browser automation such as the browser-control skill or CLI.",
+  "If you need the page the user is looking at and it is not shared, ask them to click Share tab in the panel, or open the URL yourself with browser.tabs.open.",
+  "To change how a website looks or behaves persistently, write a site script and install it with site_scripts.install; the user approves it in the panel. Never ask the user to install Tampermonkey or Violentmonkey.",
+].join("\n")
+
 const decodeCommand = Schema.decodeUnknownSync(Browser.Command)
 const decodeControl = Schema.decodeUnknownOption(Browser.Control)
 const encodeOutcome = Schema.encodeSync(Browser.Outcome)
@@ -62,6 +71,8 @@ export async function createSessionBrowser(input: {
   let groupId: number | undefined
   let retry: ReturnType<typeof setTimeout> | undefined
   let stateTimer: ReturnType<typeof setTimeout> | undefined
+  let guided = false
+  let lastPage: string | undefined
 
   // Tabs survive a service worker restart; their IDs must too, or the agent's tab IDs go stale.
   const stored = ((await chrome.storage.session.get(storageKey))[storageKey] ?? []) as Stored[]
@@ -339,6 +350,10 @@ export async function createSessionBrowser(input: {
           attempts = 0
           setStatus("connected")
           publish(true)
+          if (!guided) {
+            guided = true
+            void putContext("open-extension", GUIDANCE)
+          }
           continue
         }
         if (message.value.type === "cancel") {
@@ -369,6 +384,16 @@ export async function createSessionBrowser(input: {
       requests.clear()
       if (connection === current) connection = undefined
     }
+  }
+
+  const putContext = async (key: string, value: string) => {
+    const info = await input.service.get()
+    await OpenCode.make({
+      baseUrl: info.url,
+      headers: { Authorization: `Basic ${btoa(`opencode:${info.password}`)}` },
+    })
+      .session.instructions.entry.put({ sessionID: input.sessionID, key, value })
+      .catch((cause: unknown) => console.warn("[open-extension] session context failed", key, cause))
   }
 
   const run = async () => {
@@ -460,6 +485,23 @@ export async function createSessionBrowser(input: {
       entry.loadError = undefined
       entry.page?.reset()
       publish()
+    },
+    /** Tells the agent which page the user is looking at; repeated values are not resent. */
+    page(tab: chrome.tabs.Tab | undefined) {
+      const entry = tab?.id === undefined ? undefined : find(tab.id)
+      const value = !tab?.url
+        ? "The user is not looking at a web page."
+        : [
+            `The user is looking at: ${tab.title || "Untitled"} (${tab.url}).`,
+            entry
+              ? `It is shared with you as tabID ${entry.id}.`
+              : shareable(tab.url)
+                ? "It is not shared with you. Ask the user to click Share tab, or open the URL in your own tab with browser.tabs.open."
+                : "It is a browser page that extensions cannot control.",
+          ].join(" ")
+      if (value === lastPage) return
+      lastPage = value
+      void putContext("open-extension.page", value)
     },
     loadFailed(tabId: number, message: string) {
       const entry = find(tabId)
