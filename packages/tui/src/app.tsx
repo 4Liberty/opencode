@@ -1136,8 +1136,8 @@ function App() {
         category: "System",
         palette: undefined,
         enabled: process.platform !== "win32",
-        run: () => {
-          renderer.suspend()
+        run: async () => {
+          await renderer.suspend()
           process.once("SIGCONT", () => renderer.resume())
           process.kill(0, "SIGTSTP")
         },
