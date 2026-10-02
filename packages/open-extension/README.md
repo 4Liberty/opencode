@@ -14,9 +14,8 @@ local opencode service next to any page, let the agent use real tabs, and extend
 ## Install
 
 ```sh
-cd packages/open-extension
-bun run build          # outputs dist/
-bun run host:install   # native host + opencode plugin
+cd packages/open-extension && bun run build   # outputs dist/
+opencode sidepanel install                    # registers the helper with your browsers
 ```
 
 1. Open the browser's extensions page, turn on **Developer mode**, choose **Load unpacked**, and select
@@ -25,11 +24,14 @@ bun run host:install   # native host + opencode plugin
 2. For site scripts, choose **Details** on Open Extension and turn on **Allow user scripts**.
 3. Click the toolbar icon, or press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>.</kbd>, to open the panel.
 
-`host:install` registers the `ai.opencode.open_extension` native messaging host for every installed
-Chromium browser. The host runs `opencode service start` and `opencode service get password`, so the panel
-finds the background service without configuration. It also bundles the opencode plugin that adds the
-`site_scripts` and `browsing` tools into `~/.config/opencode/plugins/open-extension.js`. Without the host,
-the panel offers a manual URL and password form.
+`opencode sidepanel install` registers the `ai.opencode.sidepanel` native messaging host for every
+installed Chromium browser. The host is the opencode CLI itself (`opencode sidepanel host`): it starts the
+background service if needed and returns its URL and password, so the panel connects without
+configuration. The extension also hands the host its opencode plugin (`plugin/open-extension.ts`, the
+`site_scripts` and `browsing` tools), which is written to `~/.config/opencode/plugins/sidepanel.ts`
+whenever it changes, so the plugin always matches the installed extension. Without the host, the panel
+offers a manual URL and password form. `opencode sidepanel status` and `opencode sidepanel uninstall`
+check and remove the registration.
 
 ## How it connects
 
@@ -57,4 +59,4 @@ bun run dev       # rebuilds dist/ on change; reload the extension to pick it up
 bun typecheck
 ```
 
-Rerun `bun run host:install` after changing `host/` or `plugin/`.
+The plugin file must stay self-contained (type-only imports): it is copied into opencode as-is.

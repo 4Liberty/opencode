@@ -1,7 +1,8 @@
+import pluginSource from "../../plugin/open-extension.ts?raw"
 import type { ServiceInfo, ServiceState } from "../shared/protocol"
 
-/** Native messaging host installed by `bun run host:install`; it reads the opencode service registration. */
-export const HOST_NAME = "ai.opencode.open_extension"
+/** Native messaging host registered by `opencode sidepanel install`: the opencode CLI itself. */
+export const HOST_NAME = "ai.opencode.sidepanel"
 const MANUAL_KEY = "manualService"
 
 type HostResponse = { ok: true; url: string; password: string } | { ok: false; error: string }
@@ -10,6 +11,7 @@ type HostResponse = { ok: true; url: string; password: string } | { ok: false; e
 export function createService(changed: (state: ServiceState) => void) {
   let state: ServiceState = { status: "loading" }
   let pending: Promise<ServiceInfo> | undefined
+  let pluginSent = false
   const set = (next: ServiceState) => {
     state = next
     changed(next)
@@ -21,6 +23,7 @@ export function createService(changed: (state: ServiceState) => void) {
       : await chrome.runtime.sendNativeMessage(HOST_NAME, { type: "service" }).then(
           (response: HostResponse) => {
             if (!response?.ok) throw new Error(response?.error ?? "The native host returned no service.")
+            installPlugin()
             return { url: response.url, password: response.password, source: "host" as const }
           },
           (error: unknown) => {
@@ -29,6 +32,16 @@ export function createService(changed: (state: ServiceState) => void) {
         )
     await verify(info)
     return info
+  }
+  // The extension ships its opencode plugin (site_scripts and browsing tools) so it always matches this
+  // version; the host writes it into opencode's plugins directory when it changed. Once per worker.
+  const installPlugin = () => {
+    if (pluginSent) return
+    pluginSent = true
+    void chrome.runtime.sendNativeMessage(HOST_NAME, { type: "plugin", source: pluginSource }).catch((error: unknown) => {
+      pluginSent = false
+      console.warn("[open-extension] plugin install failed", error)
+    })
   }
   const get = () => {
     if (state.status === "ready") return Promise.resolve(state.info)

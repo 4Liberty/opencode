@@ -43,15 +43,15 @@ export function Setup(props: { state: Exclude<ServiceState, { status: "ready" }>
               <li class="flex gap-2.5">
                 <Step n={1} />
                 <div class="min-w-0 flex-1">
-                  <div class="text-v2-text-text-base">In the opencode repository, run</div>
+                  <div class="text-v2-text-text-base">In a terminal, run</div>
                   <code class="mt-1.5 block rounded-md bg-v2-background-bg-layer-01 px-2.5 py-2 font-mono text-12-regular text-v2-text-text-base select-all">
-                    cd packages/open-extension && bun run host:install
+                    opencode sidepanel install
                   </code>
                 </div>
               </li>
               <li class="flex gap-2.5">
                 <Step n={2} />
-                <div class="text-v2-text-text-base">Make sure opencode is running, then retry.</div>
+                <div class="text-v2-text-text-base">Then retry. The command also starts opencode if needed.</div>
               </li>
             </ol>
           </Show>

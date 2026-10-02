@@ -8,8 +8,7 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch --mode development",
-    "typecheck": "tsgo --noEmit -p tsconfig.json",
-    "host:install": "bun host/install.ts"
+    "typecheck": "tsgo --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@opencode/client": "workspace:*",

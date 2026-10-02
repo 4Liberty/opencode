@@ -2,9 +2,62 @@
 // matching pages of the user's browser (the way Tampermonkey does, without a separate extension) and
 // browsing tools that read history and bookmarks. The extension owns the data and asks the user in its
 // side panel before every install and before a conversation first reads browsing data.
-// `bun run host:install` bundles this file into ~/.config/opencode/plugins/open-extension.js.
+// `opencode sidepanel install` copies this file verbatim into opencode's plugins directory, so it must
+// not import anything at runtime: type-only imports are erased when opencode loads it.
+//
+// It also owns the relay RPC between this plugin (server) and the extension's background worker: the
+// plugin emits `control {type:"command", requestID}` on the server event stream, the extension fetches
+// the command with `command`, runs it, and answers with `result`.
 import type { Plugin } from "@opencode/plugin"
-import { RelayDefinition, type RelayCommand, type RelayControl, type RelayOutcome } from "../src/shared/relay-rpc"
+import type { SiteScriptDraft } from "../src/shared/site-script"
+
+export const RELAY_RPC_ID = "open-extension.relay"
+
+export type RelayCommand =
+  | { action: "list" }
+  | { action: "get"; id: string }
+  | { action: "install"; draft: SiteScriptDraft }
+  | { action: "remove"; id: string }
+  | { action: "set_enabled"; id: string; enabled: boolean }
+  | { action: "history"; sessionID: string; query?: string; days?: number; limit?: number }
+  | { action: "bookmarks"; sessionID: string; query?: string; limit?: number }
+  | { action: "top_sites"; sessionID: string }
+  | { action: "recently_closed"; sessionID: string; limit?: number }
+
+export type RelayOutcome = { ok: true; value: unknown } | { ok: false; message: string }
+
+export type RelayControl = { type: "command" | "cancel"; requestID: string }
+
+const requestID = { type: "string", minLength: 1 } as const
+
+export const RelayDefinition = {
+  id: RELAY_RPC_ID,
+  methods: {
+    command: {
+      input: { type: "object", properties: { requestID }, required: ["requestID"] },
+      output: { type: "object" },
+      errors: { unavailable: { type: "object" } },
+    },
+    result: {
+      input: {
+        type: "object",
+        properties: { requestID, outcome: { type: "object" } },
+        required: ["requestID", "outcome"],
+      },
+      output: {},
+    },
+  },
+  events: {
+    control: {
+      schema: {
+        type: "object",
+        properties: { type: { type: "string", enum: ["command", "cancel"] }, requestID },
+        required: ["type", "requestID"],
+      },
+    },
+  },
+} as const
+
 
 // The extension fetches a command within moments when its side panel is open; installs then wait for
 // the user, so the whole request gets much longer.
