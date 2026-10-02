@@ -1,5 +1,5 @@
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-_]*$/
-const OPENAI_COMPATIBLE = "@ai-sdk/openai-compatible"
+const OPENAI_COMPATIBLE = "@opencode/ai/providers/openai-compatible"
 
 type Translator = (key: string, vars?: Record<string, string | number | boolean>) => string
 
@@ -137,13 +137,13 @@ export function validateCustomProvider(input: ValidateArgs) {
       name,
       key,
       config: {
-        npm: OPENAI_COMPATIBLE,
+        package: OPENAI_COMPATIBLE,
         name,
         ...(env ? { env: [env] } : {}),
-        options: {
+        settings: {
           baseURL,
-          ...(Object.keys(headerConfig).length ? { headers: headerConfig } : {}),
         },
+        ...(Object.keys(headerConfig).length ? { headers: headerConfig } : {}),
         models: modelConfig,
       },
     },

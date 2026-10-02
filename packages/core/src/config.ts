@@ -237,7 +237,12 @@ export const layer = (options?: Options) =>
         ]
       })
 
-      const initial = yield* ConfigDiscovery.discover(options)
+      const discover = ConfigDiscovery.discover(options).pipe(
+        Effect.provideService(FSUtil.Service, fs),
+        Effect.provideService(Global.Service, globalService),
+        Effect.provideService(Location.Service, location),
+      )
+      const initial = yield* discover
       let sources = initial
       let configs = yield* load(initial)
       const updates = yield* PubSub.unbounded<Watcher.Update>()
@@ -264,7 +269,7 @@ export const layer = (options?: Options) =>
 
       const reload = Effect.fn("Config.reload")(
         function* () {
-          const discovered = yield* ConfigDiscovery.discover(options)
+          const discovered = yield* discover
           const next = yield* load(discovered)
           yield* reconcile(discovered)
           const compatibilityChanged =
@@ -275,7 +280,7 @@ export const layer = (options?: Options) =>
           configs = next
           yield* bus.publish(Event.Updated, {})
         },
-        (effect) => reloadLock.withPermit(effect),
+        (effect) => reloadLock.withPermit(effect).pipe(Effect.provideService(FSUtil.Service, fs)),
       )
 
       // Subscribe eagerly so synchronous watch readiness isn't dropped.
@@ -334,16 +339,26 @@ export const layer = (options?: Options) =>
           const text = (yield* fs.readFileStringSafe(filepath)) ?? "{}\n"
           const updated = yield* Effect.try({
             try: () =>
-              applyEdits(
+              [
+                ...(patch.shell === undefined ? [] : [{ path: ["shell"], value: patch.shell ?? undefined }]),
+                ...Object.entries(patch.providers ?? {}).map(([id, provider]) => ({
+                  path: ["providers", id],
+                  value: provider ?? undefined,
+                })),
+              ].reduce(
+                (text, edit) =>
+                  applyEdits(
+                    text,
+                    modify(text, edit.path, edit.value, {
+                      formattingOptions: { tabSize: 2, insertSpaces: true },
+                    }),
+                  ),
                 text,
-                modify(text, ["shell"], patch.shell ?? undefined, {
-                  formattingOptions: { tabSize: 2, insertSpaces: true },
-                }),
               ),
             catch: (cause) => new FSUtil.FileSystemError({ method: "config.update", cause }),
           })
           yield* fs.writeWithDirs(filepath, updated.endsWith("\n") ? updated : `${updated}\n`)
-          yield* requestReload
+          yield* reload()
         },
         (effect) => updateLock.withPermit(effect),
       )

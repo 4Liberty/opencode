@@ -2370,9 +2370,101 @@ export type ConfigShellsOutput = ReadonlyArray<{
 }>
 export type ConfigShellsOperation<E = never> = () => Effect.Effect<ConfigShellsOutput, E>
 
-export type ConfigUpdateInput = { readonly shell: string | null }
+export type ConfigUpdateInput = {
+  readonly shell?: string | null | undefined
+  readonly providers?:
+    | {
+        readonly [x: string]: {
+          readonly canonical?: Provider.ID | undefined
+          readonly name?: string | undefined
+          readonly env?: ReadonlyArray<string> | undefined
+          readonly package?: string | undefined
+          readonly settings?:
+            | ({
+                readonly timeout?: number | false | undefined
+                readonly headerTimeout?: number | false | undefined
+                readonly chunkTimeout?: number | false | undefined
+                readonly compaction?: Provider.Compaction | undefined
+                readonly transport?: Provider.Transport | undefined
+              } & { readonly [x: string]: Schema.Json | undefined })
+            | undefined
+          readonly headers?: { readonly [x: string]: string } | undefined
+          readonly body?: { readonly [x: string]: Schema.Json } | undefined
+          readonly models?:
+            | {
+                readonly [x: string]: {
+                  readonly modelID?: Model.ID | undefined
+                  readonly family?: Model.Family | undefined
+                  readonly name?: string | undefined
+                  readonly compatibility?: Model.Compatibility | undefined
+                  readonly package?: string | undefined
+                  readonly settings?:
+                    | ({ readonly compaction?: Provider.Compaction | undefined } & {
+                        readonly [x: string]: Schema.Json | undefined
+                      })
+                    | undefined
+                  readonly headers?: { readonly [x: string]: string } | undefined
+                  readonly body?: { readonly [x: string]: Schema.Json } | undefined
+                  readonly capabilities?:
+                    | {
+                        readonly tools?: boolean | undefined
+                        readonly input?: ReadonlyArray<string> | undefined
+                        readonly output?: ReadonlyArray<string> | undefined
+                      }
+                    | undefined
+                  readonly variants?:
+                    | ReadonlyArray<{
+                        readonly id: Model.VariantID
+                        readonly settings?:
+                          | ({ readonly compaction?: Provider.Compaction | undefined } & {
+                              readonly [x: string]: Schema.Json | undefined
+                            })
+                          | undefined
+                        readonly headers?: { readonly [x: string]: string } | undefined
+                        readonly body?: { readonly [x: string]: Schema.Json } | undefined
+                      }>
+                    | undefined
+                  readonly cost?:
+                    | {
+                        readonly tier?: { readonly type: "context"; readonly size: number } | undefined
+                        readonly input: number & Brand.Brand<"Money.USDPerMillionTokens">
+                        readonly output: number & Brand.Brand<"Money.USDPerMillionTokens">
+                        readonly cache?:
+                          | {
+                              readonly read?: (number & Brand.Brand<"Money.USDPerMillionTokens">) | undefined
+                              readonly write?: (number & Brand.Brand<"Money.USDPerMillionTokens">) | undefined
+                            }
+                          | undefined
+                      }
+                    | ReadonlyArray<{
+                        readonly tier?: { readonly type: "context"; readonly size: number } | undefined
+                        readonly input: number & Brand.Brand<"Money.USDPerMillionTokens">
+                        readonly output: number & Brand.Brand<"Money.USDPerMillionTokens">
+                        readonly cache?:
+                          | {
+                              readonly read?: (number & Brand.Brand<"Money.USDPerMillionTokens">) | undefined
+                              readonly write?: (number & Brand.Brand<"Money.USDPerMillionTokens">) | undefined
+                            }
+                          | undefined
+                      }>
+                    | undefined
+                  readonly disabled?: boolean | undefined
+                  readonly limit?:
+                    | {
+                        readonly context?: number | undefined
+                        readonly input?: number | undefined
+                        readonly output?: number | undefined
+                      }
+                    | undefined
+                }
+              }
+            | undefined
+        } | null
+      }
+    | undefined
+}
 export type ConfigUpdateOutput = void
-export type ConfigUpdateOperation<E = never> = (input: ConfigUpdateInput) => Effect.Effect<ConfigUpdateOutput, E>
+export type ConfigUpdateOperation<E = never> = (input?: ConfigUpdateInput) => Effect.Effect<ConfigUpdateOutput, E>
 
 export interface ConfigApi<E = never> {
   readonly get: ConfigGetOperation<E>

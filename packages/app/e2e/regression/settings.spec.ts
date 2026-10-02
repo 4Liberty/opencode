@@ -632,6 +632,61 @@ for (const row of ["configured", "disabled", "failure"] as const) {
   })
 }
 
+test("creates a custom provider with V2 config and separate credentials", async ({ page }) => {
+  const catalog = {
+    all: [] as { id: string; name: string; models: Record<string, { id: string; name: string }> }[],
+    connected: [] as string[],
+    default: {},
+  }
+  const { settings } = await open(page, { provider: () => catalog })
+  const writes: unknown[] = []
+  await page.route("**/api/experimental/config", async (route) => {
+    const payload = route.request().postDataJSON()
+    writes.push(payload)
+    catalog.all.push({
+      id: "desktop-custom",
+      name: "Desktop Custom",
+      models: { demo: { id: "demo", name: "Custom Demo" } },
+    })
+    catalog.connected.push("desktop-custom")
+    await route.fulfill({ status: 204 })
+  })
+  await page.route("**/api/credential", async (route) => {
+    const payload = route.request().postDataJSON()
+    writes.push(payload)
+    await route.fulfill({
+      json: { data: { id: "cred_custom", ...payload, label: "API key" } },
+    })
+  })
+  await settings.getByRole("tab", { name: "Providers", exact: true }).click()
+  await settings.getByRole("button", { name: "Show more providers", exact: true }).click()
+  await page.getByText("Custom OpenAI-compatible provider", { exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByRole("textbox", { name: "Provider ID", exact: true }).fill("desktop-custom")
+  await dialog.getByRole("textbox", { name: "Display name", exact: true }).fill("Desktop Custom")
+  await dialog.getByRole("textbox", { name: "Base URL", exact: true }).fill("http://127.0.0.1:1/v1")
+  await dialog.getByRole("textbox", { name: "API key", exact: true }).fill("test-key")
+  await dialog.getByPlaceholder("model-id", { exact: true }).fill("demo")
+  await dialog.getByPlaceholder("Display Name", { exact: true }).fill("Custom Demo")
+  await dialog.getByRole("button", { name: "Submit", exact: true }).click()
+  await expect(dialog).toBeHidden()
+  expect(writes).toEqual([
+    {
+      providers: {
+        "desktop-custom": {
+          package: "@opencode/ai/providers/openai-compatible",
+          name: "Desktop Custom",
+          settings: { baseURL: "http://127.0.0.1:1/v1" },
+          models: { demo: { name: "Custom Demo" } },
+        },
+      },
+    },
+    { integrationID: "desktop-custom", value: { type: "key", key: "test-key" } },
+  ])
+  await settings.getByRole("tab", { name: "Models", exact: true }).click()
+  await expect(settings.getByRole("switch", { name: "Custom Demo", exact: true })).toBeChecked()
+})
+
 // Zen and the Console account share the id `opencode`: the provider comes from models.dev, the
 // integration carries the account sign-in.
 for (const row of [

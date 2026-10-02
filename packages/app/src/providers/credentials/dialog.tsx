@@ -9,13 +9,17 @@ import { batch, For } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { ExternalLink } from "@/runtime/platform/external-link"
 import { useData } from "@/runtime/server/current"
+import { useServerSDK } from "@/runtime/server/client"
+import { useModels } from "@/providers/models/models"
 import { useLanguage } from "@/runtime/i18n/language"
 import { type FormState, headerRow, modelRow, validateCustomProvider } from "./form"
 import { CustomManagedProviderIcon } from "@/providers/models/provider-group"
 
-export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
+export function CustomProviderForm(props: { autofocus?: boolean; directory?: string } = {}) {
   const dialog = useDialog()
   const data = useData()
+  const serverSDK = useServerSDK()
+  const models = useModels()
   const language = useLanguage()
 
   const [form, setForm] = createStore<FormState>({
@@ -104,8 +108,24 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
 
   const saveMutation = useMutation(() => ({
     mutationFn: async (result: NonNullable<ReturnType<typeof validate>>): Promise<typeof result> => {
-      // TODO: Restore custom providers when V2 exposes config and arbitrary credential APIs.
-      throw new Error(language.t("provider.custom.unavailable"))
+      await serverSDK.api.config.update({ providers: { [result.providerID]: result.config } })
+      if (result.key)
+        await serverSDK.api.credential.create({
+          integrationID: result.providerID,
+          value: { type: "key", key: result.key },
+        })
+      const location = props.directory ? { directory: props.directory } : undefined
+      data.location.integration.invalidate(location)
+      data.location.provider.invalidate(location)
+      data.location.model.invalidate(location)
+      await Promise.all([
+        data.location.integration.sync(location),
+        data.location.provider.sync(location),
+        data.location.model.sync(location),
+      ])
+      for (const modelID of Object.keys(result.config.models))
+        models.setVisibility({ providerID: result.providerID, modelID }, true)
+      return result
     },
     onSuccess: (result) => {
       dialog.close()
@@ -141,7 +161,7 @@ export function CustomProviderForm(props: { autofocus?: boolean } = {}) {
       <form onSubmit={save} class="px-2.5 pb-6 flex flex-col gap-6">
         <p class="text-14-regular text-text-base">
           {language.t("provider.custom.description.prefix")}
-          <ExternalLink href="https://opencode.ai/docs/providers/#custom-provider" tabIndex={-1}>
+          <ExternalLink href="https://opencode.ai/v2/docs/providers/#custom" tabIndex={-1}>
             {language.t("provider.custom.description.link")}
           </ExternalLink>
           {language.t("provider.custom.description.suffix")}

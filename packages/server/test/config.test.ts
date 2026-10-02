@@ -59,7 +59,7 @@ it.live("returns ordered config entries for the requested directory", () =>
   }),
 )
 
-it.live("updates the global shell without replacing unrelated JSONC", () =>
+it.live("updates supported global fields without replacing unrelated JSONC", () =>
   Effect.gen(function* () {
     const tmp = yield* Effect.acquireDisposable(Effect.promise(() => tmpdir("opencode-config-shells-")))
     const global = path.join(tmp.path, "global")
@@ -71,7 +71,8 @@ it.live("updates the global shell without replacing unrelated JSONC", () =>
         `{
   // keep this comment
   "model": "provider/model",
-  "shell": "bash"
+  "shell": "bash",
+  "providers": { "existing": { "name": "Existing" } }
 }
 `,
       ),
@@ -80,16 +81,84 @@ it.live("updates the global shell without replacing unrelated JSONC", () =>
     const response = yield* Effect.promise(() =>
       fetch(new URL("/api/experimental/config", server.base), {
         method: "PATCH",
-        headers: { ...server.headers, "content-type": "application/json" },
+        headers: { ...server.headers, "content-type": "application/json", "x-opencode-directory": global },
         body: JSON.stringify({ shell: "/bin/zsh" }),
       }),
     )
 
-    expect(response.status).toBe(204)
+    expect({ status: response.status, body: yield* Effect.promise(() => response.text()) }).toEqual({
+      status: 204,
+      body: "",
+    })
     const text = yield* Effect.promise(() => fs.readFile(config, "utf8"))
     expect(text).toContain("// keep this comment")
     expect(text).toContain('"model": "provider/model"')
     expect(text).toContain('"shell": "/bin/zsh"')
+
+    const provider = {
+      name: "Custom Provider",
+      package: "@opencode/ai/providers/openai-compatible",
+      settings: { baseURL: "http://127.0.0.1:1/v1" },
+      models: { demo: { name: "Demo" } },
+    }
+    const added = yield* Effect.promise(() =>
+      fetch(new URL("/api/experimental/config", server.base), {
+        method: "PATCH",
+        headers: { ...server.headers, "content-type": "application/json", "x-opencode-directory": global },
+        body: JSON.stringify({ providers: { custom: provider } }),
+      }),
+    )
+    expect(added.status).toBe(204)
+    const updated = yield* Effect.promise(() => fs.readFile(config, "utf8"))
+    expect(updated).toContain("// keep this comment")
+    expect(JSON.parse(updated.replace("// keep this comment", ""))).toMatchObject({
+      model: "provider/model",
+      shell: "/bin/zsh",
+      providers: { existing: { name: "Existing" }, custom: provider },
+    })
+    const loaded = yield* Effect.promise(() =>
+      fetch(new URL("/api/config", server.base), {
+        headers: { ...server.headers, "x-opencode-directory": global },
+      }).then((response) => response.json()),
+    )
+    expect(Schema.decodeUnknownSync(Schema.Array(Config.Entry))(loaded)).toContainEqual(
+      expect.objectContaining({
+        info: expect.objectContaining({ providers: expect.objectContaining({ custom: provider }) }),
+      }),
+    )
+    const credential = yield* Effect.promise(() =>
+      fetch(new URL("/api/credential", server.base), {
+        method: "POST",
+        headers: { ...server.headers, "content-type": "application/json" },
+        body: JSON.stringify({ integrationID: "custom", value: { type: "key", key: "test-key" } }),
+      }),
+    )
+    expect(credential.ok).toBe(true)
+    const integrations = yield* Effect.promise(() =>
+      fetch(new URL("/api/integration", server.base), {
+        headers: { ...server.headers, "x-opencode-directory": global },
+      }).then((response) => response.json()),
+    )
+    expect(integrations.data).toContainEqual(expect.objectContaining({ id: "custom" }))
+    const available = yield* Effect.promise(() =>
+      fetch(new URL("/api/provider", server.base), {
+        headers: { ...server.headers, "x-opencode-directory": global },
+      }).then((response) => response.json()),
+    )
+    expect(available.data).toContainEqual(expect.objectContaining({ id: "custom", name: "Custom Provider" }))
+
+    const removed = yield* Effect.promise(() =>
+      fetch(new URL("/api/experimental/config", server.base), {
+        method: "PATCH",
+        headers: { ...server.headers, "content-type": "application/json", "x-opencode-directory": global },
+        body: JSON.stringify({ providers: { custom: null } }),
+      }),
+    )
+    expect(removed.status).toBe(204)
+    const remaining = yield* Effect.promise(() => fs.readFile(config, "utf8"))
+    expect(JSON.parse(remaining.replace("// keep this comment", "")).providers).toEqual({
+      existing: { name: "Existing" },
+    })
 
     const shells = yield* Effect.promise(() =>
       fetch(new URL("/api/config/shell", server.base), { headers: server.headers }),
