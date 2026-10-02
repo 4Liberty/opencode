@@ -208,26 +208,35 @@ export const configureBrowserControl = Effect.fn("cli.browser.configureBrowserCo
   const global = yield* Global.Service
   const fs = yield* FileSystem.FileSystem
   const file = yield* Effect.promise(() => resolveConfigPath(global.config))
-  const existing = yield* browserControlConfigured()
-  if (existing) return { status: "exists" as const, file, name: existing }
-  const server = {
-    type: "local",
-    command: Bun.which("browser-control")
-      ? ["browser-control", "mcp"]
-      : ["npx", "-y", "@opencode-ai/browser-control@latest", "mcp"],
-    // Lets a Browser Control relay that predates opencode Browser accept this extension's connection.
-    environment: { BROWSER_CONTROL_EXTENSION_ORIGINS: EXTENSION_IDS.map((id) => `chrome-extension://${id}`).join(",") },
-  }
   const text = yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => "{}"))
-  const edits = modify(text, ["mcp", "servers", BROWSER_CONTROL_MCP], server, {
-    formattingOptions: { tabSize: 2, insertSpaces: true },
-  })
+  // Lets a Browser Control relay that predates opencode Browser accept this extension's connection.
+  const origins = EXTENSION_IDS.map((id) => `chrome-extension://${id}`).join(",")
+  const existing = yield* browserControlConfigured()
+  const servers = ((parse(text) ?? {}) as { mcp?: { servers?: Record<string, { environment?: Record<string, string> }> } })
+    .mcp?.servers
+  if (existing && servers?.[existing]?.environment?.BROWSER_CONTROL_EXTENSION_ORIGINS)
+    return { status: "exists" as const, file, name: existing }
+  const edits = existing
+    ? modify(text, ["mcp", "servers", existing, "environment", "BROWSER_CONTROL_EXTENSION_ORIGINS"], origins, {
+        formattingOptions: { tabSize: 2, insertSpaces: true },
+      })
+    : modify(
+        text,
+        ["mcp", "servers", BROWSER_CONTROL_MCP],
+        {
+          type: "local",
+          command: Bun.which("browser-control")
+            ? ["browser-control", "mcp"]
+            : ["npx", "-y", "@opencode-ai/browser-control@latest", "mcp"],
+          environment: { BROWSER_CONTROL_EXTENSION_ORIGINS: origins },
+        },
+        { formattingOptions: { tabSize: 2, insertSpaces: true } },
+      )
   yield* fs.makeDirectory(path.dirname(file), { recursive: true })
   yield* fs.writeFileString(file, applyEdits(text, edits))
-  return { status: "added" as const, file, name: BROWSER_CONTROL_MCP }
+  return { status: existing ? ("updated" as const) : ("added" as const), file, name: existing ?? BROWSER_CONTROL_MCP }
 })
 
-/** The name of the configured Browser Control MCP server, if any. */
 export const browserControlConfigured = Effect.fn("cli.browser.browserControlConfigured")(function* () {
   const global = yield* Global.Service
   const fs = yield* FileSystem.FileSystem

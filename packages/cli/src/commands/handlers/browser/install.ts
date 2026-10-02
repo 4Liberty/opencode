@@ -28,7 +28,9 @@ export default Runtime.handler(
       log.success(
         control.status === "added"
           ? `Browser Control MCP added to ${control.file}`
-          : `Browser Control MCP already configured ("${control.name}")`,
+          : control.status === "updated"
+            ? `Browser Control MCP "${control.name}" now accepts opencode Browser`
+            : `Browser Control MCP already configured ("${control.name}")`,
       )
 
       yield* Service.ensure(yield* ServiceConfig.options())
