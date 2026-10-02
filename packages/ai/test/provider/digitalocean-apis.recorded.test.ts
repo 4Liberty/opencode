@@ -202,3 +202,44 @@ recordedTests({
     }),
   60_000,
 )
+
+recordedTests({
+  prefix: "digitalocean-messages",
+  provider: "digitalocean",
+  protocol: "messages",
+  requires: ["DIGITAL_OCEAN_OFFICIAL_API_KEY"],
+}).effect.with(
+  "delivers chronological system update text",
+  { tags: ["system", "continuation"] },
+  () =>
+    Effect.gen(function* () {
+      for (const id of ["anthropic-claude-sonnet-5.5", "anthropic-claude-opus-4.8"]) {
+        const request = LLM.request({
+          model: provider.model(id),
+          system: "Answer questions about the conversation contents concisely.",
+          messages: [
+            Message.user("Hello"),
+            Message.assistant("Hi"),
+            Message.user("What reference word was just provided? Include the word in your answer."),
+          Message.system("The session reference word is VIOLET."),
+        ],
+        generation: { maxTokens: 1024 },
+        })
+        const compiled = yield* compileRequest(request)
+        expect(compiled.body).toMatchObject({
+          messages: expect.arrayContaining([
+            expect.objectContaining({
+              role: "system",
+              content: expect.arrayContaining([
+                expect.objectContaining({ type: "text", text: "The session reference word is VIOLET." }),
+              ]),
+            }),
+          ]),
+        })
+        const response = yield* LLMClient.generate(request)
+        // Check delivery and visibility, not whether this update overrides conflicting instructions.
+        expect(response.text).toMatch(/VIOLET/i)
+      }
+    }),
+  60_000,
+)

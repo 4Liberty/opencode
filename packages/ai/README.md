@@ -350,8 +350,9 @@ const chat = digitalocean.chat("openai-gpt-5-nano")
 Explicit package entrypoints are `@opencode/ai/providers/digitalocean/chat`,
 `digitalocean/messages`, and `digitalocean/responses`. Each exposes `model(modelID, settings)`.
 Responses defaults to stateless encrypted-reasoning replay and preserves native tool namespaces.
-Messages uses automatic cache breakpoints and signed thinking replay. Native chronological Messages
-effort/system updates are disabled because the gateway did not support them in live probes.
+Messages uses automatic cache breakpoints, signed thinking replay, and the shared protocol's
+model-specific system-update support. Native chronological effort markers remain disabled because
+the gateway rejected that wire format in live probes.
 
 ## MiniMax
 

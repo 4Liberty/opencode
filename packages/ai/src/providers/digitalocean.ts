@@ -1,4 +1,5 @@
 import type { ProviderPackage } from "../provider-package.js"
+import { ModelNames } from "../model-names.js"
 import { AnthropicMessages } from "../protocols/anthropic-messages.js"
 import { OpenAIChat } from "../protocols/openai-chat.js"
 import { OpenAIResponses } from "../protocols/openai-responses.js"
@@ -41,17 +42,11 @@ export const route = Route.make({
   framing: OpenAIChat.framing,
 })
 
-const messagesProtocol = Protocol.make({
-  ...AnthropicMessages.protocol,
-  // DigitalOcean rejects the native chronological effort marker even with the beta header.
-  supportsEffortUpdates: () => false,
-})
-
 const messagesRoute = Route.make({
   id: "digitalocean-messages",
   provider: id,
   providerMetadataKey: "digitalocean",
-  protocol: messagesProtocol,
+  protocol: AnthropicMessages.protocol,
   endpoint: Endpoint.path("/messages", { baseURL }),
   transport: AnthropicMessages.transport<AnthropicMessages.AnthropicMessagesBody>(),
   headers: () => ({ "anthropic-version": "2023-06-01" }),
@@ -94,7 +89,8 @@ export const configure = (input: LanguageModelOptions = {}) => {
       })
       .model<AnthropicMessages.OptionsInput>({
         id: modelID,
-        compatibility: { supportsEffortUpdates: false, supportsSystemUpdates: false },
+        // DigitalOcean rejects the native chronological effort marker even with the beta header.
+        compatibility: { supportsEffortUpdates: false },
       })
   const responses = (modelID: string | ModelID) =>
     responsesRoute
@@ -108,12 +104,9 @@ export const configure = (input: LanguageModelOptions = {}) => {
           reasoningEffort,
         },
       })
-      .model<OpenAIProviderOptionsInput>({
-        id: modelID,
-        compatibility: { supportsEffortUpdates: /^openai-gpt-6(?:[.-]|$)/i.test(modelID) },
-      })
+      .model<OpenAIProviderOptionsInput>({ id: modelID })
   const model = (modelID: string | ModelID) =>
-    /^(?:anthropic[-/]|claude-)/i.test(modelID) ? messages(modelID) : responses(modelID)
+    ModelNames.isAnthropic(modelID) ? messages(modelID) : responses(modelID)
   return { id, model, chat, messages, responses, configure }
 }
 

@@ -90,7 +90,13 @@ describe("DigitalOcean native APIs", () => {
 
   it.effect("emits chronological effort updates only on supported Responses models", () =>
     Effect.gen(function* () {
-      for (const id of ["openai-gpt-6-1-sol", "openai-gpt-5.4-nano"]) {
+      for (const id of [
+        "openai-gpt-6-1-sol",
+        "openai-gpt-7-sol",
+        "openai-gpt-10.2-sol",
+        "openai-gpt-54-nano",
+        "openai-gpt-5.4-nano",
+      ]) {
         const compiled = yield* compileRequest(
           LLM.request({
             model: DigitalOcean.configure({
@@ -105,7 +111,7 @@ describe("DigitalOcean native APIs", () => {
             ],
           }),
         )
-        if (id === "openai-gpt-6-1-sol") {
+        if (id !== "openai-gpt-5.4-nano" && id !== "openai-gpt-54-nano") {
           expect(compiled.body).toMatchObject({
             reasoning: { effort: "low" },
             input: expect.arrayContaining([{ type: "configuration_update", reasoning: { effort: "high" } }]),
@@ -118,25 +124,32 @@ describe("DigitalOcean native APIs", () => {
     }),
   )
 
-  it.effect("keeps rejected native Messages effort and system updates on the fallback path", () =>
+  it.effect("keeps rejected effort markers out while delivering native system updates", () =>
     Effect.gen(function* () {
       const compiled = yield* compileRequest(
         LLM.request({
           model: DigitalOcean.configure({ apiKey: "fixture", providerOptions: { effort: "high" } }).messages(
-            "claude-opus-4-8",
+            "anthropic-claude-opus-4.8",
           ),
           messages: [
             Message.user("Hello"),
             Message.assistant("Hi"),
             Message.effort({ previous: "low", effort: "high" }),
-            Message.system("New instruction"),
             Message.user("Continue"),
+            Message.system("New instruction"),
           ],
         }),
       )
       expect(compiled.body).toMatchObject({ output_config: { effort: "high" } })
-      expect(JSON.stringify(compiled.body)).toContain("<system-update>")
-      expect(JSON.stringify(compiled.body)).not.toContain('"role":"system"')
+      expect(compiled.body).toMatchObject({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: "system",
+            content: expect.arrayContaining([expect.objectContaining({ type: "text", text: "New instruction" })]),
+          }),
+        ]),
+      })
+      expect(JSON.stringify(compiled.body)).not.toContain("<system-update>")
     }),
   )
 })

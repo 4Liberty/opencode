@@ -2,6 +2,7 @@ export * as AISDKNative from "./aisdk-native.js"
 
 import { Effect, Option, Schema, Struct } from "effect"
 import { Provider } from "./provider.js"
+import { ModelNames } from "@opencode/ai/model-names"
 
 type Overlays = {
   settings?: Provider.Settings
@@ -138,7 +139,7 @@ const mantle = (modelID: string | undefined) => {
 const digitalocean = (modelID: string | undefined) =>
   modelID === undefined
     ? "@opencode/ai/providers/digitalocean"
-    : `@opencode/ai/providers/digitalocean/${/^(?:anthropic[-/]|claude-)/i.test(modelID) ? "messages" : "responses"}`
+    : `@opencode/ai/providers/digitalocean/${ModelNames.isAnthropic(modelID) ? "messages" : "responses"}`
 
 function resolve(specifier: string, context: Context & { readonly settings?: Provider.Settings }): string | undefined {
   const npm = Provider.packageName(specifier)
