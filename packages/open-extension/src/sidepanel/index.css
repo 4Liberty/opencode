@@ -36,6 +36,11 @@
     background: var(--v2-background-bg-layer-01);
   }
 
+  /* Light mode's weak icon tone is near white; tint the wordmark's inner shadows like the desktop's. */
+  [data-color-scheme="light"] [data-component="new-chat-logo"] {
+    --icon-weak-base: color-mix(in srgb, var(--icon-base) 30%, transparent);
+  }
+
   /* The panel is narrow: let the permission actions wrap instead of overflowing. */
   [data-component="dock-prompt"] [data-slot="permission-footer-actions"],
   [data-component="dock-prompt"] [data-slot="question-footer-actions"] {

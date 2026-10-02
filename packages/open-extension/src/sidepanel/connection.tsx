@@ -48,9 +48,11 @@ function createServer(info: ServiceInfo, background: Background) {
     onError: toastError("Couldn't refresh opencode data"),
   })
 
-  // Remote reads: the project list drives the header and home view.
+  // Remote reads: the server's own directory is where a new conversation starts, and the project list
+  // fills the directory picker.
   createEffect(() => {
     if (connection.status() !== "connected") return
+    void data.location.syncInfo().catch(toastError("Couldn't load the home directory"))
     void data.project.sync().catch(toastError("Couldn't load projects"))
   })
 

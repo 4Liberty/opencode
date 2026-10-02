@@ -7,7 +7,7 @@ import { createBackground } from "./port"
 import { Setup } from "./setup"
 import { Shell } from "./shell"
 
-export function App(props: { project?: string }) {
+export function App() {
   const background = createBackground()
   // A repeated `ready` with the same URL and password keeps the open connection and its data.
   const info = createMemo(() => background.service(), undefined, {
@@ -30,7 +30,7 @@ export function App(props: { project?: string }) {
         >
           {(service) => (
             <ServerProvider info={service} background={background}>
-              <Shell project={props.project} />
+              <Shell />
             </ServerProvider>
           )}
         </Show>

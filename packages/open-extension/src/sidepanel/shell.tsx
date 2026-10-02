@@ -1,41 +1,41 @@
-// The connected panel: header, home or session, and the routing between them.
-import type { Project, SessionInfo } from "@opencode/client/promise"
+// The connected panel: header, a new conversation or an open session, and the routing between them.
+import type { SessionInfo } from "@opencode/client/promise"
 import { Button } from "@opencode/ui/button"
 import { Icon } from "@opencode/ui/icon"
 import { IconButton } from "@opencode/ui/icon-button"
-import { Menu } from "@opencode/ui/menu"
+import { Logo } from "@opencode/ui/logo"
 import { Tooltip } from "@opencode/ui/tooltip"
-import { For, Show, Suspense, createMemo, createSignal, lazy, onCleanup, onMount } from "solid-js"
+import { Show, Suspense, createMemo, createSignal, lazy, onCleanup, onMount } from "solid-js"
+import { Composer } from "./composer"
 import { useServer } from "./connection"
 import { basename, toastError } from "./format"
-import { Home } from "./home"
-
-export const PROJECT_KEY = "open-extension.project"
+import { History } from "./history"
+import { ProjectPicker } from "./projects"
 
 const SessionView = lazy(() => import("./session"))
 
-export function Shell(props: { project?: string }) {
+export function Shell() {
   const server = useServer()
   const data = server.data
   const [view, setView] = createSignal<string>()
-  const [projectID, setProjectID] = createSignal(props.project)
-  const project = createMemo(() => {
-    const list = data.project.list()
-    return list.find((item) => item.id === projectID()) ?? list[0]
-  })
+  // A directory picked for this panel's lifetime; every fresh panel starts in the server's home directory.
+  const [picked, setPicked] = createSignal<string>()
+  const home = () => data.location.info()?.directory
+  const directory = () => picked() ?? home()
   const session = createMemo(() => {
     const id = view()
     return id ? data.session.get(id) : undefined
   })
   const composer = { current: undefined as HTMLTextAreaElement | undefined }
 
-  // The session chunk is heavy (timeline, markdown, diffs); compile it while home idles.
+  const focusComposer = () => requestAnimationFrame(() => composer.current?.focus())
+
+  // The session chunk is heavy (timeline, markdown, diffs); compile it while the new conversation idles.
   onMount(() => {
+    focusComposer()
     const idle = requestIdleCallback(() => void SessionView.preload())
     onCleanup(() => cancelIdleCallback(idle))
   })
-
-  const focusComposer = () => requestAnimationFrame(() => composer.current?.focus())
 
   // Tell the background which session this panel shows, so the agent's browser follows the panel.
   const announce = (info: SessionInfo) => {
@@ -58,7 +58,7 @@ export function Shell(props: { project?: string }) {
       .catch(toastError("Couldn't open session"))
   }
 
-  const home = () => {
+  const startNew = () => {
     setView(undefined)
     server.background.hide()
     focusComposer()
@@ -67,50 +67,60 @@ export function Shell(props: { project?: string }) {
   const create = (sessionID: string, request: Promise<SessionInfo>) => {
     open(sessionID)
     void request.then(announce).catch(() => {
-      if (view() === sessionID) home()
+      if (view() === sessionID) startNew()
     })
-  }
-
-  const selectProject = (id: string) => {
-    setProjectID(id)
-    void chrome.storage.local.set({ [PROJECT_KEY]: id })
   }
 
   return (
     <div class="flex h-full min-h-0 flex-col bg-v2-background-bg-base">
       <header class="flex h-11 shrink-0 items-center gap-1 border-b border-v2-border-border-muted px-2">
-        <Show when={view()} fallback={<ProjectPicker project={project()} onSelect={selectProject} />}>
-          <Tooltip placement="bottom" value={session()?.parentID ? "Back to parent session" : "All sessions"}>
-            <IconButton
-              variant="ghost-muted"
-              size="large"
-              icon={<Icon name="arrow-left" />}
-              aria-label="Back"
-              onClick={() => {
-                const parent = session()?.parentID
-                if (parent) return open(parent)
-                home()
+        <Show
+          when={view()}
+          fallback={
+            <ProjectPicker
+              directory={directory()}
+              home={home()}
+              onSelect={(value) => {
+                setPicked(value)
+                focusComposer()
               }}
             />
-          </Tooltip>
-          <div class="flex min-w-0 flex-1 flex-col">
+          }
+        >
+          <Show when={session()?.parentID}>
+            {(parent) => (
+              <Tooltip placement="bottom" value="Back to parent session">
+                <IconButton
+                  variant="ghost-muted"
+                  size="large"
+                  icon={<Icon name="arrow-left" />}
+                  aria-label="Back to parent session"
+                  onClick={() => open(parent())}
+                />
+              </Tooltip>
+            )}
+          </Show>
+          <div class="flex min-w-0 flex-1 flex-col px-1.5">
             <span class="truncate text-[13px] font-[530] leading-4 tracking-[-0.04px] text-v2-text-text-base">
-              {session()?.title || "New session"}
+              {session()?.title || "New conversation"}
             </span>
             <Show when={session()?.location.directory}>
-              {(directory) => (
-                <span class="truncate text-12-regular leading-4 text-v2-text-text-faint">{basename(directory())}</span>
+              {(value) => (
+                <span class="truncate text-12-regular leading-4 text-v2-text-text-faint">
+                  {value() === home() ? "Home" : basename(value())}
+                </span>
               )}
             </Show>
           </div>
         </Show>
-        <Tooltip placement="bottom-end" value="New session">
+        <History directory={session()?.location.directory ?? directory()} current={view()} onOpen={open} />
+        <Tooltip placement="bottom-end" value="New conversation">
           <IconButton
             variant="ghost-muted"
             size="large"
             icon={<Icon name="new-session" />}
-            aria-label="New session"
-            onClick={home}
+            aria-label="New conversation"
+            onClick={startNew}
           />
         </Tooltip>
       </header>
@@ -119,13 +129,19 @@ export function Shell(props: { project?: string }) {
         when={view()}
         keyed
         fallback={
-          <Home
-            project={project()}
-            onOpen={open}
-            onNew={focusComposer}
-            onCreate={create}
-            composerRef={(element) => (composer.current = element)}
-          />
+          <>
+            <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 px-8 pb-8 text-center">
+              <div data-component="new-chat-logo" aria-hidden="true" class="text-v2-background-bg-inverse">
+                <Logo class="block aspect-[234/42] w-[136px] opacity-25" />
+              </div>
+              <p class="max-w-[248px] text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-faint">
+                Ask about this page, or have the agent use your tabs.
+              </p>
+            </div>
+            <div class="shrink-0 px-2 pb-2">
+              <Composer directory={directory()} onCreate={create} ref={(element) => (composer.current = element)} />
+            </div>
+          </>
         }
       >
         {(id) => (
@@ -134,64 +150,6 @@ export function Shell(props: { project?: string }) {
           </Suspense>
         )}
       </Show>
-    </div>
-  )
-}
-
-function ProjectPicker(props: { project?: Project; onSelect: (id: string) => void }) {
-  const server = useServer()
-  const projects = () => server.data.project.list()
-  return (
-    <div class="min-w-0 flex-1">
-      <Menu gutter={4} placement="bottom-start" modal={false}>
-        <Menu.Trigger
-          as={Button}
-          variant="ghost"
-          size="normal"
-          class="max-w-full justify-start ![font-weight:530]"
-          disabled={projects().length === 0}
-        >
-          <Icon name="folder" class="shrink-0 text-v2-icon-icon-muted" />
-          <span class="truncate">
-            {props.project ? props.project.name || basename(props.project.canonical) : "No project"}
-          </span>
-          <Icon name="chevron-down" size="small" class="shrink-0 text-v2-icon-icon-muted" />
-        </Menu.Trigger>
-        <Menu.Portal>
-          <Menu.Content class="max-h-[min(420px,70vh)] max-w-[calc(100vw-16px)] overflow-y-auto">
-            <Menu.Group>
-              <Menu.GroupLabel>Projects</Menu.GroupLabel>
-              <Menu.RadioGroup value={props.project?.id} onChange={props.onSelect}>
-                <For each={projects()}>
-                  {(item) => (
-                    <Menu.RadioItem value={item.id} closeOnSelect>
-                      <span class="flex min-w-0 flex-col">
-                        <span class="truncate">{item.name || basename(item.canonical)}</span>
-                        <span class="truncate text-12-regular text-v2-text-text-faint">{item.canonical}</span>
-                      </span>
-                    </Menu.RadioItem>
-                  )}
-                </For>
-              </Menu.RadioGroup>
-            </Menu.Group>
-            <Menu.Separator />
-            <Menu.Group>
-              <Menu.GroupLabel>
-                <span class="truncate">
-                  {server.info.url}
-                  {server.info.source === "manual" ? " · manual" : ""}
-                </span>
-              </Menu.GroupLabel>
-              <Menu.Item onSelect={() => server.background.send({ type: "service.refresh" })}>Reconnect</Menu.Item>
-              <Show when={server.info.source === "manual"}>
-                <Menu.Item onSelect={() => server.background.send({ type: "service.clearManual" })}>
-                  Use automatic discovery
-                </Menu.Item>
-              </Show>
-            </Menu.Group>
-          </Menu.Content>
-        </Menu.Portal>
-      </Menu>
     </div>
   )
 }

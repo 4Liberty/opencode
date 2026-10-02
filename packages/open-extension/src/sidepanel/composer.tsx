@@ -1,6 +1,6 @@
-// The prompt box. In a session it sends (or steers) and stops; on home it starts a session in the
-// selected project. Mirrors the desktop composer's surface and controls at side panel scale.
-import type { ModelInfo, ModelRef, Project, SessionInfo } from "@opencode/client/promise"
+// The prompt box. In a session it sends (or steers) and stops; in a new conversation it starts a session
+// in the selected directory. Mirrors the desktop composer's surface and controls at side panel scale.
+import type { ModelInfo, ModelRef, SessionInfo } from "@opencode/client/promise"
 import { Button } from "@opencode/ui/button"
 import { Icon } from "@opencode/ui/icon"
 import { IconButton } from "@opencode/ui/icon-button"
@@ -9,14 +9,14 @@ import { Tooltip } from "@opencode/ui/tooltip"
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useServer } from "./connection"
-import { basename, toastError } from "./format"
+import { toastError } from "./format"
 
-// Drafts outlive the composer, so switching between home and sessions keeps unsent text.
+// Drafts outlive the composer, so switching between a new conversation and sessions keeps unsent text.
 const [drafts, setDrafts] = createStore<Record<string, string>>({})
 
 export function Composer(props: {
   sessionID?: string
-  project?: Project
+  directory?: string
   onCreate?: (sessionID: string, request: Promise<SessionInfo>) => void
   ref?: (element: HTMLTextAreaElement) => void
 }) {
@@ -25,10 +25,10 @@ export function Composer(props: {
   const [choice, setChoice] = createStore<{ agent?: string; model?: ModelRef }>({})
   const [include, setInclude] = createSignal(false)
   const [defaults, setDefaults] = createStore<Record<string, ModelInfo | null>>({})
-  const draftKey = () => props.sessionID ?? `home:${props.project?.id ?? ""}`
+  const draftKey = () => props.sessionID ?? `new:${props.directory ?? ""}`
   const text = () => drafts[draftKey()] ?? ""
   const session = createMemo(() => (props.sessionID ? data.session.get(props.sessionID) : undefined))
-  const directory = createMemo(() => session()?.location.directory ?? props.project?.canonical)
+  const directory = createMemo(() => session()?.location.directory ?? props.directory)
   const location = createMemo(() => {
     const value = directory()
     return value ? { directory: value } : undefined
@@ -64,9 +64,9 @@ export function Composer(props: {
     models().forEach((model) => groups.set(model.providerID, [...(groups.get(model.providerID) ?? []), model]))
     return Array.from(groups, ([id, items]) => ({ id, name: names.get(id) ?? id, models: items }))
   })
-  // A new session starts like the project's most recent one, so the controls show what will run.
+  // A new session starts like the directory's most recent one, so the controls show what will run.
   const recent = createMemo(() =>
-    data.session.list().find((item) => item.projectID === props.project?.id && !item.parentID),
+    data.session.list().find((item) => item.location.directory === props.directory && !item.parentID),
   )
   const fallbackModel = (): ModelRef | undefined => {
     const value = directory()
@@ -128,12 +128,11 @@ export function Composer(props: {
       })
       return
     }
-    const project = props.project
-    if (!project) return
+    const target = props.directory
+    if (!target) return
     const tab = include() ? activeTab() : undefined
     const created = data.session.create({
-      location: { directory: project.canonical },
-      projectID: project.id,
+      location: { directory: target },
       agent: agent(),
       model: model(),
     })
@@ -159,7 +158,7 @@ export function Composer(props: {
   const placeholder = () => {
     if (busy()) return "Steer the agent…"
     if (props.sessionID) return "Ask a follow-up…"
-    return props.project ? `Start a session in ${basename(props.project.canonical)}…` : "Ask anything…"
+    return "Ask anything…"
   }
 
   return (
@@ -178,7 +177,6 @@ export function Composer(props: {
         aria-label="Prompt"
         placeholder={placeholder()}
         value={text()}
-        disabled={!props.sessionID && !props.project}
         class="block max-h-[180px] min-h-[52px] w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-[13px] font-[440] leading-5 text-v2-text-text-base [field-sizing:content] placeholder:text-v2-text-text-faint focus:outline-none"
         onInput={(event) => setDrafts(draftKey(), event.currentTarget.value)}
         onKeyDown={(event) => {
@@ -293,7 +291,7 @@ export function Composer(props: {
             type="button"
             variant="submit"
             class="size-7 rounded-md p-[6px]"
-            disabled={!stopping() && (!text().trim() || (!props.sessionID && !props.project))}
+            disabled={!stopping() && (!text().trim() || (!props.sessionID && !props.directory))}
             icon={<Icon name={stopping() ? "stop" : "arrow-up"} />}
             aria-label={stopping() ? "Stop" : "Send"}
             onClick={() => {
