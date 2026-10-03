@@ -516,7 +516,6 @@ async function forEachBrowser(callback: (browser: SessionBrowser) => void) {
 
 async function sendActiveTab(windowID: number) {
   const [tab] = await chrome.tabs.query({ active: true, windowId: windowID })
-  schedulePageContext(windowID, tab)
   const owners = await Promise.all(Array.from(browsers.values()))
   const active: ActiveTab | null = tab?.id
     ? {
@@ -532,24 +531,6 @@ async function sendActiveTab(windowID: number) {
       }
     : null
   broadcast((panel) => panel.windowID === windowID, { type: "activeTab", tab: active })
-}
-
-const pageTimers = new Map<number, ReturnType<typeof setTimeout>>()
-/** Updates the "current page" context of sessions shown in this window once browsing settles. */
-function schedulePageContext(windowID: number, tab: chrome.tabs.Tab | undefined) {
-  clearTimeout(pageTimers.get(windowID))
-  pageTimers.set(
-    windowID,
-    setTimeout(() => {
-      pageTimers.delete(windowID)
-      const shown = new Set(
-        Array.from(panels)
-          .filter((panel) => panel.windowID === windowID && panel.sessionID)
-          .map((panel) => panel.sessionID!),
-      )
-      shown.forEach((sessionID) => void browsers.get(sessionID)?.then((browser) => browser.page(tab)))
-    }, 1_000),
-  )
 }
 
 function post(panel: Panel, message: ToPanel) {

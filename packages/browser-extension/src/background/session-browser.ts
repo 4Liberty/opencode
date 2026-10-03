@@ -79,7 +79,6 @@ export async function createSessionBrowser(input: {
   let stateTimer: ReturnType<typeof setTimeout> | undefined
   let guided = false
   const recording: { recording?: Recording } = {}
-  let lastPage: string | undefined
 
   // Tabs survive a service worker restart; their IDs must too, or the agent's tab IDs go stale.
   const stored = ((await chrome.storage.session.get(storageKey))[storageKey] ?? []) as Stored[]
@@ -504,23 +503,6 @@ export async function createSessionBrowser(input: {
       entry.loadError = undefined
       entry.page?.reset()
       publish()
-    },
-    /** Tells the agent which page the user is looking at; repeated values are not resent. */
-    page(tab: chrome.tabs.Tab | undefined) {
-      const entry = tab?.id === undefined ? undefined : find(tab.id)
-      const value = !tab?.url
-        ? "The user is not looking at a web page."
-        : [
-            `The user is looking at: ${tab.title || "Untitled"} (${tab.url}).`,
-            entry
-              ? `It is shared with you as tabID ${entry.id}.`
-              : shareable(tab.url)
-                ? "It is not shared with you. Call browser.tabs.request({}) to ask the user to share it, or open the URL in your own tab with browser.tabs.open."
-                : "It is a browser page that extensions cannot control.",
-          ].join(" ")
-      if (value === lastPage) return
-      lastPage = value
-      void putContext("opencode-browser.page", value)
     },
     /** Claims a download if it came from one of this session's tabs; returns whether it did. */
     download(item: chrome.downloads.DownloadItem) {

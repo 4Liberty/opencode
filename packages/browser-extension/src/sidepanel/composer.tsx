@@ -23,6 +23,11 @@ const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
 type DraftTarget = { sessionID?: string; directory?: string }
 
+// The page context last sent to each session. It goes out only with a prompt from this panel, so the user
+// switching tabs while an agent works (or while chatting from another client) doesn't touch the session.
+const sentPage = new Map<string, string>()
+const PAGE_KEY = "opencode-browser.page"
+
 const keyFor = (target: DraftTarget) => target.sessionID ?? `new:${target.directory ?? ""}`
 
 /** Starts a prompt in a composer's draft, after any unsent text, for actions outside the composer. */
@@ -157,6 +162,29 @@ export function Composer(props: {
     void server.api.session.interrupt({ sessionID }).catch(toastError("Couldn't stop the session"))
   }
 
+  /** "Which page the user is looking at" for a prompt sent now; resent only when it changed. */
+  const sendPage = (sessionID: string, includedTab?: number) => {
+    const tab = activeTab()
+    const shared = server.background.browser(sessionID)?.tabs.find((item) => item.chromeTabID === tab?.chromeTabID)
+    const value = !tab?.url
+      ? "The user is not looking at a web page."
+      : [
+          `The user is looking at: ${tab.title || "Untitled"} (${tab.url}).`,
+          shared
+            ? `It is shared with you as tabID ${shared.id}.`
+            : includedTab === tab.chromeTabID
+              ? "The user shared it with you; find its tabID with browser.tabs.list({})."
+              : tab.shareable
+                ? "It is not shared with you. Call browser.tabs.request({}) to ask the user to share it, or open the URL in your own tab with browser.tabs.open."
+                : "It is a browser page that extensions cannot control.",
+        ].join(" ")
+    if (sentPage.get(sessionID) === value) return Promise.resolve()
+    return server.api.session.instructions.entry
+      .put({ sessionID, key: PAGE_KEY, value })
+      .then(() => void sentPage.set(sessionID, value))
+      .catch(() => undefined)
+  }
+
   const submit = () => {
     const value = text().trim()
     const pictures = attached()
@@ -171,7 +199,7 @@ export function Composer(props: {
     if (sessionID) {
       setDrafts(key, "")
       setImages(key, [])
-      void data.session.prompt({ sessionID, text: value, files }).catch((error: unknown) => {
+      void data.session.prompt({ sessionID, text: value, files, prepare: () => sendPage(sessionID) }).catch((error: unknown) => {
         restore()
         toastError("Couldn't send message")(error)
       })
@@ -198,11 +226,13 @@ export function Composer(props: {
         restore()
         toastError("Couldn't start a session")(error)
       })
-    void data.session.prompt({ sessionID: created.id, text: value, files }).catch((error: unknown) => {
-      // A failed create already reported itself and rolled the session back.
-      if (!data.session.get(created.id)) return
-      toastError("Couldn't send message")(error)
-    })
+    void data.session
+      .prompt({ sessionID: created.id, text: value, files, prepare: () => sendPage(created.id, tab?.chromeTabID) })
+      .catch((error: unknown) => {
+        // A failed create already reported itself and rolled the session back.
+        if (!data.session.get(created.id)) return
+        toastError("Couldn't send message")(error)
+      })
   }
 
   const placeholder = () => {
