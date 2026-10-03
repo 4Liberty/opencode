@@ -14,12 +14,16 @@ local opencode service next to any page, let the agent use real tabs, and extend
 ## Install
 
 ```sh
-cd packages/browser-extension && bun run build   # outputs dist/
-opencode browser install                    # registers the helper with your browsers
+npx opencode-browser-cli install   # registers the helper, adds Browser Control, copies the extension
 ```
 
+The helper is the `opencode-browser-cli` npm package in `cli/` (`bun run build` there bundles it with this
+extension's build). It asks your installed opencode for the service with `opencode service start` and
+`opencode service get password`, so it works with any opencode release. `opencode browser install` does
+the same from the opencode CLI.
+
 1. Open the browser's extensions page, turn on **Developer mode**, choose **Load unpacked**, and select
-   `packages/browser-extension/dist`. The manifest key keeps the extension ID stable
+   the folder `install` prints (or `packages/browser-extension/dist` when building from source). The manifest key keeps the extension ID stable
    (`afeafocngkodbmaipcngoamamfmekgfo`).
 2. For site scripts, choose **Details** on OpenCode Browser and turn on **Allow user scripts**.
 3. Click the toolbar icon, or press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>.</kbd>, to open the panel.
@@ -29,7 +33,7 @@ installed Chromium browser on macOS and Linux (a manifest in each browser's `Nat
 directory) and on Windows (per-user registry keys), matching the browsers ChatGPT's extension supports. The host is the opencode CLI itself (`opencode browser host`): it starts the
 background service if needed and returns its URL and password, so the panel connects without
 configuration. The extension also hands the host its opencode plugin (`plugin/opencode-browser.ts`, the
-`site_scripts` and `browsing` tools), which is written to `~/.config/opencode/plugins/sidepanel.ts`
+`site_scripts` and `browsing` tools), which is written to `~/.config/opencode/plugins/opencode-browser.ts`
 whenever it changes, so the plugin always matches the installed extension. Without the host, the panel
 offers a manual URL and password form. `opencode browser status` and `opencode browser uninstall`
 check and remove the registration.

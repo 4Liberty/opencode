@@ -7,7 +7,8 @@ import { Tooltip } from "@opencode/ui/tooltip"
 import { For, createEffect, createSignal, onCleanup } from "solid-js"
 import type { RelayStatus, ServiceState } from "../shared/protocol"
 
-export const INSTALL_COMMAND = "opencode browser install"
+/** Works with any opencode release; the helper ships as an npm package (packages/browser-extension/cli). */
+export const INSTALL_COMMAND = "npx opencode-browser-cli install"
 
 /** An error message that reads as a sentence before more text follows it. */
 export function sentence(message: string) {

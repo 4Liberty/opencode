@@ -20,7 +20,7 @@ OpenCode Browser connects the browser to OpenCode, the open source AI coding age
 - Site scripts: ask the agent to change how a site looks or works, approve the script, and turn it on or off anytime.
 - Works with Browser Control, so OpenCode's Browser Control MCP and CLI drive your tabs through the same extension.
 
-Requires OpenCode on your computer. Run `opencode browser install` once to connect it.
+Requires OpenCode on your computer. Run `npx opencode-browser-cli install` once to connect it.
 
 Everything stays between your browser and your own OpenCode. The extension has no server of its own.
 
@@ -35,7 +35,7 @@ Use OpenCode, an AI agent running on the user's computer, from the browser side 
 - `tabs`, `tabGroups`: List and open tabs for the agent, show which page the user is on, and group the agent's tabs so the user can see them.
 - `webNavigation`: Know when an agent's tab finished loading before it acts.
 - `storage`: Save settings, site scripts, and per-conversation permissions locally.
-- `nativeMessaging`: Find the user's local OpenCode service through a helper installed by `opencode browser install`.
+- `nativeMessaging`: Find the user's local OpenCode service through a helper installed by `npx opencode-browser-cli install`.
 - `alarms`: Keep the connection to the local OpenCode service and Browser Control relay alive and reconnect.
 - `userScripts`: Run site scripts the user approved on the sites they chose.
 - `downloads`: Save files the agent was asked to download, and report downloads to it.
