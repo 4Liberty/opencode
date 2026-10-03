@@ -11,8 +11,8 @@ import { BrowserControlHandoffDock, BrowserControlMenu, BrowserControlNotice } f
 import { BrowsingAccessDock } from "./browsing-access"
 import { Composer, prefillDraft } from "./composer"
 import { useServer } from "./connection"
-import { basename, toastError } from "./format"
-import { History } from "./history"
+import { toastError } from "./format"
+import { History, SessionPicker } from "./history"
 import { ProjectPicker } from "./projects"
 import { ScriptApprovalDock, SiteScriptsView, scriptsOnPage } from "./site-scripts"
 
@@ -136,18 +136,7 @@ export function Shell() {
                 </Tooltip>
               )}
             </Show>
-            <div class="flex min-w-0 flex-1 flex-col px-1.5">
-              <span class="truncate text-[13px] font-[530] leading-4 tracking-[-0.04px] text-v2-text-text-base">
-                {session()?.title || "New conversation"}
-              </span>
-              <Show when={session()?.location.directory}>
-                {(value) => (
-                  <span class="truncate text-12-regular leading-4 text-v2-text-text-faint">
-                    {value() === home() ? "Home" : basename(value())}
-                  </span>
-                )}
-              </Show>
-            </div>
+            <SessionPicker title={session()?.title || "New conversation"} current={view()} onOpen={open} />
           </Match>
         </Switch>
         <BrowserControlMenu />
@@ -182,7 +171,9 @@ export function Shell() {
             </Button>
           </Tooltip>
         </Show>
-        <History directory={session()?.location.directory ?? directory()} current={view()} onOpen={open} />
+        <Show when={!view() || managing()}>
+          <History current={view()} onOpen={open} />
+        </Show>
         <Tooltip placement="bottom-end" value="New conversation">
           <IconButton
             variant="ghost-muted"
