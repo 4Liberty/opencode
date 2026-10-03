@@ -1,7 +1,7 @@
 import pluginSource from "../../plugin/opencode-browser.ts?raw"
 import type { ServiceInfo, ServiceState } from "../shared/protocol"
 
-/** Native messaging host registered by `npx opencode-browser-cli install` (or `opencode browser install`). */
+/** Native messaging host registered by `npx opencode-browser-cli install` (packages/browser-extension/cli). */
 export const HOST_NAME = "ai.opencode.browser"
 const MANUAL_KEY = "manualService"
 

@@ -2,7 +2,7 @@
 // matching pages of the user's browser (the way Tampermonkey does, without a separate extension) and
 // browsing tools that read history and bookmarks. The extension owns the data and asks the user in its
 // side panel before every install and before a conversation first reads browsing data.
-// `opencode browser install` copies this file verbatim into opencode's plugins directory, so it must
+// The helper (npx opencode-browser-cli) copies this file verbatim into opencode's plugins directory, so it must
 // not import anything at runtime: type-only imports are erased when opencode loads it.
 //
 // It also owns the relay RPC between this plugin (server) and the extension's background worker: the
