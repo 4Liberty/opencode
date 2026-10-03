@@ -676,13 +676,7 @@
   }
 }
 
-[data-component="collapsed-tool-group"]:has(
-    > [data-component="collapsible"]
-      > [data-slot="collapsible-content"]
-      [data-slot="context-tool-group-item"]:first-child
-      > [data-slot="session-timeline-notice"]
-  )
-  > [data-component="collapsible"].tool-collapsible {
+[data-component="collapsed-tool-group"][data-notices-only] > [data-component="collapsible"].tool-collapsible {
   --tool-content-gap: 0px;
 }
 
