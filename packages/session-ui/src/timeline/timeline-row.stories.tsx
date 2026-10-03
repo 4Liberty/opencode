@@ -576,6 +576,49 @@ const RichUserAttachments = {
   ),
 }
 
+const markdownPrompt = [
+  "Please *review* @src/a.ts before _shipping_:",
+  "- Check the ~old~ `parse` path",
+  "- Keep https://opencode.ai/docs working",
+  "1. Run tests",
+  "2. Ship it",
+  "> Quoted note",
+  "```",
+  "const value = *raw*",
+  "```",
+].join("\n")
+
+const MarkdownPrompt = {
+  render: () => (
+    <CurrentSessionTimelineStory
+      title="Prompt with simple Markdown"
+      description="Slack-style marks, lists, quotes, and code render in the user message, and mentions stay highlighted."
+      document={{
+        ...thinkingDocument,
+        status: { type: "idle" },
+        messages: [
+          {
+            id: "msg_story_markdown_user",
+            type: "user",
+            text: markdownPrompt,
+            files: [
+              {
+                data: "",
+                mime: "text/plain",
+                name: "a.ts",
+                source: { type: "uri", uri: "src/a.ts" },
+                mention: { text: "@src/a.ts", start: 16, end: 25 },
+              },
+            ],
+            time: { created: 1_735_689_633_000 },
+          },
+        ],
+      }}
+      width="560px"
+    />
+  ),
+}
+
 const conversationScenarios = {
   reasoning: AgentReasoning,
   hidden: WorkingWithoutReasoningDetails,
@@ -586,6 +629,7 @@ const conversationScenarios = {
   interruption: InterruptedTurn,
   models: AliasedModelNotices,
   attachments: RichUserAttachments,
+  markdown: MarkdownPrompt,
 }
 
 export const Conversation = {

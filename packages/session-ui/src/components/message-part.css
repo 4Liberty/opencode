@@ -158,6 +158,68 @@
       color: var(--user-message-mention-prefix-color);
     }
 
+    :is([data-slot="user-message-paragraph"], li, blockquote) {
+      unicode-bidi: plaintext;
+    }
+
+    ul,
+    ol {
+      margin: 0;
+      padding-inline-start: 20px;
+      list-style-position: outside;
+    }
+
+    ul {
+      list-style-type: disc;
+    }
+
+    ol {
+      list-style-type: decimal;
+    }
+
+    blockquote {
+      margin: 0;
+      padding-inline-start: 8px;
+      border-inline-start: 2px solid color-mix(in oklch, currentColor 30%, transparent);
+    }
+
+    strong {
+      font-weight: 600;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      direction: ltr;
+      unicode-bidi: isolate;
+    }
+
+    code {
+      direction: ltr;
+      unicode-bidi: isolate;
+      padding: 0 4px;
+      border-radius: 4px;
+      font-family: var(--font-family-mono);
+      font-feature-settings: var(--font-family-mono--font-feature-settings);
+      background: color-mix(in oklch, currentColor 10%, transparent);
+    }
+
+    [data-slot="user-message-code-block"] {
+      margin: 2px 0;
+      padding: 4px 8px;
+      border-radius: 6px;
+      direction: ltr;
+      unicode-bidi: isolate;
+      white-space: pre-wrap;
+      background: color-mix(in oklch, currentColor 10%, transparent);
+
+      code {
+        padding: 0;
+        background: none;
+      }
+    }
+
     max-width: 100%;
   }
 

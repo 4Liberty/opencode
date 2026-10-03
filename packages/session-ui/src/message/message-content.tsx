@@ -28,6 +28,7 @@ import type {
 } from "@opencode/client/promise"
 import type { SessionUserActions, SessionUserAttachmentReference, SessionUserComment } from "../actions"
 import { attached, typeLabel } from "../components/message-file"
+import { parseUserMarkdown, type UserMarkdownBlock, type UserMarkdownInline } from "./user-markdown"
 
 export async function writeClipboard(text: string): Promise<boolean> {
   const body = typeof document === "undefined" ? undefined : document.body
@@ -303,7 +304,7 @@ export function CurrentUserMessageDisplay(props: {
       >
         <div data-slot="user-message-body">
           <div data-slot="user-message-text" dir="auto" data-comments={comments().length > 0 ? "true" : undefined}>
-            <CurrentHighlightedText text={props.text} files={inlineFiles()} agents={agents()} />
+            <UserMessageMarkdown text={props.text} files={inlineFiles()} agents={agents()} />
             <Show when={comments().length > 0}>
               <UserMessageComments comments={comments()} bounded />
             </Show>
@@ -359,46 +360,87 @@ export function CurrentUserMessageDisplay(props: {
   )
 }
 
-function CurrentHighlightedText(props: {
-  text: string
-  files: PromptFileAttachment[]
-  agents: PromptAgentAttachment[]
-}) {
-  const segments = createMemo(() => {
-    const references = [
+function UserMessageMarkdown(props: { text: string; files: PromptFileAttachment[]; agents: PromptAgentAttachment[] }) {
+  const blocks = createMemo(() =>
+    parseUserMarkdown(props.text, [
       ...props.files.flatMap((file) =>
         file.mention ? [{ start: file.mention.start, end: file.mention.end, type: "file" as const }] : [],
       ),
       ...props.agents.flatMap((agent) =>
         agent.mention ? [{ start: agent.mention.start, end: agent.mention.end, type: "agent" as const }] : [],
       ),
-    ].sort((a, b) => a.start - b.start)
-    const result: HighlightSegment[] = []
-    let last = 0
-    references.forEach((reference) => {
-      if (reference.start < last) return
-      if (reference.start > last) result.push({ text: props.text.slice(last, reference.start) })
-      result.push({ text: props.text.slice(reference.start, reference.end), type: reference.type })
-      last = reference.end
-    })
-    if (last < props.text.length) result.push({ text: props.text.slice(last) })
-    return result
-  })
+    ]),
+  )
+  return <For each={blocks()}>{(block) => <UserMarkdownBlockView block={block} />}</For>
+}
+
+function UserMarkdownBlockView(props: { block: UserMarkdownBlock }) {
+  const block = props.block
+  if (block.type === "code") {
+    return (
+      <pre data-slot="user-message-code-block">
+        <code>{block.text}</code>
+      </pre>
+    )
+  }
+  if (block.type === "quote") {
+    return (
+      <blockquote>
+        <UserMarkdownInlineView nodes={block.children} />
+      </blockquote>
+    )
+  }
+  if (block.type === "list") {
+    const items = (
+      <For each={block.items}>
+        {(item) => (
+          <li value={block.ordered ? item.value : undefined}>
+            <UserMarkdownInlineView nodes={item.children} />
+          </li>
+        )}
+      </For>
+    )
+    if (block.ordered) return <ol start={block.items[0]?.value}>{items}</ol>
+    return <ul>{items}</ul>
+  }
   return (
-    <For each={segments()}>
-      {(segment) => (
-        <span data-highlight={segment.type}>
-          <Show when={segment.type && segment.text.startsWith("@")} fallback={segment.text}>
-            <span data-slot="user-message-mention-prefix">@</span>
-            {segment.text.slice(1)}
-          </Show>
-        </span>
-      )}
-    </For>
+    <div data-slot="user-message-paragraph">
+      <UserMarkdownInlineView nodes={block.children} />
+    </div>
   )
 }
 
-type HighlightSegment = { text: string; type?: "file" | "agent" }
+function UserMarkdownInlineView(props: { nodes: UserMarkdownInline[] }) {
+  return (
+    <For each={props.nodes}>
+      {(node) => {
+        if (node.type === "text") return node.text
+        if (node.type === "code") return <code>{node.text}</code>
+        if (node.type === "link") {
+          return (
+            <a href={node.text} class="external-link" target="_blank" rel="noopener noreferrer">
+              {node.text}
+            </a>
+          )
+        }
+        if (node.type === "mention") {
+          return (
+            <span data-highlight={node.mention}>
+              <Show when={node.text.startsWith("@")} fallback={node.text}>
+                <span data-slot="user-message-mention-prefix">@</span>
+                {node.text.slice(1)}
+              </Show>
+            </span>
+          )
+        }
+        const children = <UserMarkdownInlineView nodes={node.children} />
+        if (node.type === "bold") return <strong>{children}</strong>
+        if (node.type === "italic") return <em>{children}</em>
+        return <s>{children}</s>
+      }}
+    </For>
+  )
+}
 
 export function SessionCompactionMessage(props: { message: SessionMessageCompaction; error: string }) {
   const i18n = useI18n()

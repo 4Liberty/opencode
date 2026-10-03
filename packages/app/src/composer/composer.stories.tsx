@@ -241,6 +241,14 @@ export const MultilineDraft = {
   render: () => <ComposerStory prompt={text("Review the implementation\nThen run the focused tests")} />,
 }
 
+export const ListDraft = {
+  render: () => (
+    <ComposerStory
+      prompt={text("Plan the change:\n- Read the timeline code\n- Add focused tests\n1. Build the app\n2. Ship it")}
+    />
+  ),
+}
+
 export const MixedAttachments = {
   render: () => (
     <ComposerStory

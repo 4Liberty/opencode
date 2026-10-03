@@ -2,6 +2,90 @@
   content: "\200B";
 }
 
+/* Text hidden below fades into the controls row. The fade clears at the end so the last line stays readable. */
+@property --composer-scroll-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes composer-scroll-fade {
+  from {
+    --composer-scroll-fade: 24px;
+  }
+  to {
+    --composer-scroll-fade: 0px;
+  }
+}
+
+@supports (animation-timeline: --composer-scroll) {
+  [data-component="composer-scroll"] .scroll-view__viewport {
+    /* Revealing the caret keeps its line above the fade. */
+    scroll-padding-bottom: 24px;
+    scroll-timeline: --composer-scroll y;
+    animation: composer-scroll-fade linear both;
+    animation-timeline: --composer-scroll;
+    animation-range: calc(100% - 1.1px) calc(100% - 1px);
+    mask-image: linear-gradient(to bottom, black calc(100% - var(--composer-scroll-fade)), transparent);
+  }
+}
+
+[data-component="composer-editor"] :is(ul, ol) {
+  margin: 0;
+  padding-inline-start: 20px;
+  list-style-position: outside;
+}
+
+[data-component="composer-editor"] ul {
+  list-style-type: disc;
+}
+
+[data-component="composer-editor"] ol {
+  list-style-type: decimal;
+}
+
+[data-component="composer-editor"] li {
+  unicode-bidi: plaintext;
+}
+
+[data-component="composer-editor"] [data-md="marker"] {
+  color: var(--v2-text-text-faint);
+}
+
+[data-component="composer-editor"] [data-md="bold"] {
+  font-weight: 600;
+}
+
+[data-component="composer-editor"] [data-md="italic"] {
+  font-style: italic;
+}
+
+[data-component="composer-editor"] [data-md="strike"] {
+  text-decoration: line-through;
+}
+
+[data-component="composer-editor"] [data-md="link"] {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+[data-component="composer-editor"] [data-md="quote"] {
+  color: var(--v2-text-text-muted);
+}
+
+[data-component="composer-editor"] :is([data-md="code"], [data-md="code-block"]) {
+  direction: ltr;
+  unicode-bidi: isolate;
+  font-family: var(--font-family-mono);
+  font-feature-settings: var(--font-family-mono--font-feature-settings);
+}
+
+[data-component="composer-editor"] [data-md="code"] {
+  padding: 0 2px;
+  border-radius: 4px;
+  background: color-mix(in oklch, currentColor 10%, transparent);
+}
+
 /* Masks only cover hidden content; they do not reserve space in the toolbar. */
 [data-slot="composer-controls"][data-overflow-start="true"] {
   --mask-start: 16px;

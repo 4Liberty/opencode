@@ -262,6 +262,73 @@ story("renders a draft once and supports editing, caret restoration, and failure
   await expect(input).toHaveText("Preserve this draft on failure")
 })
 
+story("edits Slack-style lists and submits them as Markdown", async ({ mount, page }) => {
+  const component = await mount("opencode-composer-flow--empty-draft")
+  const input = component.getByRole("textbox", { name: "Prompt", exact: true })
+  await input.click()
+  await page.keyboard.type("Plan:")
+  await page.keyboard.press("Shift+Enter")
+  await page.keyboard.type("- one")
+  await page.keyboard.press("Shift+Enter")
+  await page.keyboard.type("two")
+  await page.keyboard.press("Shift+Enter")
+  await page.keyboard.press("Shift+Enter")
+  await page.keyboard.type("1. first @rev")
+  await expect(input.locator("ul > li")).toHaveText(["one", "two"])
+  await expect(input.locator("ol > li")).toHaveText(["first @rev"])
+
+  await expect(component.locator('[data-suggestion-id="agent:review"]')).toBeVisible()
+  await page.keyboard.press("Enter")
+  await expect(input.locator("ol > li [data-mention=agent]")).toHaveText("@review")
+
+  await input.locator("li", { hasText: "two" }).click()
+  await page.keyboard.press("Home")
+  await page.keyboard.press("Backspace")
+  await expect(input.locator("ul > li")).toHaveText(["one"])
+
+  await page.keyboard.press("Enter")
+  await expect(component.getByRole("status")).toContainText("Submitted:")
+  expect(await component.getByRole("status").textContent()).toBe("Submitted: Plan:\n- one\ntwo\n1. first @review ")
+})
+
+story("previews Slack-style inline marks while typing", async ({ mount, page }) => {
+  const component = await mount("opencode-composer-flow--empty-draft")
+  const input = component.getByRole("textbox", { name: "Prompt", exact: true })
+  await input.click()
+  await page.keyboard.type("*hello* _link_ `code` done")
+  await expect(input.locator('[data-md="bold"]')).toHaveText("*hello*")
+  await expect(input.locator('[data-md="bold"]')).toHaveCSS("font-weight", "600")
+  await expect(input.locator('[data-md="italic"]')).toHaveText("_link_")
+  await expect(input.locator('[data-md="code"]')).toHaveText("`code`")
+  await expect(input.locator('[data-md="marker"]')).toHaveCount(6)
+
+  await page.keyboard.press("Enter")
+  await expect(component.getByRole("status")).toContainText("Submitted:")
+  expect(await component.getByRole("status").textContent()).toBe("Submitted: *hello* _link_ `code` done")
+})
+
+story("fades overflowing prompt text above the controls until the caret line is at the end", async ({ mount, page }) => {
+  const component = await mount("opencode-composer-flow--empty-draft")
+  const input = component.getByRole("textbox", { name: "Prompt", exact: true })
+  const viewport = component.locator('[data-component="composer-scroll"] .scroll-view__viewport')
+  const mask = () => viewport.evaluate((element) => getComputedStyle(element).maskImage)
+  const clear = "linear-gradient(rgb(0, 0, 0) 100%, rgba(0, 0, 0, 0))"
+  await input.click()
+  await expect.poll(mask).toBe(clear)
+
+  for (let line = 1; line <= 12; line++) {
+    if (line > 1) await page.keyboard.press("Shift+Enter")
+    await page.keyboard.type(`Line ${line}`)
+  }
+  await expect.poll(() => viewport.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+  await expect.poll(mask).toBe(clear)
+
+  await viewport.evaluate((element) => {
+    element.scrollTop = 0
+  })
+  await expect.poll(mask).toBe("linear-gradient(rgb(0, 0, 0) calc(100% - 24px), rgba(0, 0, 0, 0))")
+})
+
 story("shows thinking on composer hover or when a non-default variant is selected", async ({ mount, page }) => {
   const component = await mount("opencode-composer-flow--model-and-variant")
   const composer = component.locator('[data-component="composer"]')
