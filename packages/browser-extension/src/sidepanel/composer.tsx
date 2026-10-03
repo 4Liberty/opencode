@@ -14,6 +14,13 @@ import { toastError } from "./format"
 // Drafts outlive the composer, so switching between a new conversation and sessions keeps unsent text.
 const [drafts, setDrafts] = createStore<Record<string, string>>({})
 
+/** An image pasted, dropped, or picked into a draft; it travels inline with the prompt as a data URL. */
+type DraftImage = { id: string; name: string; mime: string; url: string }
+const [images, setImages] = createStore<Record<string, DraftImage[]>>({})
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"]
+// The desktop composer's inline limit.
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024
+
 type DraftTarget = { sessionID?: string; directory?: string }
 
 const keyFor = (target: DraftTarget) => target.sessionID ?? `new:${target.directory ?? ""}`
@@ -37,6 +44,34 @@ export function Composer(props: {
   const [defaults, setDefaults] = createStore<Record<string, ModelInfo | null>>({})
   const draftKey = () => keyFor(props)
   const text = () => drafts[draftKey()] ?? ""
+  const attached = () => images[draftKey()] ?? []
+  const ready = () => !!text().trim() || attached().length > 0
+  let picker: HTMLInputElement | undefined
+
+  const addImages = async (files: File[]) => {
+    const key = draftKey()
+    const accepted = files.filter((file) => IMAGE_TYPES.includes(file.type))
+    if (files.length && !accepted.length) return toastError("Couldn't attach")("Only PNG, JPEG, GIF, and WebP images can be attached.")
+    const fitting = accepted.filter((file) => file.size <= MAX_IMAGE_BYTES)
+    if (fitting.length < accepted.length) toastError("Couldn't attach")("Images must be 20 MB or smaller.")
+    const read = await Promise.all(
+      fitting.map(
+        (file) =>
+          new Promise<DraftImage>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () =>
+              resolve({ id: crypto.randomUUID(), name: file.name || "Pasted image", mime: file.type, url: String(reader.result) })
+            reader.onerror = () => reject(reader.error)
+            reader.readAsDataURL(file)
+          }),
+      ),
+    ).catch((error: unknown) => {
+      toastError("Couldn't attach")(error)
+      return []
+    })
+    if (read.length) setImages(key, (current) => [...(current ?? []), ...read])
+  }
+  const removeImage = (id: string) => setImages(draftKey(), (current) => (current ?? []).filter((image) => image.id !== id))
   const session = createMemo(() => (props.sessionID ? data.session.get(props.sessionID) : undefined))
   const directory = createMemo(() => session()?.location.directory ?? props.directory)
   const location = createMemo(() => {
@@ -101,7 +136,7 @@ export function Composer(props: {
   const agentName = () => agents().find((item) => item.id === agent())?.name ?? agent() ?? "Agent"
 
   const busy = () => !!props.sessionID && data.session.status(props.sessionID) === "running"
-  const stopping = () => busy() && !text().trim()
+  const stopping = () => busy() && !ready()
   const activeTab = () => server.background.state.activeTab
   const includable = () => !props.sessionID && !!activeTab()?.shareable
 
@@ -124,15 +159,19 @@ export function Composer(props: {
 
   const submit = () => {
     const value = text().trim()
-    if (!value) return
+    const pictures = attached()
+    if (!value && !pictures.length) return
     const key = draftKey()
+    const files = pictures.length ? pictures.map((image) => ({ uri: image.url, name: image.name })) : undefined
     const restore = () => {
       if (!drafts[key]) setDrafts(key, value)
+      if (!images[key]?.length) setImages(key, pictures)
     }
     const sessionID = props.sessionID
     if (sessionID) {
       setDrafts(key, "")
-      void data.session.prompt({ sessionID, text: value }).catch((error: unknown) => {
+      setImages(key, [])
+      void data.session.prompt({ sessionID, text: value, files }).catch((error: unknown) => {
         restore()
         toastError("Couldn't send message")(error)
       })
@@ -147,6 +186,7 @@ export function Composer(props: {
       model: model(),
     })
     setDrafts(key, "")
+    setImages(key, [])
     setInclude(false)
     props.onCreate?.(created.id, created.request)
     void created.request
@@ -158,7 +198,7 @@ export function Composer(props: {
         restore()
         toastError("Couldn't start a session")(error)
       })
-    void data.session.prompt({ sessionID: created.id, text: value }).catch((error: unknown) => {
+    void data.session.prompt({ sessionID: created.id, text: value, files }).catch((error: unknown) => {
       // A failed create already reported itself and rolled the session back.
       if (!data.session.get(created.id)) return
       toastError("Couldn't send message")(error)
@@ -179,7 +219,40 @@ export function Composer(props: {
         event.preventDefault()
         submit()
       }}
+      onDragOver={(event) => {
+        if (event.dataTransfer?.types.includes("Files")) event.preventDefault()
+      }}
+      onDrop={(event) => {
+        const files = Array.from(event.dataTransfer?.files ?? [])
+        if (!files.length) return
+        event.preventDefault()
+        void addImages(files)
+      }}
     >
+      <Show when={attached().length > 0}>
+        <div class="flex gap-2 overflow-x-auto px-3 pt-3 no-scrollbar" aria-label="Attached images">
+          <For each={attached()}>
+            {(image) => (
+              <div class="group relative size-14 shrink-0">
+                <img
+                  src={image.url}
+                  alt={image.name}
+                  title={image.name}
+                  class="size-14 rounded-lg border border-v2-border-border-muted object-cover"
+                />
+                <button
+                  type="button"
+                  aria-label={`Remove ${image.name}`}
+                  class="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full bg-v2-background-bg-inverse text-v2-text-text-inverse opacity-0 shadow transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                  onClick={() => removeImage(image.id)}
+                >
+                  <Icon name="close-small" size="small" />
+                </button>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
       <textarea
         ref={props.ref}
         rows={1}
@@ -189,6 +262,12 @@ export function Composer(props: {
         value={text()}
         class="block max-h-[180px] min-h-[52px] w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-[13px] font-[440] leading-5 text-v2-text-text-base [field-sizing:content] placeholder:text-v2-text-text-faint focus:outline-none"
         onInput={(event) => setDrafts(draftKey(), event.currentTarget.value)}
+        onPaste={(event) => {
+          const files = Array.from(event.clipboardData?.files ?? []).filter((file) => file.type.startsWith("image/"))
+          if (!files.length) return
+          event.preventDefault()
+          void addImages(files)
+        }}
         onKeyDown={(event) => {
           if (event.key !== "Enter" || event.shiftKey || event.isComposing) return
           event.preventDefault()
@@ -198,6 +277,28 @@ export function Composer(props: {
       />
       <div class="flex h-10 items-center gap-1 ps-1.5 pe-2">
         <div class="flex h-full min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overscroll-x-contain no-scrollbar">
+          <input
+            ref={picker}
+            type="file"
+            accept={IMAGE_TYPES.join(",")}
+            multiple
+            hidden
+            onChange={(event) => {
+              void addImages(Array.from(event.currentTarget.files ?? []))
+              event.currentTarget.value = ""
+            }}
+          />
+          <Tooltip placement="top" value="Attach images">
+            <IconButton
+              type="button"
+              variant="ghost-muted"
+              size="normal"
+              class="shrink-0"
+              icon={<Icon name="plus" />}
+              aria-label="Attach images"
+              onClick={() => picker?.click()}
+            />
+          </Tooltip>
           <Show when={includable() && activeTab()}>
             {(tab) => (
               <Tooltip
@@ -295,13 +396,13 @@ export function Composer(props: {
             </Menu.Portal>
           </Menu>
         </div>
-        <Tooltip placement="top" inactive={!stopping() && !text().trim()} value={stopping() ? "Stop" : "Send"}>
+        <Tooltip placement="top" inactive={!stopping() && !ready()} value={stopping() ? "Stop" : "Send"}>
           <IconButton
             data-action="composer-submit"
             type="button"
             variant="submit"
             class="size-7 rounded-md p-[6px]"
-            disabled={!stopping() && (!text().trim() || (!props.sessionID && !props.directory))}
+            disabled={!stopping() && (!ready() || (!props.sessionID && !props.directory))}
             icon={<Icon name={stopping() ? "stop" : "arrow-up"} />}
             aria-label={stopping() ? "Stop" : "Send"}
             onClick={() => {
