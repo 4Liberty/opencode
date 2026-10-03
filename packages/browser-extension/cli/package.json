@@ -1,6 +1,6 @@
 {
   "name": "opencode-browser-cli",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Set up the OpenCode Browser extension: registers its helper with your browsers and connects it to opencode.",
   "type": "module",
   "license": "MIT",

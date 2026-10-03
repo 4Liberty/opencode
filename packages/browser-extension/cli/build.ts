@@ -24,4 +24,9 @@ await cp(path.join(extension, "dist"), path.join(here, "extension"), {
   recursive: true,
   filter: (file) => !file.endsWith(".map"),
 })
-console.log("built dist/cli.mjs and extension/")
+// The bundled extension carries the package version, like the store zip.
+const manifestFile = path.join(here, "extension", "manifest.json")
+const manifest = await Bun.file(manifestFile).json()
+manifest.version = (await Bun.file(path.join(here, "package.json")).json()).version
+await Bun.write(manifestFile, JSON.stringify(manifest, null, 2) + "\n")
+console.log(`built dist/cli.mjs and extension/ (${manifest.version})`)
