@@ -10,8 +10,7 @@ story("spaces an error between a shell result and expanded updates", async ({ mo
   const updatesBox = (await updates.boundingBox())!
   expect(errorBox.y - (shellBox.y + shellBox.height)).toBe(24)
   expect(updatesBox.y - (errorBox.y + errorBox.height)).toBe(8)
-  const errorText = error.getByText("getaddrinfo ENOTFOUND opencode.ai")
-  expect(updatesBox.x).toBe((await errorText.boundingBox())!.x)
+  expect(updatesBox.x).toBe(errorBox.x)
   await updates.click()
   const notice = timeline.locator('[data-slot="session-timeline-notice"]')
   await expect(notice).toContainText("Instructions updated")

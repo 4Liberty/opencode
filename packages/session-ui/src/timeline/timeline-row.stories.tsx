@@ -669,7 +669,7 @@ export const ErrorAndUpdates = {
       ],
     } satisfies SessionDocument
     return (
-      <section class="mx-auto w-full max-w-[720px] p-6">
+      <section class="mx-auto min-h-screen w-full max-w-[720px] bg-v2-background-bg-base p-6">
         <CurrentSessionProviders document={document}>
           <SessionTimeline document={document} timelineDetail={timelinePresets[1].value} />
         </CurrentSessionProviders>
