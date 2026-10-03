@@ -14,6 +14,7 @@ import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from
 import { BrowserControlHandoffDock } from "./browser-control"
 import { BrowserStrip } from "./browser-strip"
 import { BrowsingAccessDock } from "./browsing-access"
+import { TabRequestDock } from "./tab-request"
 import { Composer } from "./composer"
 import { useServer } from "./connection"
 import { PermissionDock, QuestionDock, UnsupportedFormDock, answerable } from "./docks"
@@ -310,6 +311,7 @@ export default function SessionView(props: {
             </Show>
             <BrowserControlHandoffDock />
             <ScriptApprovalDock />
+            <TabRequestDock />
             <BrowsingAccessDock />
             <Show
               when={

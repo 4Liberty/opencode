@@ -9,6 +9,7 @@ import { Match, Show, Suspense, Switch, createMemo, createSignal, lazy, onCleanu
 import type { SiteScript } from "../shared/site-script"
 import { BrowserControlHandoffDock, BrowserControlMenu, BrowserControlNotice } from "./browser-control"
 import { BrowsingAccessDock } from "./browsing-access"
+import { TabRequestDock } from "./tab-request"
 import { Composer, prefillDraft } from "./composer"
 import { useServer } from "./connection"
 import { toastError } from "./format"
@@ -194,6 +195,7 @@ export function Shell() {
             <div class="flex shrink-0 flex-col gap-1 px-2 empty:hidden [&:not(:empty)]:pb-2">
               <BrowserControlHandoffDock />
               <ScriptApprovalDock />
+              <TabRequestDock />
               <BrowsingAccessDock />
             </div>
           </>
@@ -215,6 +217,7 @@ export function Shell() {
               <div class="flex shrink-0 flex-col gap-1 px-2 pb-2">
                 <BrowserControlHandoffDock />
                 <ScriptApprovalDock />
+                <TabRequestDock />
                 <BrowsingAccessDock />
                 <Composer directory={directory()} onCreate={create} ref={(element) => (composer.current = element)} />
               </div>

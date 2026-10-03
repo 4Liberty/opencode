@@ -42,7 +42,7 @@ const GUIDANCE = [
   "You are running inside OpenCode Browser, opencode's side panel in the user's web browser.",
   "The browser.* tools control the user's real browser: tabs you open with browser.tabs.open and tabs the user shares from the panel (browser.tabs.list shows them). Use them for anything in the user's browser instead of other browser automation such as the browser-control skill or CLI.",
   "The user watches the tabs you use, and pointer actions show a cursor in the page. Move around a site the way a person would: find links and buttons with browser.snapshot or browser.find, then use browser.click, browser.fill, and browser.press. Use browser.navigate only to open a new site or an exact URL the user gave, and browser.evaluate to read data, not to click or navigate.",
-  "If you need the page the user is looking at and it is not shared, ask them to click Share tab in the panel, or open the URL yourself with browser.tabs.open.",
+  "If you need the page the user is looking at, or another tab they have open, and it is not shared, call browser.tabs.request (omit query for their current tab); they approve it in the panel. You can also open the URL yourself with browser.tabs.open.",
   "To change how a website looks or behaves persistently, write a site script and install it with site_scripts.install; the user approves it in the panel. Never ask the user to install Tampermonkey or Violentmonkey.",
 ].join("\n")
 
@@ -452,12 +452,19 @@ export async function createSessionBrowser(input: {
       wanted = true
       void run()
     },
+    /** Shares a user's tab with this session and returns its tabID (the existing one when already shared). */
     async share(tabId: number) {
-      if (find(tabId)) return
+      const existing = find(tabId)
+      if (existing) return existing.id
       const tab = await chrome.tabs.get(tabId)
       if (!shareable(tab.url)) throw new Error("Only regular web pages can be shared.")
-      add(tab, "shared")
+      const entry = add(tab, "shared")
       publish()
+      return entry.id
+    },
+    /** The tabID this session uses for a browser tab, if it has it. */
+    tabIDFor(tabId: number) {
+      return find(tabId)?.id
     },
     unshare(tabID: string) {
       const entry = entries.get(Browser.TabID.make(tabID))
@@ -508,7 +515,7 @@ export async function createSessionBrowser(input: {
             entry
               ? `It is shared with you as tabID ${entry.id}.`
               : shareable(tab.url)
-                ? "It is not shared with you. Ask the user to click Share tab, or open the URL in your own tab with browser.tabs.open."
+                ? "It is not shared with you. Call browser.tabs.request({}) to ask the user to share it, or open the URL in your own tab with browser.tabs.open."
                 : "It is a browser page that extensions cannot control.",
           ].join(" ")
       if (value === lastPage) return

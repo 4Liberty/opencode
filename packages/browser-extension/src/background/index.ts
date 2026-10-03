@@ -8,6 +8,7 @@ import {
   type FromWelcome,
   type ToBackground,
   type ToPanel,
+  type TabRequest,
   type ToWelcome,
 } from "../shared/protocol"
 import type { RelayCommand } from "../shared/relay-rpc"
@@ -33,6 +34,7 @@ const scripts = createSiteScripts((state) => {
 })
 const approvals = new Map<string, { approval: SiteScriptApproval; answer: (approve: boolean) => void }>()
 const accessRequests = new Map<string, { request: AccessRequest; answer: (allow: boolean) => void }>()
+const tabRequests = new Map<string, { request: TabRequest; answer: (allow: boolean) => void }>()
 const link = createRelayLink({ service, run: runRelayCommand })
 const control = createBrowserControl({
   changed: (state) => broadcastStatus({ type: "browserControl", state }),
@@ -83,6 +85,7 @@ async function receive(panel: Panel, message: ToBackground) {
       post(panel, { type: "scripts", state: scripts.state() })
       post(panel, { type: "approvals", approvals: pendingApprovals() })
       post(panel, { type: "access", requests: pendingAccess() })
+      post(panel, { type: "tabRequests", requests: pendingTabRequests() })
       post(panel, { type: "browserControl", state: control.state() })
       link.start()
       await service.get().catch(() => undefined)
@@ -120,20 +123,9 @@ async function receive(panel: Panel, message: ToBackground) {
     case "browser.takeover":
       ;(await browsers.get(message.sessionID))?.takeover(panel.windowID ?? chrome.windows.WINDOW_ID_CURRENT)
       return
-    case "tab.share": {
-      const browser = await browsers.get(message.sessionID)
-      if (!browser) return
-      // A tab belongs to one session at a time.
-      await Promise.all(
-        Array.from(browsers.values(), async (other) => {
-          const resolved = await other
-          if (resolved !== browser) resolved.release(message.chromeTabID)
-        }),
-      )
-      await browser.share(message.chromeTabID)
-      if (panel.windowID !== undefined) await sendActiveTab(panel.windowID)
+    case "tab.share":
+      await shareTab(message.sessionID, message.chromeTabID)
       return
-    }
     case "tab.unshare":
       ;(await browsers.get(message.sessionID))?.unshare(message.tabID)
       if (panel.windowID !== undefined) await sendActiveTab(panel.windowID)
@@ -170,6 +162,14 @@ async function receive(panel: Panel, message: ToBackground) {
     case "browserControl.reconnect":
       control.reconnect()
       return
+    case "tabRequest.reply": {
+      const pending = tabRequests.get(message.id)
+      if (!pending) return
+      tabRequests.delete(message.id)
+      broadcastTabRequests()
+      pending.answer(message.allow)
+      return
+    }
     case "access.reply": {
       const pending = accessRequests.get(message.id)
       if (!pending) return
@@ -225,7 +225,99 @@ async function runRelayCommand(command: RelayCommand, signal: AbortSignal): Prom
       if (!(await allowBrowsing(command.sessionID, command.action, signal)))
         throw new Error("The user chose Don't allow in the side panel; browsing data was not shared with this conversation.")
       return readBrowsing(command)
+    case "request_tab":
+      return requestTab(command, signal)
   }
+}
+
+/** Shares a user's tab with one session; a tab belongs to one session at a time. Returns its tabID. */
+async function shareTab(sessionID: string, chromeTabID: number) {
+  const browser = await browsers.get(sessionID)
+  if (!browser) return undefined
+  await Promise.all(
+    Array.from(browsers.values(), async (other) => {
+      const resolved = await other
+      if (resolved !== browser) resolved.release(chromeTabID)
+    }),
+  )
+  const tabID = await browser.share(chromeTabID)
+  const windows = new Set(Array.from(panels, (panel) => panel.windowID).filter((id) => id !== undefined))
+  await Promise.all(Array.from(windows, (id) => sendActiveTab(id)))
+  return tabID
+}
+
+/**
+ * browser.tabs.request: finds the tab the agent asked for (the user's current tab, or an open tab matching
+ * its query), asks the user in the panel, and shares it with the session.
+ */
+async function requestTab(command: Extract<RelayCommand, { action: "request_tab" }>, signal: AbortSignal) {
+  const browser = await browsers.get(command.sessionID)
+  const showing = Array.from(panels).filter((panel) => panel.sessionID === command.sessionID)
+  if (!browser || !showing.length)
+    throw new Error("No OpenCode Browser side panel is showing this conversation. Ask the user to open it here, then retry.")
+  const query = command.query?.trim()
+  const tab = query ? await matchTab(query) : await currentTab(showing.map((panel) => panel.windowID))
+  if (!tab?.id)
+    throw new Error(
+      query
+        ? `No open tab matches "${query}". Ask the user which tab they mean, or open the page yourself with browser.tabs.open.`
+        : "Could not find the tab the user is looking at.",
+    )
+  const summary = { title: tab.title || hostLabel(tab.url ?? ""), url: tab.url ?? "" }
+  const existing = browser.tabIDFor(tab.id)
+  if (existing) return { tabID: existing, ...summary, note: "This tab was already available to this conversation." }
+  if (!shareable(tab.url))
+    throw new Error(
+      `The ${query ? "matching" : "user's current"} tab (${summary.url || "a browser page"}) is a browser or extension page, which cannot be shared. Ask the user to switch to a regular web page.`,
+    )
+  const request: TabRequest = {
+    id: crypto.randomUUID(),
+    sessionID: command.sessionID,
+    tab: { ...summary, ...(tab.favIconUrl ? { favIconUrl: tab.favIconUrl } : {}) },
+    current: !query,
+    ...(command.reason?.trim() ? { reason: command.reason.trim().slice(0, 200) } : {}),
+  }
+  const allowed = await new Promise<boolean>((resolve) => {
+    const withdraw = () => {
+      if (!tabRequests.delete(request.id)) return
+      broadcastTabRequests()
+      resolve(false)
+    }
+    tabRequests.set(request.id, {
+      request,
+      answer: (allow) => {
+        signal.removeEventListener("abort", withdraw)
+        resolve(allow)
+      },
+    })
+    signal.addEventListener("abort", withdraw, { once: true })
+    broadcastTabRequests()
+  })
+  if (!allowed) throw new Error("The user chose Don't share in the side panel; the tab was not shared with this conversation.")
+  const tabID = await shareTab(command.sessionID, tab.id)
+  if (!tabID) throw new Error("The conversation's browser closed before the tab could be shared. Retry.")
+  return { tabID, ...summary }
+}
+
+/** The active tab in a window showing the conversation, else the last focused window's. */
+async function currentTab(windowIDs: (number | undefined)[]) {
+  for (const windowId of windowIDs) {
+    if (windowId === undefined) continue
+    const [tab] = await chrome.tabs.query({ active: true, windowId }).catch(() => [])
+    if (tab) return tab
+  }
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+  return tab
+}
+
+/** The most recently used regular tab whose title or URL contains every word of the query. */
+async function matchTab(query: string) {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  const tabs = (await chrome.tabs.query({})).filter((tab) => {
+    const text = `${tab.title ?? ""} ${tab.url ?? ""}`.toLowerCase()
+    return shareable(tab.url) && words.every((word) => text.includes(word))
+  })
+  return tabs.sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0))[0]
 }
 
 /** Asks once per session whether the agent may read browsing data; the grant is remembered. */
@@ -270,6 +362,14 @@ async function allowBrowsing(sessionID: string, reason: AccessRequest["reason"],
 
 function pendingAccess() {
   return Array.from(accessRequests.values(), (pending) => pending.request)
+}
+
+function pendingTabRequests() {
+  return Array.from(tabRequests.values(), (pending) => pending.request)
+}
+
+function broadcastTabRequests() {
+  broadcast(() => true, { type: "tabRequests", requests: pendingTabRequests() })
 }
 
 function broadcastAccess() {

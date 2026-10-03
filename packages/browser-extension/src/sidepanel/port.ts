@@ -7,6 +7,7 @@ import { createStore, reconcile } from "solid-js/store"
 import {
   PANEL_PORT,
   type AccessRequest,
+  type TabRequest,
   type ActiveTab,
   type BrowserState,
   type RelayState,
@@ -33,6 +34,8 @@ export function createBackground() {
     approvals: SiteScriptApproval[]
     /** Sessions asking to read browsing data, oldest first. */
     access: AccessRequest[]
+    /** Conversations asking the user to share a tab, oldest first. */
+    tabRequests: TabRequest[]
     /** The Browser Control relay connection and the tabs its sessions use. */
     browserControl: RelayState
   }>({
@@ -42,6 +45,7 @@ export function createBackground() {
     scripts: { available: true, scripts: [] },
     approvals: [],
     access: [],
+    tabRequests: [],
     browserControl: { status: "offline", tabs: [] },
   })
   // The file the agent last asked to show; cleared when the panel shows another session.
@@ -74,6 +78,7 @@ export function createBackground() {
       if (message.type === "scripts") return setState("scripts", reconcile(message.state))
       if (message.type === "approvals") return setState("approvals", message.approvals)
       if (message.type === "access") return setState("access", message.requests)
+      if (message.type === "tabRequests") return setState("tabRequests", message.requests)
       if (message.type === "preview") return setPreview(message)
       if (message.type === "browserControl") return setState("browserControl", reconcile(message.state))
       if (message.type === "activeTab") setState("activeTab", message.tab)

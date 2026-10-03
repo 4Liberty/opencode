@@ -18,7 +18,8 @@ const reasons: Record<AccessRequest["reason"], string> = {
 export function BrowsingAccessDock() {
   const server = useServer()
   const background = server.background
-  const request = () => (background.state.approvals.length ? undefined : background.state.access[0])
+  const request = () =>
+    background.state.approvals.length || background.state.tabRequests.length ? undefined : background.state.access[0]
   const total = () => background.state.access.length
   // An ID rather than a flag, so the next request starts answerable.
   const [answered, setAnswered] = createSignal<string>()

@@ -83,6 +83,16 @@ export type AccessRequest = {
   reason: "history" | "bookmarks" | "top_sites" | "recently_closed"
 }
 
+/** A conversation asking the user to share one of their open tabs (browser.tabs.request). */
+export type TabRequest = {
+  id: string
+  sessionID: string
+  tab: { title: string; url: string; favIconUrl?: string }
+  /** Whether it is the tab the user is looking at, rather than one matched by the agent's query. */
+  current: boolean
+  reason?: string
+}
+
 export type ToBackground =
   | { type: "panel.hello"; windowID: number }
   | { type: "service.refresh" }
@@ -106,6 +116,8 @@ export type ToBackground =
   | { type: "approval.reply"; id: string; approve: boolean }
   /** The user's answer to a request to read browsing history and bookmarks. */
   | { type: "access.reply"; id: string; allow: boolean }
+  /** The user's answer to a request to share a tab. */
+  | { type: "tabRequest.reply"; id: string; allow: boolean }
   /** Let Browser Control (its CLI and MCP agents) use this tab. */
   | { type: "browserControl.attach"; chromeTabID: number }
   /** Answer Browser Control's handoff on this tab, the same as the page's Continue button. */
@@ -125,6 +137,7 @@ export type ToPanel =
   | { type: "notice"; message: string }
   /** Sessions asking to read browsing history, bookmarks, top sites, and recently closed tabs. */
   | { type: "access"; requests: AccessRequest[] }
+  | { type: "tabRequests"; requests: TabRequest[] }
   /** The agent asked to show a server file (browser.preview) in the panel showing this session. */
   | { type: "preview"; sessionID: string; path: string }
   /** The Browser Control relay connection and the tabs its sessions use. */

@@ -23,6 +23,7 @@ export type RelayCommand =
   | { action: "bookmarks"; sessionID: string; query?: string; limit?: number }
   | { action: "top_sites"; sessionID: string }
   | { action: "recently_closed"; sessionID: string; limit?: number }
+  | { action: "request_tab"; sessionID: string; query?: string; reason?: string }
 
 export type RelayOutcome = { ok: true; value: unknown } | { ok: false; message: string }
 
@@ -275,6 +276,25 @@ export default {
         options,
         execute: (input, tool) =>
           run({ action: "recently_closed", sessionID: tool.sessionID, ...(input as { limit?: number }) }, tool.signal),
+      })
+    })
+
+    // Lives next to the built-in browser.tabs tools: asks the user to share a tab they have open.
+    await ctx.tool.transform((editor) => {
+      editor.add({
+        name: "request",
+        description:
+          "Ask the user to share one of their open tabs with you, when you need a page you didn't open (\"look at this tab\", \"what am I looking at\"). Omit query for the tab the user is looking at; pass words from a page title or URL to ask for another open tab. The OpenCode Browser side panel shows the tab and a Share / Don't share prompt; the call waits for the answer and fails if they decline. Returns { tabID, title, url } for the browser.* tools (for example browser.screenshot({ tabID })). A tab already shared with or opened by this conversation is returned without asking.",
+        input: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Words from the title or URL of an open tab. Omit for the current tab." },
+            reason: { type: "string", description: "One short sentence shown to the user, for example \"To see the error you mentioned\"." },
+          },
+        },
+        options: { namespace: "browser.tabs", codemode: true },
+        execute: (input, tool) =>
+          run({ action: "request_tab", sessionID: tool.sessionID, ...(input as { query?: string; reason?: string }) }, tool.signal),
       })
     })
 
