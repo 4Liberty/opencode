@@ -114,6 +114,7 @@ import { isRecord } from "../../util/record"
 import { createHistoryPrepend } from "./history"
 import { context, use, type PendingAction } from "./render-context"
 import { INLINE_TOOL_ICON_WIDTH, InlineToolRow, ReasoningPart, TextPart, toolDisplay } from "./message-parts"
+import { UserMessageMarkdown } from "./user-message-markdown"
 import { defaultVerbosity, type GroupKind, type SessionEntry } from "./grouping/session"
 import { SessionGroupView } from "./group-view"
 import { useEntryAnchor } from "./anchor-view"
@@ -2215,6 +2216,13 @@ function UserMessage(props: { message: SessionMessageUser }) {
   const dialog = useDialog()
   const renderer = useRenderer()
   const promptRef = usePromptRef()
+  const config = useConfig()
+  const markdown = createMemo(() => config.data.experimental?.simple_markdown === true)
+  const mentions = createMemo(() =>
+    [...(props.message.files ?? []), ...(props.message.agents ?? []), ...skills()].flatMap((part) =>
+      part.mention ? [{ start: part.mention.start, end: part.mention.end, type: "file" as const }] : [],
+    ),
+  )
 
   const updatePendingSteer = async (action: "queue" | "cancel") => {
     if (await ctx.mutatePending(action, props.message.id)) dialog.clear()
@@ -2267,7 +2275,9 @@ function UserMessage(props: { message: SessionMessageUser }) {
           backgroundColor={hover() ? theme.decrease(theme.background.raised.base) : theme.background.raised.base}
           flexShrink={0}
         >
-          <text fg={theme.text.base}>{props.message.text}</text>
+          <Show when={markdown()} fallback={<text fg={theme.text.base}>{props.message.text}</text>}>
+            <UserMessageMarkdown text={props.message.text} mentions={mentions()} />
+          </Show>
           <Show when={skills().length}>
             <box flexDirection="row" paddingTop={1} gap={1} flexWrap="wrap">
               <For each={skills()}>

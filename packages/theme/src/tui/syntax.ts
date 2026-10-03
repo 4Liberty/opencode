@@ -74,7 +74,7 @@ export function generateSyntax(theme: ResolvedThemeTokens) {
     rule(["comment.todo", "comment.note"], feedback.info.base, { italic: true, bold: true }),
     rule(["attribute", "annotation"], feedback.warning.base),
     rule(["tag"], feedback.error.base),
-    rule(["markup.strikethrough", "markup.list.unchecked", "debug"], theme.text.muted),
+    rule(["markup.strikethrough", "markup.list.unchecked", "markup.marker", "debug"], theme.text.muted),
     rule(["markup.list.checked"], feedback.success.base),
     rule(["diff.plus"], theme.diff.text.added, { background: theme.diff.background.added }),
     rule(["diff.minus"], theme.diff.text.removed, { background: theme.diff.background.removed }),

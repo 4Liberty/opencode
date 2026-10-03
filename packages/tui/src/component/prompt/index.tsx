@@ -28,6 +28,13 @@ import { useExit } from "../../context/exit"
 import { promptOffsetWidth } from "../../prompt/display"
 import { expandPromptInputPastedText, realignPromptInputMentions } from "../../prompt/mention"
 import { parseSlashHead } from "../../prompt/parse"
+import {
+  promptListMarker,
+  promptListNewline,
+  promptMarkdownRanges,
+  type PromptMarkdownRange,
+  type PromptMarkdownStyle,
+} from "../../prompt/markdown"
 import { stringWidth } from "../../util/string-width"
 import { createStore, produce, unwrap } from "solid-js/store"
 import { emptyPrompt, usePromptHistory, type PromptInfo, type PromptPartRef } from "../../prompt/history"
@@ -337,6 +344,22 @@ export function Prompt(props: PromptProps) {
   const skillStyleId = syntax().getStyleId("extmark.skill")!
   const pasteStyleId = syntax().getStyleId("extmark.paste")!
   let promptPartTypeId = 0
+  let markdownTypeId = 0
+  const markdownStyleIds = createMemo(() => {
+    const style = syntax()
+    const id = (scope: string) => style.getStyleId(scope) ?? undefined
+    return {
+      marker: id("markup.marker"),
+      list: id("markup.list"),
+      quote: id("markup.quote"),
+      bold: id("markup.strong"),
+      italic: id("markup.italic"),
+      strike: id("markup.strikethrough"),
+      code: id("markup.raw.inline"),
+      "code-block": id("markup.raw.block"),
+      link: id("markup.link"),
+    } satisfies Record<PromptMarkdownStyle, number | undefined>
+  })
   const event = useEvent()
 
   event.on("tui.prompt.append", (evt, { directory }) => {
@@ -371,6 +394,7 @@ export function Prompt(props: PromptProps) {
     extmarkToPart: new Map(),
     interrupt: 0,
   })
+  const markdown = createMemo(() => config.experimental?.simple_markdown === true && store.mode === "normal")
   let disposed = false
   let pasteQueue = Promise.resolve()
 
@@ -803,6 +827,7 @@ export function Prompt(props: PromptProps) {
         })
       }
     })
+    decorateMarkdown()
   }
 
   function syncExtmarksWithPromptParts() {
@@ -876,6 +901,67 @@ export function Prompt(props: PromptProps) {
       }),
     )
   }
+
+  // Every extmark change rebuilds all prompt highlights, so only the ranges that changed are replaced.
+  function decorateMarkdown() {
+    if (!input || input.isDestroyed || markdownTypeId === 0) return
+    const styles = markdownStyleIds()
+    const ranges = markdown()
+      ? promptMarkdownRanges(input.plainText, input.extmarks.getAllForTypeId(promptPartTypeId))
+      : []
+    const next = new Map<string, PromptMarkdownRange & { styleId: number }>(
+      ranges.flatMap((range) => {
+        const styleId = styles[range.style]
+        if (styleId === undefined) return []
+        return [[`${range.start}:${range.end}:${styleId}:${range.depth}`, { ...range, styleId }] as const]
+      }),
+    )
+    input.extmarks.getAllForTypeId(markdownTypeId).forEach((extmark) => {
+      if (next.delete(`${extmark.start}:${extmark.end}:${extmark.styleId}:${extmark.priority}`)) return
+      input.extmarks.delete(extmark.id)
+    })
+    next.forEach((range) =>
+      input.extmarks.create({
+        start: range.start,
+        end: range.end,
+        styleId: range.styleId,
+        priority: range.depth,
+        typeId: markdownTypeId,
+      }),
+    )
+  }
+
+  createEffect(on([markdown, markdownStyleIds], () => decorateMarkdown()))
+
+  // Slack list editing: a newline continues the list or ends it on an empty item, and Backspace removes a marker.
+  function editMarkdownList(change: { start: number; end: number; text: string } | undefined) {
+    if (!change || input.hasSelection()) return false
+    input.cursorOffset = change.start
+    const start = input.logicalCursor
+    input.cursorOffset = change.end
+    const end = input.logicalCursor
+    input.deleteRange(start.row, start.col, end.row, end.col)
+    if (change.text) input.insertText(change.text)
+  }
+
+  const markdownListKeys = (command: string, run: () => void | false) =>
+    config.keybinds
+      .get(command)
+      .flatMap((binding) => (typeof binding.key === "string" ? [{ bind: binding.key, run }] : []))
+
+  Keymap.createLayer(() => ({
+    priority: 1,
+    enabled: !disabled() && markdown(),
+    commands: [
+      ...markdownListKeys("input.newline", () =>
+        editMarkdownList(promptListNewline(input.plainText, input.cursorOffset)),
+      ),
+      ...markdownListKeys("input.backspace", () => {
+        const marker = promptListMarker(input.plainText, input.cursorOffset)
+        return editMarkdownList(marker && { ...marker, text: "" })
+      }),
+    ],
+  }))
 
   const stashCommands = createMemo(() =>
     [
@@ -1760,6 +1846,7 @@ export function Prompt(props: PromptProps) {
                 setStore("prompt", "text", value)
                 auto()?.onInput(value)
                 syncExtmarksWithPromptParts()
+                decorateMarkdown()
                 setCursorVersion((value) => value + 1)
               }}
               onCursorChange={() => setCursorVersion((value) => value + 1)}
@@ -1808,6 +1895,7 @@ export function Prompt(props: PromptProps) {
                 if (promptPartTypeId === 0) {
                   promptPartTypeId = input.extmarks.registerType("prompt-part")
                 }
+                if (markdownTypeId === 0) markdownTypeId = input.extmarks.registerType("markdown")
                 props.ref?.(ref)
                 setTimeout(() => {
                   // setTimeout is a workaround and needs to be addressed properly

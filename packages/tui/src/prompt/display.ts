@@ -11,6 +11,18 @@ export function promptOffsetWidth(value: string) {
   return width
 }
 
+/** Display offset at every string index. Indices inside a grapheme map to the grapheme start. */
+export function displayOffsets(value: string) {
+  const offsets = new Array<number>(value.length + 1).fill(0)
+  let width = 0
+  for (const part of graphemes.segment(value)) {
+    offsets.fill(width, part.index, part.index + part.segment.length)
+    width += part.segment === "\n" ? 1 : stringWidth(part.segment)
+  }
+  offsets[value.length] = width
+  return offsets
+}
+
 function displayOffsetIndex(value: string, offset: number) {
   if (offset <= 0) return 0
 

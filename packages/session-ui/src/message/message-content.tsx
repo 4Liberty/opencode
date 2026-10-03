@@ -28,7 +28,7 @@ import type {
 } from "@opencode/client/promise"
 import type { SessionUserActions, SessionUserAttachmentReference, SessionUserComment } from "../actions"
 import { attached, typeLabel } from "../components/message-file"
-import { parseUserMarkdown, type UserMarkdownBlock, type UserMarkdownInline } from "./user-markdown"
+import { parseUserMarkdown, type UserMarkdownBlock, type UserMarkdownInline } from "@opencode/util/user-markdown"
 
 export async function writeClipboard(text: string): Promise<boolean> {
   const body = typeof document === "undefined" ? undefined : document.body

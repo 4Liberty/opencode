@@ -5,7 +5,7 @@ import {
   type UserMarkdownInline,
   type UserMarkdownLine,
   type UserMarkdownMention,
-} from "@opencode/session-ui/user-markdown"
+} from "@opencode/util/user-markdown"
 import { isAttachment } from "../prompt-parts"
 import type { ComposerAttachment, ComposerPrompt } from "../types"
 

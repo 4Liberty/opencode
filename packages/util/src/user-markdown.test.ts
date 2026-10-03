@@ -4,7 +4,7 @@ import {
   type UserMarkdownBlock,
   type UserMarkdownInline,
   type UserMarkdownMention,
-} from "./user-markdown"
+} from "./user-markdown.js"
 
 const inline = (nodes: UserMarkdownInline[]): string =>
   nodes
