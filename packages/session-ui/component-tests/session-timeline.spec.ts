@@ -1,5 +1,23 @@
 import { expect, story } from "../../storybook/playwright/story"
 
+story("spaces an error between a shell result and expanded updates", async ({ mount }) => {
+  const timeline = await mount("current-session-timeline-rows--error-and-updates")
+  const shell = timeline.locator('[data-component="bash-output"]')
+  const error = timeline.locator('[data-kind="session-error-card"]')
+  const updates = timeline.locator('[data-component="collapsed-tool-group"] [data-slot="collapsible-trigger"]')
+  const shellBox = (await shell.boundingBox())!
+  const errorBox = (await error.boundingBox())!
+  const updatesBox = (await updates.boundingBox())!
+  expect(errorBox.y - (shellBox.y + shellBox.height)).toBe(12)
+  expect(updatesBox.y - (errorBox.y + errorBox.height)).toBe(16)
+  await updates.click()
+  const notice = timeline.locator('[data-slot="session-timeline-notice"]')
+  await expect(notice).toContainText("Instructions updated")
+  const expandedBox = (await updates.boundingBox())!
+  expect((await notice.boundingBox())!.y - (expandedBox.y + expandedBox.height)).toBe(0)
+  expect(expandedBox.height).toBe(28)
+})
+
 for (const streaming of [false, true]) {
   story(`renders Mermaid in the ${streaming ? "streaming" : "completed"} timeline`, async ({ mount, page }) => {
     await page.setViewportSize({ width: 390, height: 900 })

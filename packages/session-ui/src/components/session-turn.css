@@ -277,6 +277,12 @@
   }
 }
 
+[data-component="session-timeline"]
+  > [data-timeline-row="Error"]
+  + :is([data-timeline-row="AssistantPart"], [data-timeline-row="Notice"]) {
+  padding-top: 16px;
+}
+
 [data-slot="session-turn-list"] {
   gap: 24px;
 }
