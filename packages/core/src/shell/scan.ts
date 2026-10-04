@@ -350,12 +350,13 @@ function scanBash(
         continue
       }
     }
-    if (
-      char === "(" &&
-      ((state.assignmentWord && state.word.endsWith("=")) ||
-        (/[?*+@!]$/.test(state.word) && (state.words.length > 0 || inCasePattern || state.assignmentWord)))
-    ) {
-      const mode = state.assignmentWord && state.word.endsWith("=") ? "array" : "pattern"
+    // Elsewhere a parenthesized group inside a word is a Zsh glob qualifier, which can run code.
+    const array =
+      state.assignmentWord &&
+      state.word.endsWith("=") &&
+      (state.commandWordIndex < 0 || BASH_DECLARATIONS.has(state.rawWords[state.commandWordIndex]))
+    if (char === "(" && (array || (inCasePattern && /[?*+@!]$/.test(state.word)))) {
+      const mode = array ? "array" : "pattern"
       const end = scanBashArrayOrPattern(input, index, depth + 1, budget, state.nestedCommands, mode)
       if (typeof end === "object") return end
       state.wordStarted = true
@@ -386,7 +387,7 @@ function scanBash(
         return { kind: "opaque", reason: "compound-command" }
       return closeBashList(state, index)
     }
-    if (char === "(") return { kind: "opaque", reason: "compound-command" }
+    if (char === "(") return { kind: "opaque", reason: state.wordStarted ? "dynamic-execution" : "compound-command" }
     if (/\s/.test(char) && !" \t\n".includes(char)) return { kind: "opaque", reason: "invalid-structure" }
     if (char === " " || char === "\t") {
       finishBashWord(state)
@@ -1027,6 +1028,8 @@ function scanBashParameter(
     const char = input[index]
     if (char === "}") return index
     if (input.startsWith("@P}", index)) return { kind: "opaque", reason: "dynamic-execution" }
+    // Zsh globs an unquoted parameter's words, where a parenthesized group can be a glob qualifier.
+    if (!quoted && char === "(" && index > start) return { kind: "opaque", reason: "dynamic-execution" }
     const unit =
       index === subscript
         ? scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.subscript, false)
@@ -1124,7 +1127,8 @@ function scanBashArrayOrPattern(
       wordStarted = false
       continue
     }
-    if (char === "\n" || char === ";" || char === "&" || (mode === "array" && char === "|"))
+    // Array elements are globbed, where a parenthesized group can be a Zsh glob qualifier.
+    if (char === "\n" || char === ";" || char === "&" || (mode === "array" && "|(".includes(char)))
       return { kind: "opaque", reason: "command-substitution" }
     wordStarted = true
     const unit =

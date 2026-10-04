@@ -145,7 +145,7 @@ describe("ordinary Bash and Zsh syntax", () => {
 
   test.each([
     ["coproc job { scan_probe; }", ["scan_probe"]],
-    ["printf '%s' @(one|$(scan_probe))", ["printf", "scan_probe"]],
+    ["case x in @(one|$(scan_probe))) ;; esac", ["scan_probe"]],
     ["printf '%s' $((1 + '$(scan_probe)'))", ["printf", "scan_probe"]],
     ["printf '%s' $(((1 + '$(scan_probe)')))", ["printf", "scan_probe"]],
     ['printf %s "${ scan_probe; }"', ["printf", "scan_probe"]],

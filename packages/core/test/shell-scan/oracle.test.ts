@@ -267,6 +267,21 @@ const additionalOracleFixtures = [
   "a[b; scan_probe; echo ]=1",
   "a[0 #]\n]=1; scan_probe",
   "if true; then >/dev/null fi; scan_probe; fi",
+  "echo *(e:'scan_probe q1':)",
+  "echo *(+scan_probe)",
+  "a=(*(e:'scan_probe g':))",
+  "for f in *(e:'scan_probe h':); do :; done",
+  "echo ${x:-target(e:'scan_probe p2':)}",
+  "echo a=(e:'scan_probe p3':)",
+  "echo >*(e:'scan_probe f':)",
+  "cat <*(e:'scan_probe g':)",
+  "echo $x*(e:'scan_probe h':)",
+  "echo \"\"*(e:'scan_probe i':)",
+  "echo ${x:-*(e:'scan_probe j':)}",
+  "echo {a,*(e:'scan_probe m':)}",
+  "declare -a a=(*(e:'scan_probe g':))",
+  "export a=(*(e:'scan_probe h':))",
+  "printf '%s' @(one|$(scan_probe))",
   "declare -i x='a[$(scan_probe)]'",
   "declare 'a[$(scan_probe)]=1'",
   "a=(1); unset 'a[$(scan_probe)]'",
@@ -326,14 +341,7 @@ const additionalOracleFixtures = [
   "cat <\\\n(scan_probe i)",
 ] as const
 
-const knownGapFixtures = [
-  "echo *(e:'scan_probe q1':)",
-  "echo *(+scan_probe)",
-  "a=(*(e:'scan_probe g':))",
-  "for f in *(e:'scan_probe h':); do :; done",
-  "echo ${x:-target(e:'scan_probe p2':)}",
-  "echo a=(e:'scan_probe p3':)",
-] as const
+const knownGapFixtures = [] as const
 
 const nestingWrappers: Array<[name: string, wrap: (inner: string) => string]> = [
   ["$(...)", (inner) => `export OUTER=$( ${inner}\n)`],
