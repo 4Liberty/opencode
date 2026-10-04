@@ -53,6 +53,7 @@ const TIME_AHEAD_RE = /time[ \t]+(?:-p[ \t]+)?(?=[{(]|(?:if|while|until|for|case
 const COMPOUND_KEYWORD_AHEAD_RE = /(?:if|while|until|for|select|case)(?=(?:\\\n)*(?:[ \t\n(]|$))/y
 const DO_AHEAD_RE = /(?:[ \t\n;]|\\\n|#[^\n]*(?:\n|$))*(?:do(?=(?:\\\n)*(?:[ \t\n;{(]|$))|\{(?=(?:\\\n)*[ \t\n]))/y
 const NOFORK_OPEN_RE = /\$\{(?:\\\n)*(?:[ \t\n]|\|)/y
+const PARAMETER_SUBSCRIPT_RE = /[!#]?[A-Za-z_][A-Za-z0-9_]*\[/y
 const SUBSCRIPT_ASSIGN_RE = /\[(?:[^\]\n;|&<>'"`\\$()]|\$\([^)]*\)|`[^`]*`|\$\{[^}]*\})+\]\+?=/y
 const BASH_ANSI_ESCAPES: Record<string, string> = {
   a: "\x07",
@@ -301,37 +302,16 @@ function scanBash(
         state.wordEnd = index + 1
         continue
       }
-      if (char === "\\" && index + 1 < input.length) {
-        const next = input[index + 1]
-        if ('$`"\\\n'.includes(next)) {
-          index++
-          if (next !== "\n") state.word += next
-          state.wordEnd = index + 1
-          continue
-        }
-        state.word += char
+      if (char === "\\" && '$`"\\\n'.includes(input[index + 1] ?? "\0")) {
+        if (input[++index] !== "\n") state.word += input[index]
         state.wordEnd = index + 1
         continue
       }
-      if (char === "$" && input[index + 1] === "$") {
-        state.word += "$$"
-        index++
-        state.wordEnd = index + 1
-        continue
-      }
-      if (char === "$" && input[index + 1] === "\\" && input[index + 2] === "\n")
-        return { kind: "opaque", reason: "command-substitution" }
-      if ((char === "$" && "({[".includes(input[index + 1] ?? "\0")) || char === "`") {
-        const allowBracket = state.commandWordIndex >= 0 && !BASH_DECLARATIONS.has(state.rawWords[0])
-        const substitution = scanBashDollarOrBacktick(input, index, depth, budget, true, allowBracket)
-        if (substitution.kind === "opaque") return substitution
-        state.nestedCommands.push(...substitution.commands)
-        state.word += input.slice(index, substitution.end + 1)
-        index = substitution.end
-        state.wordEnd = index + 1
-        continue
-      }
-      state.word += char
+      const allowBracket = state.commandWordIndex >= 0 && !BASH_DECLARATIONS.has(state.rawWords[0])
+      const unit = scanBashUnit(input, index, depth, budget, state.nestedCommands, "quoted", allowBracket)
+      if (typeof unit === "object") return unit
+      state.word += input.slice(index, (unit ?? index) + 1)
+      index = unit ?? index
       state.wordEnd = index + 1
       continue
     }
@@ -354,8 +334,6 @@ function scanBash(
       state.wordEnd = index + 1
       continue
     }
-    if (char === "$" && input[index + 1] === "\\" && input[index + 2] === "\n")
-      return { kind: "opaque", reason: "command-substitution" }
     if (char === "$" && input[index + 1] === "'") {
       const literal = bashAnsiQuote(input, index + 1)
       if (!literal) return { kind: "opaque", reason: "unterminated-quote" }
@@ -400,27 +378,19 @@ function scanBash(
       continue
     }
     const inCasePattern = state.structures.at(-1)?.phase === "pattern"
-    if (inCasePattern && char === "[") {
-      const bracket = scanBashPatternBracket(input, index, depth + 1, budget)
-      if (bracket) {
-        if (bracket.kind === "opaque") return bracket
-        state.nestedCommands.push(...bracket.commands)
-        state.wordStarted = true
-        state.word += input.slice(index, bracket.end + 1)
-        index = bracket.end
-        state.wordEnd = index + 1
-        continue
-      }
-    }
-    if ((char === "$" && "({[".includes(input[index + 1] ?? "\0")) || char === "`") {
-      const allowBracket =
-        !state.assignmentWord && state.commandWordIndex >= 0 && !BASH_DECLARATIONS.has(state.rawWords[0])
-      const substitution = scanBashDollarOrBacktick(input, index, depth, budget, false, allowBracket)
-      if (substitution.kind === "opaque") return substitution
-      state.nestedCommands.push(...substitution.commands)
+    const allowBracket =
+      !state.assignmentWord && state.commandWordIndex >= 0 && !BASH_DECLARATIONS.has(state.rawWords[0])
+    const unit =
+      inCasePattern && char === "["
+        ? scanBashPatternBracket(input, index, depth, budget, state.nestedCommands)
+        : char === "=" && !state.wordStarted && input[index + 1] === "("
+          ? scanBashNested(input, index + 2, depth, budget, state.nestedCommands, ")")
+          : scanBashUnit(input, index, depth, budget, state.nestedCommands, "word", allowBracket)
+    if (typeof unit === "object") return unit
+    if (unit !== undefined) {
       state.wordStarted = true
-      state.word += input.slice(index, substitution.end + 1)
-      index = substitution.end
+      state.word += input.slice(index, unit + 1)
+      index = unit
       state.wordEnd = index + 1
       continue
     }
@@ -434,12 +404,11 @@ function scanBash(
     ) {
       SUBSCRIPT_ASSIGN_RE.lastIndex = index
       if (SUBSCRIPT_ASSIGN_RE.test(input)) {
-        const subscript = scanBashSubscript(input, index, depth + 1, budget, false)
-        if (subscript.kind === "opaque") return subscript
-        state.nestedCommands.push(...subscript.commands)
+        const end = scanBashSpan(input, index + 1, depth, budget, state.nestedCommands, BASH_SPANS.subscript, false)
+        if (typeof end === "object") return end
         state.wordStarted = true
-        state.word += input.slice(index, subscript.end + 1)
-        index = subscript.end
+        state.word += input.slice(index, end + 1)
+        index = end
         state.wordEnd = index + 1
         continue
       }
@@ -451,22 +420,11 @@ function scanBash(
         (/[?*+@!]$/.test(state.word) && (state.words.length > 0 || inCasePattern || state.assignmentWord)))
     ) {
       const mode = state.assignmentWord && state.word.endsWith("=") ? "array" : "pattern"
-      const group = scanBashArrayOrPattern(input, index, depth + 1, budget, mode)
-      if (group.kind === "opaque") return { kind: "opaque", reason: "command-substitution" }
-      state.nestedCommands.push(...group.commands)
+      const end = scanBashArrayOrPattern(input, index, depth + 1, budget, state.nestedCommands, mode)
+      if (typeof end === "object") return end
       state.wordStarted = true
-      state.word += input.slice(index, group.end + 1)
-      index = group.end
-      state.wordEnd = index + 1
-      continue
-    }
-    if ((char === "<" || char === ">" || (char === "=" && !state.wordStarted)) && input[index + 1] === "(") {
-      const substitution = scanBash(input, index + 2, depth + 1, budget, ")")
-      if (substitution.kind === "opaque") return { kind: "opaque", reason: "command-substitution" }
-      state.nestedCommands.push(...substitution.commands)
-      state.wordStarted = true
-      state.word += input.slice(index, substitution.end + 1)
-      index = substitution.end
+      state.word += input.slice(index, end + 1)
+      index = end
       state.wordEnd = index + 1
       continue
     }
@@ -602,9 +560,8 @@ function scanBashOperatorOrSeparator(
       if (!body) return { kind: "opaque", reason: "heredoc" }
       if (heredoc.command) heredoc.command.resource = input.slice(heredoc.start, body.end).trim()
       if (!heredoc.quoted) {
-        const expansion = scanBashHeredocBody(body.source, depth + 1, budget)
-        if (expansion.kind === "opaque") return { kind: "opaque", reason: "command-substitution" }
-        state.commands.push(...expansion.commands)
+        const expansion = scanBashSpan(body.source, 0, depth, budget, state.commands, BASH_SPANS.heredoc, true)
+        if (typeof expansion === "object") return expansion
       }
       nextIndex = body.end
     }
@@ -645,16 +602,15 @@ function scanBashCommandStart(
     return index
   }
   if (structure?.kind === "for" && structure.phase === "header" && char === "(" && input[index + 1] !== "(") {
-    const values = scanBashArrayOrPattern(input, index, depth + 1, budget, "array")
-    if (values.kind === "opaque") return { kind: "opaque", reason: "compound-command" }
+    const end = scanBashArrayOrPattern(input, index, depth + 1, budget, state.nestedCommands, "array")
+    if (typeof end === "object") return end
     finishBashCommand(state)
-    state.commands.push(...values.commands)
     // Zsh permits a sublist or brace group directly after the value list, without do/done.
     structure.phase = "do"
     structure.parenthesized = true
-    DO_AHEAD_RE.lastIndex = values.end + 1
+    DO_AHEAD_RE.lastIndex = end + 1
     if (!DO_AHEAD_RE.test(input)) state.structures.pop()
-    return values.end
+    return end
   }
   const keywordStep = scanBashKeyword(state, index, depth)
   if (keywordStep !== undefined) return keywordStep
@@ -673,9 +629,11 @@ function scanBashCommandStart(
   const forHeader = structure?.kind === "for" && structure.phase === "header"
   if ((atStart || forHeader) && input.startsWith("((", index)) {
     if (forHeader && state.words.length > 0) return { kind: "opaque", reason: "compound-command" }
-    const expression = scanBashArithmetic(input, index + 2, depth + 1, budget, forHeader)
-    if (expression.kind === "scanned") {
-      state.commands.push(...expression.commands)
+    const commands: Command[] = []
+    const span = forHeader ? BASH_SPANS.forArithmetic : BASH_SPANS.arithmetic
+    const end = scanBashSpan(input, index + 2, depth, budget, commands, span, true)
+    if (typeof end === "number" && input[end + 1] === ")") {
+      state.commands.push(...commands)
       if (forHeader) {
         structure.phase = "do"
         structure.sawIn = true
@@ -684,9 +642,9 @@ function scanBashCommandStart(
         bashStatement(state)
         state.compoundEnd = true
       }
-      return expression.end
+      return end + 1
     }
-    if (forHeader || expression.reason !== "not-arithmetic") return { kind: "opaque", reason: "invalid-structure" }
+    if (forHeader || typeof end === "object") return { kind: "opaque", reason: "invalid-structure" }
   }
   if (
     atStart &&
@@ -706,12 +664,11 @@ function scanBashCommandStart(
     input.startsWith("[[", index) &&
     ((SPACE_CONTINUATION_AHEAD_RE.lastIndex = index + 2), SPACE_CONTINUATION_AHEAD_RE.test(input))
   ) {
-    const expression = scanBashConditional(input, index + 2, depth + 1, budget)
-    if (expression.kind === "opaque") return expression
-    state.commands.push(...expression.commands)
+    const end = scanBashConditional(input, index + 2, depth, budget, state.commands)
+    if (typeof end === "object") return end
     bashStatement(state)
     state.compoundEnd = true
-    return expression.end
+    return end
   }
   return undefined
 }
@@ -885,44 +842,143 @@ function bashFunctionHeadLength(input: string, start: number): number {
   return 0
 }
 
+// Word text is unquoted. Quoted text follows double-quote rules. Arithmetic text, including subscripts,
+// expands like double-quoted text while its matcher still lets a backslash escape any character.
+type BashTextMode = "word" | "quoted" | "arithmetic"
+
+type BashSpan = { open?: string; close?: string; reject: string; mode: Exclude<BashTextMode, "word"> }
+
+const BASH_SPANS = {
+  double: { close: '"', reject: "", mode: "quoted" },
+  heredoc: { reject: "", mode: "quoted" },
+  arithmetic: { open: "(", close: ")", reject: ";", mode: "arithmetic" },
+  forArithmetic: { open: "(", close: ")", reject: "", mode: "arithmetic" },
+  bracketArithmetic: { close: "]", reject: ";|&<>()[\n'\"\\#", mode: "arithmetic" },
+  subscript: { open: "[", close: "]", reject: "", mode: "arithmetic" },
+  // Single quotes are literal here in some shells and quoting in others, so reject what either reading
+  // would parse structurally and scan the contents for expansions.
+  arithmeticQuote: { close: "'", reject: "()[];", mode: "quoted" },
+  parameterQuote: { close: "'", reject: '"}[]', mode: "quoted" },
+} satisfies Record<string, BashSpan>
+
+// Scans one quoting or expansion unit at index into commands. Returns the unit's last index, or undefined
+// when the character is ordinary text.
+function scanBashUnit(
+  input: string,
+  index: number,
+  depth: number,
+  budget: { remaining: number },
+  commands: Command[],
+  mode: BashTextMode,
+  allowBracket: boolean,
+): number | Opaque | undefined {
+  const char = input[index]
+  const next = input[index + 1] ?? "\0"
+  if (char === "\\") return mode === "quoted" && !'$`"\\\n'.includes(next) ? undefined : index + 1
+  // A continuation inside an expansion opener is removed before the opener is recognized.
+  if (char === "$" && next === "\\" && input[index + 2] === "\n")
+    return { kind: "opaque", reason: "command-substitution" }
+  if (char === "$" && next === "$") return index + 1
+  if (mode === "word" && char === "$" && next === "'")
+    return bashAnsiQuote(input, index + 1)?.end ?? { kind: "opaque", reason: "unterminated-quote" }
+  if (mode === "word" && char === "'") {
+    const end = input.indexOf("'", index + 1)
+    return end < 0 ? { kind: "opaque", reason: "unterminated-quote" } : end
+  }
+  if (mode === "arithmetic" && char === "'")
+    return scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.arithmeticQuote, allowBracket)
+  if (mode !== "quoted" && char === '"')
+    return scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.double, allowBracket)
+  const process =
+    mode === "word" && (char === "<" || char === ">") ? bashOperatorEnd(input, index, `${char}(`) : undefined
+  if (process !== undefined) return scanBashNested(input, process + 1, depth, budget, commands, ")")
+  if ((char === "$" && "({[".includes(next)) || char === "`")
+    return scanBashDollarOrBacktick(input, index, depth, budget, commands, mode !== "word", allowBracket)
+  return undefined
+}
+
+// Scans to the span's unnested close character and returns its index; a span without one runs to the end.
+function scanBashSpan(
+  input: string,
+  start: number,
+  depth: number,
+  budget: { remaining: number },
+  commands: Command[],
+  span: BashSpan,
+  allowBracket: boolean,
+): number | Opaque {
+  let nesting = 0
+  for (let index = start; index < input.length; index++) {
+    if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
+    const char = input[index]
+    if (char === span.close) {
+      if (!nesting) return index
+      nesting--
+      continue
+    }
+    if (span.reject.includes(char)) return { kind: "opaque", reason: "invalid-structure" }
+    if (char === span.open) {
+      if (++nesting + depth > MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "invalid-structure" }
+      continue
+    }
+    const unit = scanBashUnit(input, index, depth, budget, commands, span.mode, allowBracket)
+    if (typeof unit === "object") return unit
+    if (unit !== undefined) index = unit
+  }
+  return span.close ? { kind: "opaque", reason: "unterminated-quote" } : input.length
+}
+
+// Scans a nested list such as a command or process substitution and returns its closing index.
+function scanBashNested(
+  input: string,
+  start: number,
+  depth: number,
+  budget: { remaining: number },
+  commands: Command[],
+  close: ")" | "nofork",
+): number | Opaque {
+  const nested = scanBash(input, start, depth + 1, budget, close)
+  if (nested.kind === "opaque") return nested
+  commands.push(...nested.commands)
+  return nested.end
+}
+
+// Returns the index of the operator's last character; line continuations may split its characters.
+function bashOperatorEnd(input: string, index: number, operator: string) {
+  for (let offset = 0; offset < operator.length; offset++, index++) {
+    while (offset > 0 && input.startsWith("\\\n", index)) index += 2
+    if (input[index] !== operator[offset]) return undefined
+  }
+  return index - 1
+}
+
 function scanBashDollarOrBacktick(
   input: string,
   start: number,
   depth: number,
   budget: { remaining: number },
+  commands: Command[],
   quoted: boolean,
   allowBracket: boolean,
-): BashResult {
+): number | Opaque {
   if (depth >= MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "command-substitution" }
-  if (input[start] === "`") return scanBashBacktick(input, start, depth + 1, budget, quoted)
+  if (input[start] === "`") return scanBashBacktick(input, start, depth + 1, budget, commands, quoted)
   if (input.startsWith("$((", start)) {
-    const arith = scanBashArithmetic(input, start + 3, depth + 1, budget, false)
-    if (arith.kind === "scanned") return arith
-    if (arith.reason === "not-arithmetic") {
-      const sub = scanBash(input, start + 2, depth + 1, budget, ")")
-      if (sub.kind === "opaque") return { kind: "opaque", reason: "command-substitution" }
-      return sub
+    const arithmetic: Command[] = []
+    const end = scanBashSpan(input, start + 3, depth + 1, budget, arithmetic, BASH_SPANS.arithmetic, true)
+    if (typeof end === "object") return { kind: "opaque", reason: "command-substitution" }
+    if (input[end + 1] === ")") {
+      commands.push(...arithmetic)
+      return end + 1
     }
-    return { kind: "opaque", reason: "command-substitution" }
   }
-  if (input.startsWith("$(", start)) {
-    const sub = scanBash(input, start + 2, depth + 1, budget, ")")
-    if (sub.kind === "opaque") return { kind: "opaque", reason: "command-substitution" }
-    return sub
-  }
+  if (input.startsWith("$(", start)) return scanBashNested(input, start + 2, depth, budget, commands, ")")
   NOFORK_OPEN_RE.lastIndex = start
   const nofork = NOFORK_OPEN_RE.exec(input)
-  if (nofork) {
-    const sub = scanBash(input, start + nofork[0].length, depth + 1, budget, "nofork")
-    if (sub.kind === "opaque") return { kind: "opaque", reason: "command-substitution" }
-    return sub
-  }
-  if (input.startsWith("${", start)) return scanBashParameter(input, start + 2, depth + 1, budget, quoted)
-  if (input.startsWith("$[", start)) {
-    if (!allowBracket) return { kind: "opaque", reason: "command-substitution" }
-    return scanBashBracketArithmetic(input, start + 2, depth + 1, budget)
-  }
-  return { kind: "opaque", reason: "command-substitution" }
+  if (nofork) return scanBashNested(input, start + nofork[0].length, depth, budget, commands, "nofork")
+  if (input.startsWith("${", start)) return scanBashParameter(input, start + 2, depth + 1, budget, commands, quoted)
+  if (!allowBracket) return { kind: "opaque", reason: "command-substitution" }
+  return scanBashSpan(input, start + 2, depth + 1, budget, commands, BASH_SPANS.bracketArithmetic, true)
 }
 
 function scanBashBacktick(
@@ -930,15 +986,17 @@ function scanBashBacktick(
   start: number,
   depth: number,
   budget: { remaining: number },
+  commands: Command[],
   quoted: boolean,
-): BashResult {
+): number | Opaque {
   let source = ""
   for (let index = start + 1; index < input.length; index++) {
     if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
     if (input[index] === "`") {
       const inner = scanBash(source, 0, depth, budget)
       if (inner.kind === "opaque") return { kind: "opaque", reason: "command-substitution" }
-      return { kind: "scanned", commands: inner.commands, end: index }
+      commands.push(...inner.commands)
+      return index
     }
     const next = input[index + 1] ?? "\0"
     if (input[index] === "\\" && ("$`\\\n".includes(next) || (quoted && next === '"'))) {
@@ -951,285 +1009,41 @@ function scanBashBacktick(
   return { kind: "opaque", reason: "command-substitution" }
 }
 
-function scanBashArithmetic(
-  input: string,
-  start: number,
-  depth: number,
-  budget: { remaining: number },
-  allowSemicolon: boolean,
-): BashResult | { kind: "opaque"; reason: OpaqueReason | "not-arithmetic" } {
-  const commands: Command[] = []
-  let parenDepth = 0
-  for (let index = start; index < input.length; index++) {
-    if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
-    const char = input[index]
-    if (char === ")" && parenDepth === 0) {
-      if (input[index + 1] === ")") return { kind: "scanned", commands, end: index + 1 }
-      return { kind: "opaque", reason: "not-arithmetic" }
-    }
-    if (char === ")") {
-      parenDepth--
-      continue
-    }
-    if (char === "(") {
-      parenDepth++
-      if (depth + parenDepth > MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "invalid-structure" }
-      continue
-    }
-    if (char === ";" && !allowSemicolon) return { kind: "opaque", reason: "invalid-structure" }
-    if (char === "\\") {
-      index++
-      continue
-    }
-    if (char === "$" && input[index + 1] === "'") {
-      const literal = bashAnsiQuote(input, index + 1)
-      if (!literal) return { kind: "opaque", reason: "unterminated-quote" }
-      index = literal.end
-      continue
-    }
-    if (char === "'") {
-      const single = scanBashArithmeticSingleQuote(input, index + 1, depth, budget)
-      if (single.kind === "opaque") return single
-      commands.push(...single.commands)
-      index = single.end
-      continue
-    }
-    if (char === '"') {
-      const double = scanBashDoubleQuoteSpan(input, index + 1, depth + 1, budget, true)
-      if (double.kind === "opaque") return double
-      commands.push(...double.commands)
-      index = double.end
-      continue
-    }
-    if (char === "[") {
-      const subscript = scanBashSubscript(input, index, depth + 1, budget, true)
-      if (subscript.kind === "opaque") return subscript
-      commands.push(...subscript.commands)
-      index = subscript.end
-      continue
-    }
-    if ((char === "$" && "({[".includes(input[index + 1] ?? "\0")) || char === "`") {
-      const nested = scanBashDollarOrBacktick(input, index, depth, budget, false, true)
-      if (nested.kind === "opaque") return nested
-      commands.push(...nested.commands)
-      index = nested.end
-      continue
-    }
-  }
-  return { kind: "opaque", reason: "invalid-structure" }
-}
-
-function scanBashArithmeticSingleQuote(
-  input: string,
-  start: number,
-  depth: number,
-  budget: { remaining: number },
-): BashResult {
-  const commands: Command[] = []
-  for (let index = start; index < input.length; index++) {
-    if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
-    const char = input[index]
-    if (char === "'") return { kind: "scanned", commands, end: index }
-    if ("()[];".includes(char)) return { kind: "opaque", reason: "invalid-structure" }
-    if ((char === "$" && "({[".includes(input[index + 1] ?? "\0")) || char === "`") {
-      const nested = scanBashDollarOrBacktick(input, index, depth, budget, false, true)
-      if (nested.kind === "opaque") return nested
-      commands.push(...nested.commands)
-      index = nested.end
-      continue
-    }
-  }
-  return { kind: "opaque", reason: "unterminated-quote" }
-}
-
-function scanBashBracketArithmetic(
-  input: string,
-  start: number,
-  depth: number,
-  budget: { remaining: number },
-): BashResult {
-  const commands: Command[] = []
-  for (let index = start; index < input.length; index++) {
-    if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
-    const char = input[index]
-    if (char === "]") return { kind: "scanned", commands, end: index }
-    if (";|&<>()[\n'\"\\#".includes(char)) return { kind: "opaque", reason: "command-substitution" }
-    if ((char === "$" && "({[".includes(input[index + 1] ?? "\0")) || char === "`") {
-      const nested = scanBashDollarOrBacktick(input, index, depth, budget, false, true)
-      if (nested.kind === "opaque") return nested
-      commands.push(...nested.commands)
-      index = nested.end
-      continue
-    }
-  }
-  return { kind: "opaque", reason: "command-substitution" }
-}
-
-function scanBashSubscript(
-  input: string,
-  start: number,
-  depth: number,
-  budget: { remaining: number },
-  allowBracket: boolean,
-): BashResult {
-  const commands: Command[] = []
-  let bracketDepth = 0
-  for (let index = start + 1; index < input.length; index++) {
-    if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
-    const char = input[index]
-    if (char === "]" && bracketDepth === 0) return { kind: "scanned", commands, end: index }
-    if (char === "]") {
-      bracketDepth--
-      continue
-    }
-    if (char === "[") {
-      bracketDepth++
-      continue
-    }
-    if (char === "\\") {
-      index++
-      continue
-    }
-    if (char === "$" && input[index + 1] === "'") {
-      const literal = bashAnsiQuote(input, index + 1)
-      if (!literal) return { kind: "opaque", reason: "unterminated-quote" }
-      index = literal.end
-      continue
-    }
-    if (char === "'") {
-      const single = scanBashArithmeticSingleQuote(input, index + 1, depth, budget)
-      if (single.kind === "opaque") return single
-      commands.push(...single.commands)
-      index = single.end
-      continue
-    }
-    if (char === '"') {
-      const double = scanBashDoubleQuoteSpan(input, index + 1, depth + 1, budget, allowBracket)
-      if (double.kind === "opaque") return double
-      commands.push(...double.commands)
-      index = double.end
-      continue
-    }
-    if ((char === "$" && "({[".includes(input[index + 1] ?? "\0")) || char === "`") {
-      const nested = scanBashDollarOrBacktick(input, index, depth, budget, false, allowBracket)
-      if (nested.kind === "opaque") return nested
-      commands.push(...nested.commands)
-      index = nested.end
-      continue
-    }
-  }
-  return { kind: "opaque", reason: "command-substitution" }
-}
-
 function scanBashParameter(
   input: string,
   start: number,
   depth: number,
   budget: { remaining: number },
+  commands: Command[],
   quoted: boolean,
-): BashResult {
-  const commands: Command[] = []
+): number | Opaque {
+  PARAMETER_SUBSCRIPT_RE.lastIndex = start
+  const subscript = PARAMETER_SUBSCRIPT_RE.test(input) ? PARAMETER_SUBSCRIPT_RE.lastIndex - 1 : -1
   for (let index = start; index < input.length; index++) {
     if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
     const char = input[index]
-    if (char === "}") return { kind: "scanned", commands, end: index }
-    if (char === "\\") {
-      if (!quoted || '$`\\\n"'.includes(input[index + 1] ?? "\0")) index++
-      continue
-    }
-    if (char === "$" && input[index + 1] === "$") {
-      index++
-      continue
-    }
-    if (char === "$" && input[index + 1] === "'") {
-      const literal = bashAnsiQuote(input, index + 1)
-      if (!literal) return { kind: "opaque", reason: "unterminated-quote" }
-      index = literal.end
-      continue
-    }
-    if (char === "'" && !quoted) {
-      const end = input.indexOf("'", index + 1)
-      if (end < 0) return { kind: "opaque", reason: "unterminated-quote" }
-      index = end
-      continue
-    }
-    if (char === "'" && quoted) {
-      const closeQuote = input.indexOf("'", index + 1)
-      if (closeQuote < 0) return { kind: "opaque", reason: "command-substitution" }
-      for (let cursor = index + 1; cursor < closeQuote; cursor++) {
-        if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
-        const inner = input[cursor]
-        if ('"}[]'.includes(inner)) return { kind: "opaque", reason: "command-substitution" }
-        if ((inner === "$" && "({[".includes(input[cursor + 1] ?? "\0")) || inner === "`") {
-          const nested = scanBashDollarOrBacktick(input, cursor, depth, budget, true, false)
-          if (nested.kind === "opaque") return nested
-          commands.push(...nested.commands)
-          cursor = nested.end
-        }
-      }
-      index = closeQuote
-      continue
-    }
-    if (char === '"' || (char === "$" && input[index + 1] === '"')) {
-      const double = scanBashDoubleQuoteSpan(input, index + (char === "$" ? 2 : 1), depth + 1, budget, false)
-      if (double.kind === "opaque") return double
-      commands.push(...double.commands)
-      index = double.end
-      continue
-    }
-    if (char === "[" && /^[!#]?[A-Za-z_][A-Za-z0-9_]*$/.test(input.slice(start, index))) {
-      const subscript = scanBashSubscript(input, index, depth + 1, budget, false)
-      if (subscript.kind === "opaque") return subscript
-      commands.push(...subscript.commands)
-      index = subscript.end
-      continue
-    }
-    if ((char === "$" && "({[".includes(input[index + 1] ?? "\0")) || char === "`") {
-      const nested = scanBashDollarOrBacktick(input, index, depth, budget, quoted, false)
-      if (nested.kind === "opaque") return nested
-      commands.push(...nested.commands)
-      index = nested.end
-      continue
-    }
+    if (char === "}") return index
+    const unit =
+      index === subscript
+        ? scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.subscript, false)
+        : quoted && char === "'"
+          ? scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.parameterQuote, false)
+          : quoted && char === '"'
+            ? scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.double, false)
+            : scanBashUnit(input, index, depth, budget, commands, quoted ? "quoted" : "word", false)
+    if (typeof unit === "object") return unit
+    if (unit !== undefined) index = unit
   }
   return { kind: "opaque", reason: "command-substitution" }
 }
 
-function scanBashDoubleQuoteSpan(
+function scanBashConditional(
   input: string,
   start: number,
   depth: number,
   budget: { remaining: number },
-  allowBracket: boolean,
-): BashResult {
-  const commands: Command[] = []
-  for (let index = start; index < input.length; index++) {
-    if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
-    const char = input[index]
-    if (char === '"') return { kind: "scanned", commands, end: index }
-    if (char === "\\") {
-      if ('$`"\\\n'.includes(input[index + 1] ?? "\0")) index++
-      continue
-    }
-    if (char === "$" && input[index + 1] === "$") {
-      index++
-      continue
-    }
-    if (char === "$" && input[index + 1] === "\\" && input[index + 2] === "\n")
-      return { kind: "opaque", reason: "command-substitution" }
-    if ((char === "$" && "({[".includes(input[index + 1] ?? "\0")) || char === "`") {
-      const nested = scanBashDollarOrBacktick(input, index, depth, budget, true, allowBracket)
-      if (nested.kind === "opaque") return nested
-      commands.push(...nested.commands)
-      index = nested.end
-      continue
-    }
-  }
-  return { kind: "opaque", reason: "unterminated-quote" }
-}
-
-function scanBashConditional(input: string, start: number, depth: number, budget: { remaining: number }): BashResult {
-  const commands: Command[] = []
+  commands: Command[],
+): number | Opaque {
   let wordStarted = false
   let parenDepth = 0
   for (let index = start; index < input.length; index++) {
@@ -1239,16 +1053,11 @@ function scanBashConditional(input: string, start: number, depth: number, budget
       index++
       continue
     }
-    if (char === "\\" && input[index + 1] !== undefined) {
-      wordStarted = true
-      index++
-      continue
-    }
     if (!wordStarted && input.startsWith("]]", index)) {
       BRACE_CLOSE_AHEAD_RE.lastIndex = index + 2
       if (BRACE_CLOSE_AHEAD_RE.test(input)) {
         if (parenDepth !== 0) return { kind: "opaque", reason: "invalid-structure" }
-        return { kind: "scanned", commands, end: index + 1 }
+        return index + 1
       }
     }
     if (!wordStarted && char === "#") {
@@ -1261,66 +1070,17 @@ function scanBashConditional(input: string, start: number, depth: number, budget
       wordStarted = false
       continue
     }
-    if (char === "$" && input[index + 1] === "$") {
-      wordStarted = true
-      index++
-      continue
-    }
-    if (char === "$" && input[index + 1] === "'") {
-      const literal = bashAnsiQuote(input, index + 1)
-      if (!literal) return { kind: "opaque", reason: "unterminated-quote" }
-      wordStarted = true
-      index = literal.end
-      continue
-    }
-    if (char === "'") {
-      const end = input.indexOf("'", index + 1)
-      if (end < 0) return { kind: "opaque", reason: "unterminated-quote" }
-      wordStarted = true
-      index = end
-      continue
-    }
-    if (char === '"' || (char === "$" && input[index + 1] === '"')) {
-      const double = scanBashDoubleQuoteSpan(input, index + (char === "$" ? 2 : 1), depth + 1, budget, false)
-      if (double.kind === "opaque") return double
-      commands.push(...double.commands)
-      wordStarted = true
-      index = double.end
-      continue
-    }
-    if ((char === "<" || char === ">") && input[index + 1] === "(") {
-      const sub = scanBash(input, index + 2, depth + 1, budget, ")")
-      if (sub.kind === "opaque") return sub
-      commands.push(...sub.commands)
-      wordStarted = true
-      index = sub.end
-      continue
-    }
-    if ((char === "$" && "({[".includes(input[index + 1] ?? "\0")) || char === "`") {
-      const nested = scanBashDollarOrBacktick(input, index, depth, budget, false, true)
-      if (nested.kind === "opaque") return nested
-      commands.push(...nested.commands)
-      wordStarted = true
-      index = nested.end
-      continue
-    }
-    if (char === "(") {
-      parenDepth++
-      wordStarted = false
-      continue
-    }
-    if (char === ")") {
-      if (parenDepth === 0) return { kind: "opaque", reason: "invalid-structure" }
-      parenDepth--
-      wordStarted = false
-      continue
-    }
-    if (char === "&" || char === "|" || char === "<" || char === ">") {
-      wordStarted = false
-      continue
-    }
     if (char === ";") return { kind: "opaque", reason: "invalid-structure" }
-    wordStarted = true
+    if (char === "(" || char === ")") {
+      if (char === ")" && parenDepth === 0) return { kind: "opaque", reason: "invalid-structure" }
+      parenDepth += char === "(" ? 1 : -1
+      wordStarted = false
+      continue
+    }
+    const unit = scanBashUnit(input, index, depth, budget, commands, "word", true)
+    if (typeof unit === "object") return unit
+    if (unit !== undefined) index = unit
+    wordStarted = unit !== undefined || !"&|<>".includes(char)
   }
   return { kind: "opaque", reason: "invalid-structure" }
 }
@@ -1330,21 +1090,16 @@ function scanBashArrayOrPattern(
   start: number,
   depth: number,
   budget: { remaining: number },
+  commands: Command[],
   mode: "array" | "pattern",
-): BashResult {
+): number | Opaque {
   if (depth > MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "command-substitution" }
-  const commands: Command[] = []
   let wordStarted = false
   for (let index = start + 1; index < input.length; index++) {
     if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
     const char = input[index]
-    if (char === ")") return { kind: "scanned", commands, end: index }
+    if (char === ")") return index
     if (char === "\\" && input[index + 1] === "\n") {
-      index++
-      continue
-    }
-    if (char === "\\" && input[index + 1] !== undefined) {
-      wordStarted = true
       index++
       continue
     }
@@ -1358,64 +1113,19 @@ function scanBashArrayOrPattern(
       wordStarted = false
       continue
     }
-    if (mode === "pattern" && char === "\n") return { kind: "opaque", reason: "command-substitution" }
-    if (char === ";" || char === "&" || (mode === "array" && char === "|"))
+    if (char === "\n" || char === ";" || char === "&" || (mode === "array" && char === "|"))
       return { kind: "opaque", reason: "command-substitution" }
-    if (char === "$" && input[index + 1] === "'") {
-      const literal = bashAnsiQuote(input, index + 1)
-      if (!literal) return { kind: "opaque", reason: "unterminated-quote" }
-      wordStarted = true
-      index = literal.end
-      continue
-    }
-    if (char === "'") {
-      const end = input.indexOf("'", index + 1)
-      if (end < 0) return { kind: "opaque", reason: "unterminated-quote" }
-      wordStarted = true
-      index = end
-      continue
-    }
-    if (char === '"' || (char === "$" && input[index + 1] === '"')) {
-      const double = scanBashDoubleQuoteSpan(input, index + (char === "$" ? 2 : 1), depth + 1, budget, false)
-      if (double.kind === "opaque") return double
-      commands.push(...double.commands)
-      wordStarted = true
-      index = double.end
-      continue
-    }
-    if (mode === "array" && "<>=".includes(char) && input[index + 1] === "(") {
-      const sub = scanBash(input, index + 2, depth + 1, budget, ")")
-      if (sub.kind === "opaque") return sub
-      commands.push(...sub.commands)
-      wordStarted = true
-      index = sub.end
-      continue
-    }
-    if ((char === "$" && "({[".includes(input[index + 1] ?? "\0")) || char === "`") {
-      const nested = scanBashDollarOrBacktick(input, index, depth, budget, false, false)
-      if (nested.kind === "opaque") return nested
-      commands.push(...nested.commands)
-      wordStarted = true
-      index = nested.end
-      continue
-    }
-    if (char === "(") {
-      const nested = scanBashArrayOrPattern(input, index, depth + 1, budget, mode)
-      if (nested.kind === "opaque") return nested
-      commands.push(...nested.commands)
-      wordStarted = true
-      index = nested.end
-      continue
-    }
-    if (char === "[") {
-      const subscript = scanBashSubscript(input, index, depth + 1, budget, false)
-      if (subscript.kind === "opaque") return subscript
-      commands.push(...subscript.commands)
-      wordStarted = true
-      index = subscript.end
-      continue
-    }
     wordStarted = true
+    const unit =
+      mode === "array" && char === "=" && input[index + 1] === "("
+        ? scanBashNested(input, index + 2, depth, budget, commands, ")")
+        : char === "("
+          ? scanBashArrayOrPattern(input, index, depth + 1, budget, commands, mode)
+          : char === "["
+            ? scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.subscript, false)
+            : scanBashUnit(input, index, depth, budget, commands, "word", false)
+    if (typeof unit === "object") return unit
+    if (unit !== undefined) index = unit
   }
   return { kind: "opaque", reason: "command-substitution" }
 }
@@ -1425,14 +1135,14 @@ function scanBashPatternBracket(
   start: number,
   depth: number,
   budget: { remaining: number },
-): BashResult | undefined {
-  const commands: Command[] = []
+  commands: Command[],
+): number | Opaque | undefined {
   let first = start + 1
   if (input[first] === "!" || input[first] === "^") first++
   for (let index = first; index < input.length; index++) {
     if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
     const char = input[index]
-    if (char === "]" && index > first) return { kind: "scanned", commands, end: index }
+    if (char === "]" && index > first) return index
     if (char === "\n" || char === ";") return undefined
     if (char === "\\" && input[index + 1] !== undefined) {
       index++
@@ -1447,38 +1157,13 @@ function scanBashPatternBracket(
       }
     }
     if ((char === "$" && "({[".includes(input[index + 1] ?? "\0")) || char === "`") {
-      const nested = scanBashDollarOrBacktick(input, index, depth, budget, false, false)
-      if (nested.kind === "opaque") return nested
-      commands.push(...nested.commands)
-      index = nested.end
+      const nested = scanBashDollarOrBacktick(input, index, depth, budget, commands, false, false)
+      if (typeof nested === "object") return nested
+      index = nested
       continue
     }
   }
   return undefined
-}
-
-function scanBashHeredocBody(source: string, depth: number, budget: { remaining: number }): BashResult {
-  const commands: Command[] = []
-  for (let index = 0; index < source.length; index++) {
-    if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
-    const char = source[index]
-    if (char === "\\") {
-      if ('$`\\\n"'.includes(source[index + 1] ?? "\0")) index++
-      continue
-    }
-    if (char === "$" && source[index + 1] === "$") {
-      index++
-      continue
-    }
-    if ((char === "$" && "({[".includes(source[index + 1] ?? "\0")) || char === "`") {
-      const nested = scanBashDollarOrBacktick(source, index, depth, budget, false, true)
-      if (nested.kind === "opaque") return nested
-      commands.push(...nested.commands)
-      index = nested.end
-      continue
-    }
-  }
-  return { kind: "scanned", commands, end: source.length }
 }
 
 function bashAnsiQuote(input: string, start: number) {
