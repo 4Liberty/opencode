@@ -44,6 +44,8 @@ const BASH_NON_FUNCTION_KEYWORDS = new Set([
   "in",
   "esac",
 ])
+// Characters that can begin a quoting or expansion unit.
+const BASH_UNIT_STARTS = "\\$'\"`<>"
 const MAX_INPUT_LENGTH = 64 * 1024
 const MAX_SUBSTITUTION_DEPTH = 32
 const TOKEN_RE = /[A-Za-z_][A-Za-z0-9_]*(?=(?:\\\n)*(?:[ \t\n;|&()<>]|$))/y
@@ -76,7 +78,9 @@ const BASH_ANSI_ESCAPES: Record<string, string> = {
   "?": "?",
 }
 
-type BashResult = { kind: "scanned"; commands: Command[]; end: number } | { kind: "opaque"; reason: OpaqueReason }
+type Opaque = { kind: "opaque"; reason: OpaqueReason }
+
+type BashResult = { kind: "scanned"; commands: Command[]; end: number } | Opaque
 
 type BashState = {
   input: string
@@ -115,8 +119,6 @@ type BashState = {
   // A list operator (&&, ||, |, |&) still awaits its right-hand command.
   dangling: boolean
 }
-
-type Opaque = { kind: "opaque"; reason: OpaqueReason }
 
 // Cooked word text, and the literal text the word decodes to apart from its expansions.
 type BashText = { word: string; literal: string }
@@ -316,13 +318,23 @@ function scanBash(
       if (typeof end === "object") return end
       state.wordStarted = true
       state.word += input.slice(index, end + 1)
+      state.literal += "\0"
       index = end
       state.wordEnd = index + 1
       continue
     }
-    const allowBracket =
-      !state.assignmentWord && state.commandWordIndex >= 0 && !BASH_DECLARATIONS.has(state.rawWords[0])
-    const unit = scanBashUnit(input, index, depth, budget, state.nestedCommands, "word", allowBracket, state)
+    const unit = BASH_UNIT_STARTS.includes(char)
+      ? scanBashUnit(
+          input,
+          index,
+          depth,
+          budget,
+          state.nestedCommands,
+          "word",
+          !state.assignmentWord && state.commandWordIndex >= 0 && !BASH_DECLARATIONS.has(state.rawWords[0]),
+          state,
+        )
+      : undefined
     if (typeof unit === "object") return unit
     if (unit !== undefined) {
       state.wordStarted = true
@@ -832,6 +844,7 @@ function bashAppend(text: BashText, value: string) {
 // runs when the word is evaluated. Quotes and escapes inside the brackets hide a closing bracket. NUL marks
 // where an expansion's value may supply the name.
 function bashEvaluatesSubscript(literal: string) {
+  if (!literal.includes("[")) return false
   let depth = 0
   let quote: string | undefined
   let previous = ""
