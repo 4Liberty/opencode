@@ -225,19 +225,21 @@ export const scanPortable = Effect.fnUntraced(function* (command: string, shell:
     if (CWD.has(name)) {
       output.directories.push(
         ...directoryArgs(
-          (powershell ? words : item.rawWords).flatMap((text, index): Part[] => {
-            const parameter = powershell ? /^(-(?:literalpath|path)):(.*)$/i.exec(text) : undefined
-            if (parameter)
-              return [
-                { type: "command_parameter", text: parameter[1] },
-                { type: "word", text: parameter[2] },
-              ]
-            const resolved =
-              !powershell && (text.startsWith("$'") || (!/[$`~\\]/.test(text) && /['"]/.test(text)))
-                ? (item.words[index] ?? text)
-                : text
-            return [{ type: powershell && resolved.startsWith("-") ? "command_parameter" : "word", text: resolved }]
-          }),
+          powershell
+            ? words.flatMap((text): Part[] => {
+                const parameter = /^(-(?:literalpath|path)):(.*)$/i.exec(text)
+                if (parameter)
+                  return [
+                    { type: "command_parameter", text: parameter[1] },
+                    { type: "word", text: parameter[2] },
+                  ]
+                return [{ type: text.startsWith("-") ? "command_parameter" : "word", text }]
+              })
+            : item.rawWords.map((text, index) => ({
+                type: "word",
+                // Only literal quoting resolves to a static directory.
+                text: text.startsWith("$'") || (!/[$`~\\]/.test(text) && /['"]/.test(text)) ? item.words[index] : text,
+              })),
           powershell,
           cwd,
           shell,
