@@ -27,9 +27,9 @@ export function readLocalAttachment(file: string, maxBytes = MAX_LOCAL_ATTACHMEN
 }
 
 export async function resolvePastedAttachments(text: string, platform: string) {
+  if (!mayResolvePastedAttachments(text, platform)) return undefined
   const pastedContent = text.trim()
   const filepath = normalizePastedFilepath(pastedContent, platform)
-  if (/^(https?):\/\//.test(filepath)) return undefined
 
   const attachment = await readLocalAttachment(filepath)
   const attachments = attachment ? [{ filepath, attachment }] : []
