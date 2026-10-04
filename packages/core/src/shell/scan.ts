@@ -381,11 +381,9 @@ function scanBash(
     const allowBracket =
       !state.assignmentWord && state.commandWordIndex >= 0 && !BASH_DECLARATIONS.has(state.rawWords[0])
     const unit =
-      inCasePattern && char === "["
-        ? scanBashPatternBracket(input, index, depth, budget, state.nestedCommands)
-        : char === "=" && !state.wordStarted && input[index + 1] === "("
-          ? scanBashNested(input, index + 2, depth, budget, state.nestedCommands, ")")
-          : scanBashUnit(input, index, depth, budget, state.nestedCommands, "word", allowBracket)
+      char === "=" && !state.wordStarted && input[index + 1] === "("
+        ? scanBashNested(input, index + 2, depth, budget, state.nestedCommands, ")")
+        : scanBashUnit(input, index, depth, budget, state.nestedCommands, "word", allowBracket)
     if (typeof unit === "object") return unit
     if (unit !== undefined) {
       state.wordStarted = true
@@ -1128,42 +1126,6 @@ function scanBashArrayOrPattern(
     if (unit !== undefined) index = unit
   }
   return { kind: "opaque", reason: "command-substitution" }
-}
-
-function scanBashPatternBracket(
-  input: string,
-  start: number,
-  depth: number,
-  budget: { remaining: number },
-  commands: Command[],
-): number | Opaque | undefined {
-  let first = start + 1
-  if (input[first] === "!" || input[first] === "^") first++
-  for (let index = first; index < input.length; index++) {
-    if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
-    const char = input[index]
-    if (char === "]" && index > first) return index
-    if (char === "\n" || char === ";") return undefined
-    if (char === "\\" && input[index + 1] !== undefined) {
-      index++
-      continue
-    }
-    if (char === "[" && ":=".includes(input[index + 1] ?? "\0")) {
-      const marker = input[index + 1]
-      const closeClass = input.indexOf(`${marker}]`, index + 2)
-      if (closeClass > 0) {
-        index = closeClass + 1
-        continue
-      }
-    }
-    if ((char === "$" && "({[".includes(input[index + 1] ?? "\0")) || char === "`") {
-      const nested = scanBashDollarOrBacktick(input, index, depth, budget, commands, false, false)
-      if (typeof nested === "object") return nested
-      index = nested
-      continue
-    }
-  }
-  return undefined
 }
 
 function bashAnsiQuote(input: string, start: number) {

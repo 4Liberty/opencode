@@ -267,6 +267,8 @@ const additionalOracleFixtures = [
   "a[b; scan_probe; echo ]=1",
   "a[0 #]\n]=1; scan_probe",
   "if true; then >/dev/null fi; scan_probe; fi",
+  "case [ in [) scan_probe & ( scan_probe q ]) ;; esac",
+  "case x in (x|[) scan_probe & ( scan_probe q ]) ;; esac",
   "echo \"${x:-$'$(scan_probe q1)'}\"",
   "cat <<E\n$\\\n(scan_probe h)\nE",
   "echo ${x:-$\\\n(scan_probe p)}",
@@ -294,8 +296,6 @@ const additionalOracleFixtures = [
 ] as const
 
 const knownGapFixtures = [
-  "case [ in [) scan_probe & ( scan_probe q ]) ;; esac",
-  "case x in (x|[) scan_probe & ( scan_probe q ]) ;; esac",
   "cat <<\\\n-EOF\nEOF\nscan_probe h1\n-EOF",
   "echo *(e:'scan_probe q1':)",
   "echo *(+scan_probe)",
