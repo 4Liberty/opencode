@@ -92,19 +92,23 @@ type BashState = {
   wordStarted: boolean
   wordStart: number
   wordEnd: number
+  commandStart: number | undefined
   commandEnd: number
   resourceEnd: number | undefined
   redirectWordCount: number | undefined
   commandWordIndex: number
   assignmentWord: boolean
   assignmentHeadUnsafe: boolean
-  segment: number
   invalidRedirect: boolean
   invalidStructure: boolean
   redirectTarget: boolean
   hasRedirect: boolean
   compoundEnd: boolean
+  // A list operator (&&, ||, |, |&) still awaits its right-hand command.
+  dangling: boolean
 }
+
+type Opaque = { kind: "opaque"; reason: OpaqueReason }
 
 export function scan(input: string): Result {
   if (input.length > MAX_INPUT_LENGTH) return { kind: "opaque", reason: "invalid-structure" }
@@ -123,10 +127,32 @@ function bashInHeader(state: BashState) {
   return phase === "header" || phase === "pattern" || phase === "do"
 }
 
+function atCommandStart(state: BashState) {
+  return !state.words.length && !state.hasRedirect && !state.compoundEnd && !bashInHeader(state)
+}
+
+function pending(state: BashState) {
+  return state.wordStarted || state.words.length > 0 || state.hasRedirect || state.compoundEnd
+}
+
+// Ends the current list; false when an operator still awaits its command.
+function endBashList(state: BashState) {
+  if (pending(state)) finishBashCommand(state)
+  return !state.dangling
+}
+
+function closeBashList(state: BashState, end: number): BashResult {
+  if (!endBashList(state) || state.invalidStructure) return { kind: "opaque", reason: "invalid-structure" }
+  if (state.invalidRedirect) return { kind: "opaque", reason: "invalid-redirect" }
+  if (state.structures.length) return { kind: "opaque", reason: "compound-command" }
+  return { kind: "scanned", commands: state.commands, end }
+}
+
 function finishBashWord(state: BashState) {
   if (!state.wordStarted) return
   if (!state.redirectTarget) {
     if (!state.assignmentWord && state.commandWordIndex < 0) state.commandWordIndex = state.words.length
+    state.commandStart ??= state.wordStart
     state.words.push(state.word)
     // Unquoted trailing continuations are ignored syntax, not part of the raw token.
     state.rawWords.push(state.input.slice(state.wordStart, state.wordEnd))
@@ -144,13 +170,13 @@ function finishBashCommand(state: BashState, boundary = false) {
   if (state.redirectTarget) state.invalidRedirect = true
   state.redirectTarget = false
   if (state.compoundEnd && state.words.length > 0) state.invalidStructure = true
-  const resource = state.input
-    .slice(state.segment, state.resourceEnd ?? state.wordEnd)
-    .replace(/^[ \t\n]+|[ \t\n]+$/g, "")
   const name = state.commandWordIndex
   const inHeader = bashInHeader(state)
   if (name >= 0 && !state.words[name]) state.invalidStructure = true
   if (name >= 0 && !inHeader) {
+    const resource = state.input
+      .slice(state.commandStart, state.resourceEnd ?? state.wordEnd)
+      .replace(/^[ \t\n]+|[ \t\n]+$/g, "")
     const command: Command = {
       resource,
       words: state.words.slice(name),
@@ -167,7 +193,7 @@ function finishBashCommand(state: BashState, boundary = false) {
       for (const heredoc of state.heredocs) {
         if (heredoc.command) continue
         heredoc.command = command
-        heredoc.start = state.segment
+        heredoc.start = state.commandStart
       }
     }
   }
@@ -178,10 +204,12 @@ function finishBashCommand(state: BashState, boundary = false) {
   state.words.length = 0
   state.rawWords.length = 0
   state.commandWordIndex = -1
+  state.commandStart = undefined
   state.hasRedirect = false
   state.resourceEnd = undefined
   state.redirectWordCount = undefined
   state.compoundEnd = false
+  state.dangling = false
 }
 
 function bashRedirect(input: string, index: number) {
@@ -211,22 +239,21 @@ function scanBash(
     wordStarted: false,
     wordStart: start,
     wordEnd: start,
+    commandStart: undefined,
     commandEnd: start,
     resourceEnd: undefined,
     redirectWordCount: undefined,
     commandWordIndex: -1,
     assignmentWord: false,
     assignmentHeadUnsafe: false,
-    segment: start,
     invalidRedirect: false,
     invalidStructure: false,
     redirectTarget: false,
     hasRedirect: false,
     compoundEnd: false,
+    dangling: false,
   }
   let quote: "single" | "double" | undefined
-  let dangling = false
-  let inList = false
 
   for (let index = start; index < input.length; index++) {
     if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
@@ -246,23 +273,14 @@ function scanBash(
         state.structures.length === 0 &&
         state.heredocs.length === 0 &&
         (close === "nofork" || ((BRACE_CLOSE_AHEAD_RE.lastIndex = index + 1), BRACE_CLOSE_AHEAD_RE.test(input)))
-      ) {
-        if (state.hasRedirect || state.compoundEnd) {
-          finishBashCommand(state)
-          dangling = false
-        }
-        if (dangling || state.invalidStructure) return { kind: "opaque", reason: "invalid-structure" }
-        if (state.invalidRedirect) return { kind: "opaque", reason: "invalid-redirect" }
-        return { kind: "scanned", commands: state.commands, end: index }
-      }
+      )
+        return closeBashList(state, index)
       if (char === "}")
         return { kind: "opaque", reason: state.structures.length ? "compound-command" : "invalid-structure" }
-      const step = scanBashCommandStart(state, index, depth, budget, dangling)
+      const step = scanBashCommandStart(state, index, depth, budget)
+      if (typeof step === "object") return step
       if (step !== undefined) {
-        if (step.kind === "opaque") return step
-        index = step.index
-        dangling = step.dangling
-        if (step.resetList) inList = false
+        index = step
         continue
       }
     }
@@ -454,22 +472,14 @@ function scanBash(
     }
     if (char === "#" && !state.wordStarted) {
       const newline = input.indexOf("\n", index)
-      if (state.words.length > 0 || state.hasRedirect) {
-        finishBashCommand(state)
-        dangling = false
-        inList = false
-      }
       if (newline === -1) break
       index = newline - 1
-      state.segment = newline
       continue
     }
     if ("<>&|;\n".includes(char)) {
-      const step = scanBashOperatorOrSeparator(state, index, depth, budget, dangling, inList)
-      if (step.kind === "opaque") return step
-      index = step.index
-      dangling = step.dangling
-      inList = step.inList ?? inList
+      const step = scanBashOperatorOrSeparator(state, index, depth, budget)
+      if (typeof step === "object") return step
+      index = step
       continue
     }
     if (inCasePattern && char === ")") {
@@ -480,13 +490,7 @@ function scanBash(
     if (char === ")") {
       if (close !== ")" || state.structures.length > 0 || state.heredocs.length > 0)
         return { kind: "opaque", reason: "compound-command" }
-      if (state.wordStarted || state.words.length > 0 || state.hasRedirect || state.compoundEnd) {
-        finishBashCommand(state)
-        dangling = false
-      }
-      if (dangling || state.invalidStructure) return { kind: "opaque", reason: "invalid-structure" }
-      if (state.invalidRedirect) return { kind: "opaque", reason: "invalid-redirect" }
-      return { kind: "scanned", commands: state.commands, end: index }
+      return closeBashList(state, index)
     }
     if (char === "(") return { kind: "opaque", reason: "compound-command" }
     if (/\s/.test(char) && !" \t\n".includes(char)) return { kind: "opaque", reason: "invalid-structure" }
@@ -504,29 +508,16 @@ function scanBash(
   if (close) return { kind: "opaque", reason: close === ")" ? "command-substitution" : "invalid-structure" }
   if (quote) return { kind: "opaque", reason: "unterminated-quote" }
   if (state.heredocs.length) return { kind: "opaque", reason: "heredoc" }
-  if (state.wordStarted || state.words.length > 0 || state.hasRedirect) {
-    finishBashCommand(state)
-    dangling = false
-  }
-  if (dangling) state.invalidStructure = true
-  if (state.invalidStructure) return { kind: "opaque", reason: "invalid-structure" }
-  if (state.invalidRedirect) return { kind: "opaque", reason: "invalid-redirect" }
-  if (state.structures.length) return { kind: "opaque", reason: "compound-command" }
-  return { kind: "scanned", commands: state.commands, end: input.length }
+  return closeBashList(state, input.length)
 }
 
-type BashStepResult =
-  | { kind: "step"; index: number; dangling: boolean; resetList?: boolean; inList?: boolean }
-  | { kind: "opaque"; reason: OpaqueReason }
-
+// Steps return the last consumed index.
 function scanBashOperatorOrSeparator(
   state: BashState,
   index: number,
   depth: number,
   budget: { remaining: number },
-  dangling: boolean,
-  inList: boolean,
-): BashStepResult {
+): number | Opaque {
   const input = state.input
   const char = input[index]
   const redirect = "<>&".includes(char) ? bashRedirect(input, index) : undefined
@@ -538,6 +529,7 @@ function scanBashOperatorOrSeparator(
     )
       return { kind: "opaque", reason: "invalid-redirect" }
     state.hasRedirect = true
+    state.commandStart ??= state.wordStart
     if (state.redirectTarget) state.invalidRedirect = true
     const fdPrefix =
       state.wordStarted && !state.assignmentHeadUnsafe && /^(?:\d+|\{[A-Za-z_][A-Za-z0-9_]*\})$/.test(state.word)
@@ -552,7 +544,7 @@ function scanBashOperatorOrSeparator(
     // Prefix redirects remain part of the command, and later words remain redirect destinations.
     if (state.redirectWordCount === undefined && state.commandWordIndex >= 0) {
       state.redirectWordCount = state.words.length
-      if (inList) state.resourceEnd = state.commandEnd
+      if (state.dangling) state.resourceEnd = state.commandEnd
     }
     if (redirect === "<<" || redirect === "<<-") {
       const delimiter = bashHeredocDelimiter(input, index)
@@ -560,14 +552,14 @@ function scanBashOperatorOrSeparator(
       state.heredocs.push(delimiter)
       state.wordEnd = delimiter.end + 1
       state.redirectTarget = false
-      return { kind: "step", index: delimiter.end, dangling }
+      return delimiter.end
     }
     state.redirectTarget = true
-    return { kind: "step", index: index + redirect.length - 1, dangling }
+    return index + redirect.length - 1
   }
   if (state.structures.at(-1)?.phase === "pattern" && char === "|") {
     finishBashWord(state)
-    return { kind: "step", index: index - 1, dangling }
+    return index - 1
   }
   const next = input[index + 1]
   if (
@@ -586,64 +578,44 @@ function scanBashOperatorOrSeparator(
     structure.phase === "body" &&
     (next === ";" || next === "&" || next === "|")
   ) {
-    if (dangling && !state.wordStarted && !state.words.length && !state.hasRedirect && !state.compoundEnd)
-      return { kind: "opaque", reason: "invalid-structure" }
-    let nextDangling = dangling
-    if (state.wordStarted || state.words.length || state.hasRedirect || state.compoundEnd) {
-      finishBashCommand(state)
-      nextDangling = false
-    }
+    if (!endBashList(state)) return { kind: "opaque", reason: "invalid-structure" }
     structure.phase = "pattern"
     structure.patternStarted = false
-    const nextIndex = index + (input.startsWith(";;&", index) ? 2 : 1)
-    state.segment = nextIndex + 1
-    return { kind: "step", index: nextIndex, dangling: nextDangling, inList: false }
+    return index + (input.startsWith(";;&", index) ? 2 : 1)
   }
   if (structure?.kind === "case" && (structure.phase === "header" || structure.phase === "pattern")) {
     if (separator !== "\n") return { kind: "opaque", reason: "compound-command" }
     if (structure.phase === "pattern" && (state.wordStarted || state.words.length > 0))
       return { kind: "opaque", reason: "compound-command" }
     finishBashWord(state)
-    return { kind: "step", index, dangling }
+    return index
   }
   if (structure?.kind === "for" && (structure.phase === "header" || structure.phase === "do")) {
     if (separator !== ";" && separator !== "\n") return { kind: "opaque", reason: "compound-command" }
     if (structure.phase === "header" && !structure.sawIn && !state.wordStarted && state.words.length === 0)
       return { kind: "opaque", reason: "compound-command" }
   }
-  if (
-    separator === "\n" &&
-    !state.wordStarted &&
-    state.words.length === 0 &&
-    !state.hasRedirect &&
-    !state.compoundEnd
-  ) {
+  if (separator === "\n" && !pending(state)) {
     let nextIndex = index
-    if (state.heredocs.length) {
-      for (const heredoc of state.heredocs.splice(0)) {
-        const body = bashHeredoc(input, nextIndex + 1, heredoc)
-        if (!body) return { kind: "opaque", reason: "heredoc" }
-        if (heredoc.command) heredoc.command.resource = input.slice(heredoc.start, body.end).trim()
-        if (!heredoc.quoted) {
-          const expansion = scanBashHeredocBody(body.source, depth + 1, budget)
-          if (expansion.kind === "opaque") return { kind: "opaque", reason: "command-substitution" }
-          state.commands.push(...expansion.commands)
-        }
-        nextIndex = body.end
+    for (const heredoc of state.heredocs.splice(0)) {
+      const body = bashHeredoc(input, nextIndex + 1, heredoc)
+      if (!body) return { kind: "opaque", reason: "heredoc" }
+      if (heredoc.command) heredoc.command.resource = input.slice(heredoc.start, body.end).trim()
+      if (!heredoc.quoted) {
+        const expansion = scanBashHeredocBody(body.source, depth + 1, budget)
+        if (expansion.kind === "opaque") return { kind: "opaque", reason: "command-substitution" }
+        state.commands.push(...expansion.commands)
       }
+      nextIndex = body.end
     }
-    state.segment = nextIndex + 1
-    return { kind: "step", index: nextIndex, dangling }
+    return nextIndex
   }
   finishBashCommand(state, true)
   if (structure?.kind === "for" && structure.phase === "header") structure.phase = "do"
-  const nextDangling = separator !== "&" && separator !== ";" && separator !== "\n"
-  if (separator === "\n" && state.heredocs.length) {
-    return { kind: "step", index: index - 1, dangling: nextDangling, inList: nextDangling }
-  }
-  const nextIndex = index + separator.length - 1
-  state.segment = nextIndex + 1
-  return { kind: "step", index: nextIndex, dangling: nextDangling, inList: nextDangling }
+  state.dangling = separator !== "&" && separator !== ";" && separator !== "\n"
+  // Reprocess the newline to read pending heredoc bodies.
+  if (separator === "\n" && state.heredocs.length) return index - 1
+  return index + separator.length - 1
 }
 
 function scanBashCommandStart(
@@ -651,30 +623,26 @@ function scanBashCommandStart(
   index: number,
   depth: number,
   budget: { remaining: number },
-  dangling: boolean,
-): BashStepResult | undefined {
+): number | Opaque | undefined {
   const input = state.input
   const char = input[index]
   const structure = state.structures.at(-1)
   if (structure?.phase === "pattern" && !structure.patternStarted && !state.words.length && char === "(") {
     structure.patternStarted = true
-    state.segment = index + 1
-    return { kind: "step", index, dangling }
+    return index
   }
   if (structure?.phase === "pattern" && char === "|") {
     if (!state.words.length) return { kind: "opaque", reason: "compound-command" }
     finishBashWord(state)
     structure.patternStarted = true
-    state.segment = index + 1
-    return { kind: "step", index, dangling }
+    return index
   }
   if (structure?.phase === "pattern" && char === ")") {
     if (!state.words.length) return { kind: "opaque", reason: "compound-command" }
     finishBashCommand(state)
     structure.phase = "body"
     structure.count = 0
-    state.segment = index + 1
-    return { kind: "step", index, dangling }
+    return index
   }
   if (structure?.kind === "for" && structure.phase === "header" && char === "(" && input[index + 1] !== "(") {
     const values = scanBashArrayOrPattern(input, index, depth + 1, budget, "array")
@@ -686,37 +654,24 @@ function scanBashCommandStart(
     structure.parenthesized = true
     DO_AHEAD_RE.lastIndex = values.end + 1
     if (!DO_AHEAD_RE.test(input)) state.structures.pop()
-    state.segment = values.end + 1
-    return { kind: "step", index: values.end, dangling }
+    return values.end
   }
-  const keywordStep = scanBashKeyword(state, index, depth, dangling)
+  const keywordStep = scanBashKeyword(state, index, depth)
   if (keywordStep !== undefined) return keywordStep
   if (structure?.kind === "for" && structure.phase === "do" && char !== "\n" && char !== "#" && char !== ";") {
     SPACE_CONTINUATION_AHEAD_RE.lastIndex = index + 1
     if (char !== "{" || !SPACE_CONTINUATION_AHEAD_RE.test(input)) return { kind: "opaque", reason: "compound-command" }
     state.structures.pop()
   }
-  const inHeaderAfterFor = bashInHeader(state)
-  if (!state.words.length && !state.hasRedirect && !state.compoundEnd && !inHeaderAfterFor) {
-    if (char === "(" && bashFunctionHeadLength(input, index) > 0) {
-      const nextIndex = index + bashFunctionHeadLength(input, index) - 1
-      state.segment = nextIndex + 1
-      return { kind: "step", index: nextIndex, dangling }
-    }
-    if (char === "!") {
-      NEGATION_AHEAD_RE.lastIndex = index + 1
-      if (NEGATION_AHEAD_RE.test(input)) {
-        state.segment = index + 1
-        return { kind: "step", index, dangling }
-      }
-    }
+  const atStart = atCommandStart(state)
+  if (atStart && char === "(" && bashFunctionHeadLength(input, index) > 0)
+    return index + bashFunctionHeadLength(input, index) - 1
+  if (atStart && char === "!") {
+    NEGATION_AHEAD_RE.lastIndex = index + 1
+    if (NEGATION_AHEAD_RE.test(input)) return index
   }
-  if (
-    ((!state.words.length && !state.hasRedirect && !state.compoundEnd && !inHeaderAfterFor) ||
-      (structure?.kind === "for" && structure.phase === "header")) &&
-    input.startsWith("((", index)
-  ) {
-    const forHeader = structure?.kind === "for" && structure.phase === "header"
+  const forHeader = structure?.kind === "for" && structure.phase === "header"
+  if ((atStart || forHeader) && input.startsWith("((", index)) {
     if (forHeader && state.words.length > 0) return { kind: "opaque", reason: "compound-command" }
     const expression = scanBashArithmetic(input, index + 2, depth + 1, budget, forHeader)
     if (expression.kind === "scanned") {
@@ -729,34 +684,25 @@ function scanBashCommandStart(
         bashStatement(state)
         state.compoundEnd = true
       }
-      state.segment = expression.end + 1
-      return { kind: "step", index: expression.end, dangling: false }
+      return expression.end
     }
     if (forHeader || expression.reason !== "not-arithmetic") return { kind: "opaque", reason: "invalid-structure" }
   }
   if (
-    !state.words.length &&
-    !state.hasRedirect &&
-    !state.compoundEnd &&
-    !inHeaderAfterFor &&
+    atStart &&
     (char === "(" ||
       (char === "{" && ((SPACE_CONTINUATION_AHEAD_RE.lastIndex = index + 1), SPACE_CONTINUATION_AHEAD_RE.test(input))))
   ) {
-    const groupClose = char === "{" ? "}" : ")"
-    const group = scanBash(input, index + 1, depth + 1, budget, groupClose)
+    const group = scanBash(input, index + 1, depth + 1, budget, char === "{" ? "}" : ")")
     if (group.kind === "opaque") return group
     if (!input.slice(index + 1, group.end).trim()) return { kind: "opaque", reason: "invalid-structure" }
     state.commands.push(...group.commands)
     bashStatement(state)
     state.compoundEnd = true
-    state.segment = group.end + 1
-    return { kind: "step", index: group.end, dangling: false }
+    return group.end
   }
   if (
-    !state.words.length &&
-    !state.hasRedirect &&
-    !state.compoundEnd &&
-    !inHeaderAfterFor &&
+    atStart &&
     input.startsWith("[[", index) &&
     ((SPACE_CONTINUATION_AHEAD_RE.lastIndex = index + 2), SPACE_CONTINUATION_AHEAD_RE.test(input))
   ) {
@@ -765,32 +711,25 @@ function scanBashCommandStart(
     state.commands.push(...expression.commands)
     bashStatement(state)
     state.compoundEnd = true
-    state.segment = expression.end + 1
-    return { kind: "step", index: expression.end, dangling: false }
+    return expression.end
   }
   return undefined
 }
 
-function scanBashKeyword(
-  state: BashState,
-  index: number,
-  depth: number,
-  dangling: boolean,
-): BashStepResult | undefined {
+function scanBashKeyword(state: BashState, index: number, depth: number): number | Opaque | undefined {
   const input = state.input
   const char = input[index]
   if (!((char >= "A" && char <= "Z") || (char >= "a" && char <= "z") || char === "_")) return undefined
   const structure = state.structures.at(-1)
   TOKEN_RE.lastIndex = index
   const token = TOKEN_RE.exec(input)?.[0]
+  const end = index + (token?.length ?? 0) - 1
   if (structure?.kind === "case" && structure.phase === "header" && token === "in") {
     if (state.words.length !== 1 || state.hasRedirect) return { kind: "opaque", reason: "compound-command" }
     finishBashCommand(state)
     structure.phase = "pattern"
     structure.patternStarted = false
-    const nextIndex = index + token.length - 1
-    state.segment = nextIndex + 1
-    return { kind: "step", index: nextIndex, dangling }
+    return end
   }
   if (
     structure?.kind === "for" &&
@@ -802,17 +741,13 @@ function scanBashKeyword(
   ) {
     structure.sawIn = true
     structure.phase = "header"
-    const nextIndex = index + token.length - 1
-    state.segment = nextIndex + 1
-    return { kind: "step", index: nextIndex, dangling }
+    return end
   }
   if (structure?.phase === "pattern" && !structure.patternStarted && !state.words.length && token === "esac") {
     state.structures.pop()
     bashStatement(state)
     state.compoundEnd = true
-    const nextIndex = index + token.length - 1
-    state.segment = nextIndex + 1
-    return { kind: "step", index: nextIndex, dangling: false, resetList: true }
+    return end
   }
   const inHeader = bashInHeader(state)
   if (
@@ -822,20 +757,13 @@ function scanBashKeyword(
     !state.redirectTarget &&
     (!inHeader || (token === "do" && structure?.phase === "do"))
   ) {
-    let nextDangling = dangling
-    if (state.hasRedirect || state.compoundEnd) {
-      finishBashCommand(state)
-      nextDangling = false
-    }
-    if (!structure || nextDangling) return { kind: "opaque", reason: "compound-command" }
-    const nextIndex = index + token.length - 1
+    if (!endBashList(state) || !structure) return { kind: "opaque", reason: "compound-command" }
     if (token === "then") {
       if (structure.kind !== "if" || structure.phase !== "condition" || !structure.count)
         return { kind: "opaque", reason: "compound-command" }
       structure.phase = "body"
       structure.count = 0
-      state.segment = nextIndex + 1
-      return { kind: "step", index: nextIndex, dangling: nextDangling, resetList: true }
+      return end
     }
     if (token === "elif" || token === "else") {
       if (structure.kind !== "if" || structure.phase !== "body" || !structure.count || structure.sawElse)
@@ -843,8 +771,7 @@ function scanBashKeyword(
       structure.phase = token === "elif" ? "condition" : "body"
       structure.sawElse = token === "else"
       structure.count = 0
-      state.segment = nextIndex + 1
-      return { kind: "step", index: nextIndex, dangling: nextDangling, resetList: true }
+      return end
     }
     if (token === "do") {
       if (
@@ -855,8 +782,7 @@ function scanBashKeyword(
         return { kind: "opaque", reason: "compound-command" }
       structure.phase = "body"
       structure.count = 0
-      state.segment = nextIndex + 1
-      return { kind: "step", index: nextIndex, dangling: nextDangling, resetList: true }
+      return end
     }
     if (
       (token === "fi" && (structure.kind !== "if" || structure.phase !== "body" || !structure.count)) ||
@@ -868,16 +794,11 @@ function scanBashKeyword(
     state.structures.pop()
     bashStatement(state)
     state.compoundEnd = true
-    state.segment = nextIndex + 1
-    return { kind: "step", index: nextIndex, dangling: false, resetList: true }
+    return end
   }
-  if (inHeader || state.words.length || state.hasRedirect || state.compoundEnd) return undefined
+  if (!atCommandStart(state)) return undefined
   const definitionLength = bashFunctionHeadLength(input, index)
-  if (definitionLength > 0) {
-    const nextIndex = index + definitionLength - 1
-    state.segment = nextIndex + 1
-    return { kind: "step", index: nextIndex, dangling }
-  }
+  if (definitionLength > 0) return index + definitionLength - 1
   if (
     token === "if" ||
     token === "while" ||
@@ -892,27 +813,19 @@ function scanBashKeyword(
       phase: ["for", "select", "case"].includes(token) ? "header" : "condition",
       count: 0,
     })
-    const nextIndex = index + token.length - 1
-    state.segment = nextIndex + 1
-    return { kind: "step", index: nextIndex, dangling, resetList: true }
+    // The compound command itself satisfies a preceding list operator.
+    state.dangling = false
+    return end
   }
   if (token === "coproc") {
     COPROC_AHEAD_RE.lastIndex = index
     const coprocMatch = COPROC_AHEAD_RE.exec(input)?.[0]
-    if (coprocMatch) {
-      const nextIndex = index + coprocMatch.length - 1
-      state.segment = nextIndex + 1
-      return { kind: "step", index: nextIndex, dangling }
-    }
+    if (coprocMatch) return index + coprocMatch.length - 1
   }
   if (token === "time") {
     TIME_AHEAD_RE.lastIndex = index
     const timeMatch = TIME_AHEAD_RE.exec(input)?.[0]
-    if (timeMatch) {
-      const nextIndex = index + timeMatch.length - 1
-      state.segment = nextIndex + 1
-      return { kind: "step", index: nextIndex, dangling }
-    }
+    if (timeMatch) return index + timeMatch.length - 1
   }
   return undefined
 }
