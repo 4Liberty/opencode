@@ -17,20 +17,21 @@ export function visibleTimelineMessages(
   const queued = new Set(
     pending.flatMap((item) => (item.type === "user" && item.delivery === "queue" ? [item.id] : [])),
   )
-  const inputs = new Set(
-    pending.flatMap((item) =>
-      (item.type === "user" && item.delivery === "steer") || item.type === "synthetic" ? [item.id] : [],
-    ),
+  const steers = new Set(
+    pending.flatMap((item) => (item.type === "user" && item.delivery === "steer" ? [item.id] : [])),
   )
-  if (queued.size === 0 && inputs.size === 0 && !revertMessageID) return messages
+  const notices = new Set(pending.flatMap((item) => (item.type === "synthetic" ? [item.id] : [])))
+  if (queued.size === 0 && steers.size === 0 && notices.size === 0 && !revertMessageID) return messages
   const visible = messages.filter(
     (message) => !queued.has(message.id) && (!revertMessageID || message.id < revertMessageID),
   )
-  if (inputs.size === 0) return visible
+  if (steers.size === 0 && notices.size === 0) return visible
   // Undelivered inputs do not own assistant work, so they stay below the active work like the TUI.
+  // Notices precede steers so they stay in the active turn instead of joining an undelivered one.
   return [
-    ...visible.filter((message) => !inputs.has(message.id)),
-    ...visible.filter((message) => inputs.has(message.id)),
+    ...visible.filter((message) => !steers.has(message.id) && !notices.has(message.id)),
+    ...visible.filter((message) => notices.has(message.id)),
+    ...visible.filter((message) => steers.has(message.id)),
   ]
 }
 
