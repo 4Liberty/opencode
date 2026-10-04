@@ -60,6 +60,15 @@ const fixtures = [
   ["! scan_probe", ["scan_probe"]],
   ["time scan_probe", ["time"]],
   ["{fd}>/dev/null scan_probe", ["scan_probe"]],
+  ["case $r in a) ls | head;; esac", ["ls", "head"]],
+  ["case $r in a) ls && echo;; esac", ["ls", "echo"]],
+  ["{ find . -exec echo {} \\; ; }", ["find"]],
+  ["{ echo {a,{b,c}}; }", ["echo"]],
+  ["if true; then\\\n echo hi; fi", ["true", "echo"]],
+  ["for ((i=0; i<2; i++)) do echo hi; done", ["echo"]],
+  ['echo "$(case x in @(a)) echo hi;; esac)"', ["echo", "echo"]],
+  ["set -- 1; for x do scan_probe; done", ["set", "scan_probe"]],
+  ["'q'; x=1 a", ["q", "a"]],
 ] as const
 
 describe("ordinary Bash and Zsh syntax", () => {
@@ -73,10 +82,12 @@ describe("ordinary Bash and Zsh syntax", () => {
   for (const shell of ["bash", "zsh"]) {
     const executable = Bun.which(shell)
     for (const [source] of fixtures) {
-      // These are Bash spellings; Zsh's fd allocation is a standalone statement.
+      // These are Bash spellings; Zsh's fd allocation is a standalone statement. Bash parses extglob
+      // patterns only when extglob is enabled.
       test.skipIf(
         !executable ||
-          (shell === "zsh" && (source.includes('$"') || source.startsWith("{fd}") || source.includes("$["))),
+          (shell === "zsh" && (source.includes('$"') || source.startsWith("{fd}") || source.includes("$["))) ||
+          (shell === "bash" && source.includes("@(")),
       )(`${shell} accepts the source grammar: ${source}`, () => {
         const result = Bun.spawnSync([
           executable ?? shell,
@@ -132,8 +143,13 @@ describe("ordinary Bash and Zsh syntax", () => {
     "cat <<EOF\nunclosed",
     "echo ${missing",
     "echo $'missing",
+    "case $r in a) ls |;; esac",
   ])("rejects incomplete syntax: %s", (source) => {
     expect(ShellScan.scan(source).kind).toBe("opaque")
+  })
+
+  test("scans a Zsh brace group closed after a redirect", () => {
+    expect(ShellScan.scan("{ a && >f }")).toMatchObject({ kind: "scanned", commands: [{ words: ["a"] }] })
   })
 
   test("preserves raw lexical spelling of ANSI-C and locale quoted words", () => {
