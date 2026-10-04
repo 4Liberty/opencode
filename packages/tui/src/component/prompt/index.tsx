@@ -50,7 +50,7 @@ import { createFadeIn } from "../../util/signal"
 import { DialogSkill } from "../dialog-skill"
 import { useConfig } from "../../config"
 import { usePromptMove } from "./move"
-import { mayResolvePastedAttachments, resolvePastedAttachments } from "./local-attachment"
+import { resolvePastedAttachments } from "./local-attachment"
 import { locationKey, useData } from "../../context/data"
 import { useLocation } from "../../context/location"
 import { useArgs } from "../../context/args"
@@ -1437,12 +1437,13 @@ export function Prompt(props: PromptProps) {
     const normalizedText = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
     // Plain text inserts now so keys from the same input batch, such as punctuation
     // that commits a multi-character IME candidate, land after it.
-    if (!mayResolvePastedAttachments(normalizedText, terminalEnvironment.platform)) {
+    const pending = resolvePastedAttachments(normalizedText, terminalEnvironment.platform)
+    if (!pending) {
       insertPastedText(normalizedText)
       return
     }
     void enqueuePaste(async (changed) => {
-      const attachments = await resolvePastedAttachments(normalizedText, terminalEnvironment.platform)
+      const attachments = await pending
       if (changed()) return
       if (!attachments) {
         insertPastedText(normalizedText)
