@@ -52,7 +52,10 @@ const SPACE_CONTINUATION_AHEAD_RE = /(?:\\\n)*[ \t\n]/y
 const NEGATION_AHEAD_RE = /(?:\\\n)*[ \t\n(]/y
 const COPROC_AHEAD_RE = /coproc[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?(?=[{(]|(?:if|while|until|for|case)\b)/y
 const TIME_AHEAD_RE = /time[ \t]+(?:-p[ \t]+)?(?=[{(]|(?:if|while|until|for|case)\b)/y
-const COMPOUND_KEYWORD_AHEAD_RE = /(?:if|while|until|for|select|case)(?=(?:\\\n)*(?:[ \t\n(]|$))/y
+// [function] name [()] then blanks, continuations, and comments before the body.
+const FUNCTION_HEAD_RE =
+  /(function[ \t](?:[ \t]|\\\n)*)?([A-Za-z_][\w.:+@%-]*)?(?:[ \t]|\\\n)*(\([ \t]*\))?(?:[ \t\n]|\\\n|#[^\n]*\n)*/y
+const FUNCTION_BODY_RE = /[{(]|\[\[(?=(?:\\\n)*[ \t\n])|(?:if|while|until|for|select|case)(?=(?:\\\n)*(?:[ \t\n(]|$))/y
 const DO_AHEAD_RE = /(?:[ \t\n;]|\\\n|#[^\n]*(?:\n|$))*(?:do(?=(?:\\\n)*(?:[ \t\n;{(]|$))|\{(?=(?:\\\n)*[ \t\n]))/y
 const NOFORK_OPEN_RE = /\$\{(?:\\\n)*(?:[ \t\n]|\|)/y
 const ZSH_EVALUATION_RE = /\([^)]*e[^)]*\)|(?:\([^)]*\))?[\^=]*~/y
@@ -262,13 +265,14 @@ function scanBash(
   for (let index = start; index < input.length; index++) {
     if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
     const char = input[index]
-    if (!state.wordStarted) state.wordStart = index
+    // Line continuations are removed before tokens are read.
+    if (char === "\\" && input[index + 1] === "\n") {
+      index++
+      continue
+    }
     if (!state.wordStarted) {
+      state.wordStart = index
       if (char === " " || char === "\t") continue
-      if (char === "\\" && input[index + 1] === "\n") {
-        index++
-        continue
-      }
       if (
         char === "}" &&
         state.words.length === 0 &&
@@ -289,10 +293,6 @@ function scanBash(
       }
     }
     if (char === "\\" && index + 1 >= input.length) return { kind: "opaque", reason: "unterminated-escape" }
-    if (char === "\\" && input[index + 1] === "\n") {
-      index++
-      continue
-    }
     if (input.startsWith("$$'", index)) {
       const nextQuote = input.indexOf("'", index + 3)
       if (nextQuote < 0) return { kind: "opaque", reason: "unterminated-quote" }
@@ -727,59 +727,12 @@ function scanBashKeyword(state: BashState, index: number, depth: number): number
   return undefined
 }
 
-function bashFunctionHeadLength(input: string, start: number): number {
-  let cursor = start
-  const hasKeyword = input.startsWith("function", cursor) && (input[cursor + 8] === " " || input[cursor + 8] === "\t")
-  if (hasKeyword) {
-    cursor += 8
-    while (input[cursor] === " " || input[cursor] === "\t" || (input[cursor] === "\\" && input[cursor + 1] === "\n")) {
-      cursor += input[cursor] === "\\" ? 2 : 1
-    }
-  }
-  const nameStart = cursor
-  if (
-    (input[cursor] >= "A" && input[cursor] <= "Z") ||
-    (input[cursor] >= "a" && input[cursor] <= "z") ||
-    input[cursor] === "_"
-  ) {
-    cursor++
-    while (cursor < input.length && /[A-Za-z0-9_.:+@%-]/.test(input[cursor])) cursor++
-  }
-  const name = input.slice(nameStart, cursor)
-  if (hasKeyword && !name) return 0
-  if (!hasKeyword && name && BASH_NON_FUNCTION_KEYWORDS.has(name)) return 0
-  while (input[cursor] === " " || input[cursor] === "\t" || (input[cursor] === "\\" && input[cursor + 1] === "\n")) {
-    cursor += input[cursor] === "\\" ? 2 : 1
-  }
-  const emptyParens = /^(\([ \t]*\))/.exec(input.slice(cursor, cursor + 32))?.[0]
-  if (!hasKeyword && !emptyParens) return 0
-  if (emptyParens) cursor += emptyParens.length
-  while (cursor < input.length) {
-    if (input[cursor] === " " || input[cursor] === "\t" || input[cursor] === "\n") {
-      cursor++
-      continue
-    }
-    if (input[cursor] === "\\" && input[cursor + 1] === "\n") {
-      cursor += 2
-      continue
-    }
-    if (input[cursor] === "#") {
-      const newline = input.indexOf("\n", cursor)
-      if (newline < 0) return 0
-      cursor = newline + 1
-      continue
-    }
-    break
-  }
-  const bodyChar = input[cursor]
-  if (bodyChar === "{" || bodyChar === "(") return cursor - start
-  if (input.startsWith("[[", cursor)) {
-    SPACE_CONTINUATION_AHEAD_RE.lastIndex = cursor + 2
-    if (SPACE_CONTINUATION_AHEAD_RE.test(input)) return cursor - start
-  }
-  COMPOUND_KEYWORD_AHEAD_RE.lastIndex = cursor
-  if (COMPOUND_KEYWORD_AHEAD_RE.test(input)) return cursor - start
-  return 0
+function bashFunctionHeadLength(input: string, start: number) {
+  FUNCTION_HEAD_RE.lastIndex = start
+  const head = FUNCTION_HEAD_RE.exec(input)
+  if (!head || (head[1] ? !head[2] : !head[3] || BASH_NON_FUNCTION_KEYWORDS.has(head[2] ?? ""))) return 0
+  FUNCTION_BODY_RE.lastIndex = start + head[0].length
+  return FUNCTION_BODY_RE.test(input) ? head[0].length : 0
 }
 
 // Word text is unquoted. Quoted text follows double-quote rules. Arithmetic text, including subscripts,
