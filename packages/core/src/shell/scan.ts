@@ -98,6 +98,8 @@ type BashState = {
   commandEnd: number
   resourceEnd: number | undefined
   redirectWordCount: number | undefined
+  // Dash reads `&>` as `&` and `>`, so later words would start another command there.
+  ampersandRedirectWords: number | undefined
   commandWordIndex: number
   assignmentWord: boolean
   assignmentHeadUnsafe: boolean
@@ -201,6 +203,7 @@ function finishBashCommand(state: BashState, boundary = false) {
   }
   if (boundary && !state.words.length && !state.hasRedirect && !state.compoundEnd && !inHeader)
     state.invalidStructure = true
+  if (state.words.length > (state.ampersandRedirectWords ?? Infinity)) state.invalidRedirect = true
   state.commands.push(...state.nestedCommands.splice(0))
   if (!inHeader && (state.words.length > 0 || state.hasRedirect)) bashStatement(state)
   state.words.length = 0
@@ -210,6 +213,7 @@ function finishBashCommand(state: BashState, boundary = false) {
   state.hasRedirect = false
   state.resourceEnd = undefined
   state.redirectWordCount = undefined
+  state.ampersandRedirectWords = undefined
   state.compoundEnd = false
   state.dangling = false
 }
@@ -238,6 +242,7 @@ function scanBash(
     commandEnd: start,
     resourceEnd: undefined,
     redirectWordCount: undefined,
+    ampersandRedirectWords: undefined,
     commandWordIndex: -1,
     assignmentWord: false,
     assignmentHeadUnsafe: false,
@@ -490,6 +495,7 @@ function scanBashOperatorOrSeparator(
       state.wordStarted = false
     }
     if (!fdPrefix) finishBashWord(state)
+    if (redirect.startsWith("&")) state.ampersandRedirectWords ??= state.words.length
     // Trailing redirects wrap a whole list/pipeline in the legacy grammar, not its last command.
     // Prefix redirects remain part of the command, and later words remain redirect destinations.
     if (state.redirectWordCount === undefined && state.commandWordIndex >= 0) {

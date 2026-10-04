@@ -267,6 +267,8 @@ const additionalOracleFixtures = [
   "a[b; scan_probe; echo ]=1",
   "a[0 #]\n]=1; scan_probe",
   "if true; then >/dev/null fi; scan_probe; fi",
+  "true &>/dev/null scan_probe",
+  "true &>>/dev/null scan_probe",
   "cat <<\\\n-EOF\nEOF\nscan_probe h1\n-EOF",
   "scan_probe[x y]=1",
   "cat <<\\\n-EOF\n-EOF\nscan_probe z\nEOF",

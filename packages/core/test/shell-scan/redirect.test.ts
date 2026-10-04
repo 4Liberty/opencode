@@ -38,6 +38,11 @@ describe("Bash redirect resource oracle", () => {
         `${redirect} FOO=bar git status 3>tail`,
         `npm run ${redirect} test`,
       ]) {
+        // Dash reads `&>` as `&` and `>`, so words after its target start another command there.
+        if (redirect.startsWith("&") && !command.endsWith(redirect)) {
+          expect(ShellScan.scan(command).kind).toBe("opaque")
+          continue
+        }
         await parity(command)
         for (const separator of separators) {
           await parity(`printf ok${separator}${command}`)
