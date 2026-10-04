@@ -176,7 +176,12 @@ function finishBashCommand(state: BashState, boundary = false) {
       }
     }
   }
-  if ((!resource || name < 0) && !inHeader && !state.compoundEnd && (state.hasRedirect || boundary || state.separated)) {
+  if (
+    (!resource || name < 0) &&
+    !inHeader &&
+    !state.compoundEnd &&
+    (state.hasRedirect || boundary || state.separated)
+  ) {
     const assignmentOnly = state.words.length > 0 && name < 0
     if (!assignmentOnly && !state.hasRedirect) state.invalidStructure = true
   }
@@ -626,12 +631,7 @@ function scanBashOperatorOrSeparator(
   }
   if (structure?.kind === "for" && (structure.phase === "header" || structure.phase === "do")) {
     if (separator !== ";" && separator !== "\n") return { kind: "opaque", reason: "compound-command" }
-    if (
-      structure.phase === "header" &&
-      !structure.sawIn &&
-      !state.wordStarted &&
-      state.words.length === 0
-    )
+    if (structure.phase === "header" && !structure.sawIn && !state.wordStarted && state.words.length === 0)
       return { kind: "opaque", reason: "compound-command" }
   }
   if (
@@ -716,8 +716,7 @@ function scanBashCommandStart(
   if (keywordStep !== undefined) return keywordStep
   if (structure?.kind === "for" && structure.phase === "do" && char !== "\n" && char !== "#" && char !== ";") {
     SPACE_CONTINUATION_AHEAD_RE.lastIndex = index + 1
-    if (char !== "{" || !SPACE_CONTINUATION_AHEAD_RE.test(input))
-      return { kind: "opaque", reason: "compound-command" }
+    if (char !== "{" || !SPACE_CONTINUATION_AHEAD_RE.test(input)) return { kind: "opaque", reason: "compound-command" }
     state.structures.pop()
   }
   const inHeaderAfterFor = bashInHeader(state)
@@ -914,8 +913,7 @@ function scanBashKeyword(
     token === "select" ||
     token === "case"
   ) {
-    if (depth + state.structures.length >= MAX_SUBSTITUTION_DEPTH)
-      return { kind: "opaque", reason: "compound-command" }
+    if (depth + state.structures.length >= MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "compound-command" }
     state.structures.push({
       kind: token === "select" ? "for" : token,
       phase: ["for", "select", "case"].includes(token) ? "header" : "condition",
@@ -951,27 +949,23 @@ function bashFunctionHeadLength(input: string, start: number): number {
   const hasKeyword = input.startsWith("function", cursor) && (input[cursor + 8] === " " || input[cursor + 8] === "\t")
   if (hasKeyword) {
     cursor += 8
-    while (
-      input[cursor] === " " ||
-      input[cursor] === "\t" ||
-      (input[cursor] === "\\" && input[cursor + 1] === "\n")
-    ) {
+    while (input[cursor] === " " || input[cursor] === "\t" || (input[cursor] === "\\" && input[cursor + 1] === "\n")) {
       cursor += input[cursor] === "\\" ? 2 : 1
     }
   }
   const nameStart = cursor
-  if ((input[cursor] >= "A" && input[cursor] <= "Z") || (input[cursor] >= "a" && input[cursor] <= "z") || input[cursor] === "_") {
+  if (
+    (input[cursor] >= "A" && input[cursor] <= "Z") ||
+    (input[cursor] >= "a" && input[cursor] <= "z") ||
+    input[cursor] === "_"
+  ) {
     cursor++
     while (cursor < input.length && /[A-Za-z0-9_.:+@%-]/.test(input[cursor])) cursor++
   }
   const name = input.slice(nameStart, cursor)
   if (hasKeyword && !name) return 0
   if (!hasKeyword && name && BASH_NON_FUNCTION_KEYWORDS.has(name)) return 0
-  while (
-    input[cursor] === " " ||
-    input[cursor] === "\t" ||
-    (input[cursor] === "\\" && input[cursor + 1] === "\n")
-  ) {
+  while (input[cursor] === " " || input[cursor] === "\t" || (input[cursor] === "\\" && input[cursor + 1] === "\n")) {
     cursor += input[cursor] === "\\" ? 2 : 1
   }
   const emptyParens = /^(\([ \t]*\))/.exec(input.slice(cursor, cursor + 32))?.[0]

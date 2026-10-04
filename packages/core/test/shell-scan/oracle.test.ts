@@ -136,15 +136,15 @@ const underReportFixtures = [
   // Finding 6: (( ... )) subshell vs arithmetic and subscript single quotes
   "(( echo '\"' ); scan_probe; ( echo '\"' ))",
   "((( echo '\"' ); scan_probe; ( echo '\"' )))",
-  'export X="$( (( echo \'\"\' ); scan_probe; ( echo \'\"\' )) )"',
+  "export X=\"$( (( echo '\"' ); scan_probe; ( echo '\"' )) )\"",
   "export X=${unset:+${x['0\"0']}}; scan_probe; : '\"]}}' # '",
   "set=1; export X=${set:-${x['0\"0']}}; scan_probe; : '\"]}}' # '",
-  'export X="$(export Y=${unset:+${x[\'0"0\']}}; scan_probe; : \'"]}}\' # \'\n)"',
+  "export X=\"$(export Y=${unset:+${x['0\"0']}}; scan_probe; : '\"]}}' # '\n)\"",
 
   // Finding 7: $$ followed by '
   "export X=$$'\\'; scan_probe # '",
   "export X=$$$$'\\'; scan_probe # '",
-  'export X="$(export Y=$$\'\\\'; scan_probe # \'\n)"',
+  "export X=\"$(export Y=$$'\\'; scan_probe # '\n)\"",
 
   // Finding 8: double-quoted backticks unescaping \"
   'export X="`export Y=\\"\'\\" ; scan_probe; export Z=\\"\'\\"`"',
@@ -219,10 +219,10 @@ const additionalOracleFixtures = [
   'export X="${x#${y:-"}"}}"; scan_probe',
   "export X=${!prefix*}; scan_probe",
   "export X=${x@Q}; scan_probe",
-  'export X="${unset:+${x[\'"\']}}"; scan_probe; : \'\"}]}\'',
+  "export X=\"${unset:+${x['\"']}}\"; scan_probe; : '\"}]}'",
   'export X="${unset:+${x[\'}}\"; scan_probe; : \"\']}}"',
   'echo $(case x in x) echo ")" ;; esac; scan_probe)',
-  'echo "$(case x in (x) echo \')\' ;; esac; scan_probe)"',
+  "echo \"$(case x in (x) echo ')' ;; esac; scan_probe)\"",
   'echo "`echo \\"$(scan_probe)\\"`"',
   "echo `echo \\`scan_probe\\``",
   "echo $( (echo a); scan_probe )",
@@ -284,7 +284,7 @@ const nestedCoreFixtures = [
   "!(scan_probe)",
 ] as const
 
-describe("real-shell soundness oracle", () => {
+describe.skipIf(process.platform === "win32")("real-shell soundness oracle", () => {
   test("discovers at least bash on PATH", () => {
     expect(shells.some((item) => item.endsWith("/bash"))).toBe(true)
   })
@@ -311,7 +311,7 @@ describe("real-shell soundness oracle", () => {
   }
 })
 
-describe("real-shell directory oracle", () => {
+describe.skipIf(process.platform === "win32")("real-shell directory oracle", () => {
   test("cd with redirect before target directory", async () => {
     await runDirectoryOracle((target) => `cd >/dev/null ${target}`)
   })
