@@ -3,6 +3,7 @@ import path from "node:path"
 import { pathToFileURL } from "node:url"
 import {
   MAX_LOCAL_ATTACHMENT_BYTES,
+  mayResolvePastedAttachments,
   parsePastedFilepaths,
   readLocalAttachmentWith,
   resolvePastedAttachments,
@@ -55,6 +56,21 @@ describe("prompt local attachments", () => {
     expect(
       parsePastedFilepaths(Array.from({ length: 33 }, (_, index) => `/tmp/${index}.png`).join(" "), "linux"),
     ).toEqual([])
+  })
+
+  test("only treats pastes with attachment-like paths as attachment candidates", () => {
+    for (const input of ["你好", "plain\r\ntext", "https://example.com/image.png", "/tmp/notes.txt", ""]) {
+      expect(mayResolvePastedAttachments(input, "linux")).toBeFalse()
+    }
+    for (const input of [
+      "/tmp/image.PNG",
+      "'/tmp/one image.png'",
+      "file:///tmp/file.pdf",
+      "/tmp/one.png /tmp/two.webp",
+    ]) {
+      expect(mayResolvePastedAttachments(input, "linux")).toBeTrue()
+    }
+    expect(mayResolvePastedAttachments('"C:\\image.svg"', "win32")).toBeTrue()
   })
 
   test("reads SVG attachments as text", async () => {

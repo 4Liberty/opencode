@@ -58,6 +58,16 @@ export async function resolvePastedAttachments(text: string, platform: string) {
   })
 }
 
+// Attachments are recognized by extension, so text without such a path can skip filesystem probing.
+export function mayResolvePastedAttachments(text: string, platform: string) {
+  const pastedContent = text.trim()
+  const filepath = normalizePastedFilepath(pastedContent, platform)
+  if (/^(https?):\/\//.test(filepath)) return false
+  return [filepath, ...parsePastedFilepaths(pastedContent, platform)].some(
+    (file) => path.extname(file).toLowerCase() in mimeTypes,
+  )
+}
+
 const mimeTypes: Record<string, string> = {
   ".avif": "image/avif",
   ".gif": "image/gif",

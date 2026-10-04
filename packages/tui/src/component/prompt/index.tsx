@@ -50,7 +50,7 @@ import { createFadeIn } from "../../util/signal"
 import { DialogSkill } from "../dialog-skill"
 import { useConfig } from "../../config"
 import { usePromptMove } from "./move"
-import { resolvePastedAttachments } from "./local-attachment"
+import { mayResolvePastedAttachments, resolvePastedAttachments } from "./local-attachment"
 import { locationKey, useData } from "../../context/data"
 import { useLocation } from "../../context/location"
 import { useArgs } from "../../context/args"
@@ -1450,6 +1450,11 @@ export function Prompt(props: PromptProps) {
       return
     }
 
+    insertPastedText(normalizedText)
+  }
+
+  function insertPastedText(normalizedText: string) {
+    const pastedContent = normalizedText.trim()
     const lineCount = (pastedContent.match(/\n/g)?.length ?? 0) + 1
     if ((lineCount >= 3 || pastedContent.length > 150) && config.prompt?.paste !== "full") {
       const extmark = input.extmarks.getAllForTypeId(promptPartTypeId).find((extmark) => {
@@ -1791,6 +1796,13 @@ export function Prompt(props: PromptProps) {
                 // Once we cross an async boundary below, the terminal may perform its
                 // default paste unless we suppress it first and handle insertion ourselves.
                 event.preventDefault()
+
+                // Insert plain text synchronously so keys from the same input batch, such as
+                // punctuation that commits a multi-character IME candidate, land after it.
+                if (!mayResolvePastedAttachments(normalizedText, terminalEnvironment.platform)) {
+                  insertPastedText(normalizedText)
+                  return
+                }
 
                 void enqueuePaste((changed) => pasteInputText(normalizedText, changed))
               }}
