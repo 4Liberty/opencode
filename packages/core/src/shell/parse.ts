@@ -225,14 +225,18 @@ export const scanPortable = Effect.fnUntraced(function* (command: string, shell:
     if (CWD.has(name)) {
       output.directories.push(
         ...directoryArgs(
-          words.flatMap((text): Part[] => {
+          (powershell ? words : item.rawWords).flatMap((text, index): Part[] => {
             const parameter = powershell ? /^(-(?:literalpath|path)):(.*)$/i.exec(text) : undefined
             if (parameter)
               return [
                 { type: "command_parameter", text: parameter[1] },
                 { type: "word", text: parameter[2] },
               ]
-            return [{ type: powershell && text.startsWith("-") ? "command_parameter" : "word", text }]
+            const resolved =
+              !powershell && (text.startsWith("$'") || (!/[$`~\\]/.test(text) && /['"]/.test(text)))
+                ? (item.words[index] ?? text)
+                : text
+            return [{ type: powershell && resolved.startsWith("-") ? "command_parameter" : "word", text: resolved }]
           }),
           powershell,
           cwd,

@@ -138,7 +138,7 @@ const underReportFixtures = [
   "((( echo '\"' ); scan_probe; ( echo '\"' )))",
   'export X="$( (( echo \'\"\' ); scan_probe; ( echo \'\"\' )) )"',
   "export X=${unset:+${x['0\"0']}}; scan_probe; : '\"]}}' # '",
-  "export X=${unset:-${x['0\"0']}}; scan_probe; : '\"]}}' # '",
+  "set=1; export X=${set:-${x['0\"0']}}; scan_probe; : '\"]}}' # '",
   'export X="$(export Y=${unset:+${x[\'0"0\']}}; scan_probe; : \'"]}}\' # \'\n)"',
 
   // Finding 7: $$ followed by '
@@ -221,7 +221,7 @@ describe("real-shell soundness oracle", () => {
   })
 
   for (const fixture of underReportFixtures) {
-    test.failing(`reports or rejects real-shell execution: ${JSON.stringify(fixture)}`, () => {
+    test(`reports or rejects real-shell execution: ${JSON.stringify(fixture)}`, () => {
       runProbeOracle(fixture)
     })
   }
@@ -235,7 +235,7 @@ describe("real-shell soundness oracle", () => {
   for (const [wrapperName, wrap] of nestingWrappers) {
     for (const core of nestedCoreFixtures) {
       const fixture = wrap(core)
-      test.failing(`reports or rejects in ${wrapperName}: ${JSON.stringify(core)}`, () => {
+      test(`reports or rejects in ${wrapperName}: ${JSON.stringify(core)}`, () => {
         runProbeOracle(fixture)
       })
     }
@@ -243,15 +243,15 @@ describe("real-shell soundness oracle", () => {
 })
 
 describe("real-shell directory oracle", () => {
-  test.failing("cd with redirect before target directory", async () => {
+  test("cd with redirect before target directory", async () => {
     await runDirectoryOracle((target) => `cd >/dev/null ${target}`)
   })
 
-  test.failing("cd with stderr redirect before target directory", async () => {
+  test("cd with stderr redirect before target directory", async () => {
     await runDirectoryOracle((target) => `cd 2>/dev/null ${target}`)
   })
 
-  test.failing("cd with ANSI-C quoted target directory", async () => {
+  test("cd with ANSI-C quoted target directory", async () => {
     await runDirectoryOracle((target) => `cd $'${target}'`)
   })
 
@@ -261,7 +261,7 @@ describe("real-shell directory oracle", () => {
 })
 
 describe("valid commands that must scan without false opacity", () => {
-  test.failing.each([
+  test.each([
     ["case $r in a) ls | head;; esac", ["ls", "head"]],
     ["case $r in a) ls && echo;; esac", ["ls", "echo"]],
     ["{ find . -exec echo {} \\; ; }", ["find"]],
@@ -281,7 +281,7 @@ describe("valid commands that must scan without false opacity", () => {
     expect(ShellScan.scan("case $r in a) ls |;; esac").kind).toBe("opaque")
   })
 
-  test.failing("scans deeply nested brace groups with bracket words under 50ms", () => {
+  test("scans deeply nested brace groups with bracket words under 50ms", () => {
     const source = "{ ".repeat(31) + "echo " + "a[] ".repeat(15_000) + "; }".repeat(31)
     const start = performance.now()
     const result = ShellScan.scan(source)
