@@ -183,12 +183,20 @@ function selection(local: ReturnType<typeof useLocal>) {
   }
 }
 
-test("restores durable agents even when the agent selector is hidden", () => {
-  const f = fixture({ session: durable("b", "high", "plan") })
+test("hiding agents overrides custom-agent discovery without changing existing sessions", () => {
+  const f = fixture({
+    session: durable("b", "high", "plan"),
+    agents: [agent("build"), agent("plan"), { ...agent("custom"), native: false }],
+  })
+
   f.set("visible", false)
   const { local } = f.mount()
   expect(local.agent.visible()).toBe(false)
   expect(selection(local)).toEqual({ agent: "plan", model: "b", variant: "high" })
+  f.set("route", "id", undefined)
+  expect(local.agent.current()?.name).toBe("build")
+  f.set("visible", true)
+  expect(local.agent.visible()).toBe(true)
 })
 
 test("waits for initial configuration and reloads it after reconnecting", () => {
