@@ -101,6 +101,26 @@ const findLineOccurrences = (content: string, search: string) => {
   }, [])
 }
 
+/** The dominant line ending in text, or fallback when there is none. */
+const lineEnding = (text: string, fallback: string) => {
+  const crlfCount = text.split(crlf).length - 1
+  const lfCount = text.split("\n").length - 1 - crlfCount
+  if (crlfCount === lfCount) return fallback
+  return crlfCount > lfCount ? crlf : "\n"
+}
+
+/** Number of sorted positions strictly before offset. */
+const countBefore = (positions: number[], offset: number) => {
+  let low = 0
+  let high = positions.length
+  while (low < high) {
+    const middle = (low + high) >> 1
+    if (positions[middle] < offset) low = middle + 1
+    else high = middle
+  }
+  return low
+}
+
 /** Deferred edit behavior and UX integrations remain visible at the model-facing seam. */
 // TODO: Publish watcher/file-edit events after watcher integration exists.
 // TODO: Add snapshots / undo after design exists.
@@ -122,7 +142,7 @@ export const Plugin = {
           name,
           options: { codemode: false, permission: "edit" },
           description:
-            "Edit the contents of a file by finding and replacing exact text. When editing text from Read output, preserve the exact indentation (tabs or spaces) and omit the line-number prefix, such as `1: `. Never include the prefix in oldString or newString. The edit fails if oldString is not found. By default, oldString must identify a UNIQUE location. Multiple matches FAIL unless replaceAll is true. Add more surrounding context to disambiguate, or set replaceAll to true to replace every occurrence. Use replaceAll when the change should apply to every occurrence, such as renaming a variable.",
+            "Edit the contents of a file by finding and replacing exact text. When editing text from Read output, preserve the exact indentation (tabs or spaces) and omit the line-number prefix, such as `1: `. Never include the prefix in oldString or newString. Write line breaks as \\n; the file's existing CRLF or LF line endings are matched and preserved. If there is no exact match, the edit retries while ignoring typographic quote, dash, and space variants, then trailing whitespace on each line. The edit fails if oldString is not found. By default, oldString must identify a UNIQUE location. Multiple matches FAIL unless replaceAll is true. Add more surrounding context to disambiguate, or set replaceAll to true to replace every occurrence. Use replaceAll when the change should apply to every occurrence, such as renaming a variable.",
           input: Input,
           output: Output,
           execute: (input, context) => {
@@ -157,22 +177,29 @@ export const Plugin = {
                 ),
               )
               const source = original.text
-              const ending = source.includes(crlf) ? crlf : "\n"
-              const oldString = input.oldString.replaceAll(crlf, "\n").replaceAll("\n", ending)
-              const newString = input.newString.replaceAll(crlf, "\n").replaceAll("\n", ending)
-              const exact = findOccurrences(source, oldString)
-              // These one-to-one mappings preserve offsets into the original source.
+              // Match against the LF view Read shows the model, then map offsets back to the source, so
+              // CRLF and mixed line endings neither block matches nor leak into untouched regions.
+              const view = source.replaceAll(crlf, "\n")
+              const removed = [...source.matchAll(/\r\n/g)].map((match, index) => match.index - index)
+              const fileEnding = lineEnding(source, "\n")
+              const oldString = input.oldString.replaceAll(crlf, "\n")
+              const newString = input.newString.replaceAll(crlf, "\n")
+              const exact = findOccurrences(view, oldString)
+              // These one-to-one mappings preserve offsets into the LF view.
               const unicode =
-                exact.length > 0 ? [] : findOccurrences(normalizeForMatch(source), normalizeForMatch(oldString))
-              const trailing = exact.length > 0 || unicode.length > 0 ? [] : findLineOccurrences(source, oldString)
-              const matches = exact.length > 0 ? exact : unicode.length > 0 ? unicode : trailing
+                exact.length > 0 ? [] : findOccurrences(normalizeForMatch(view), normalizeForMatch(oldString))
+              const trailing = exact.length > 0 || unicode.length > 0 ? [] : findLineOccurrences(view, oldString)
+              const matches = (exact.length > 0 ? exact : unicode.length > 0 ? unicode : trailing).map((match) => ({
+                start: match.start + countBefore(removed, match.start),
+                end: match.end + countBefore(removed, match.end),
+              }))
               const replacements = matches.length
               const replaced = (input.replaceAll === true ? matches : matches.slice(0, 1))
                 .toReversed()
-                .reduce(
-                  (content, match) => `${content.slice(0, match.start)}${newString}${content.slice(match.end)}`,
-                  source,
-                )
+                .reduce((content, match) => {
+                  const ending = lineEnding(source.slice(match.start, match.end), fileEnding)
+                  return `${content.slice(0, match.start)}${newString.replaceAll("\n", ending)}${content.slice(match.end)}`
+                }, source)
               const preview =
                 replacements > 0 && (replacements === 1 || input.replaceAll === true)
                   ? fileDiff(target.resource, source, replaced)

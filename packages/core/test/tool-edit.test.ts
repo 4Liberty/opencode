@@ -586,6 +586,56 @@ describe("EditTool", () => {
     }),
   )
 
+  it.live("matches across mixed line endings and keeps each region's endings", () =>
+    withTempDir((tmp) => {
+      const edit = makeEditFixture()
+      const mostlyLf = path.join(tmp.path, "mostly-lf.txt")
+      const mostlyCrlf = path.join(tmp.path, "mostly-crlf.txt")
+      return Effect.promise(() =>
+        Promise.all([
+          fs.writeFile(mostlyLf, "head\r\nAAA OLD BBB\ntail\n"),
+          fs.writeFile(mostlyCrlf, "one\r\ntwo\r\nthree\nfour\r\n"),
+        ]),
+      ).pipe(
+        Effect.andThen(
+          withTool(tmp.path, edit, (registry) =>
+            Effect.gen(function* () {
+              const inline = yield* executeTool(
+                registry,
+                call({ path: "mostly-lf.txt", oldString: "AAA OLD BBB", newString: "AAA NEW\nLINE2" }),
+              )
+              expect(inline.status).toBe("completed")
+              const spanning = yield* executeTool(
+                registry,
+                call({ path: "mostly-lf.txt", oldString: "LINE2\ntail", newString: "LINE2\nTAIL" }),
+              )
+              expect(spanning.status).toBe("completed")
+              const crossing = yield* executeTool(
+                registry,
+                call({ path: "mostly-crlf.txt", oldString: "o\nthree\nfo", newString: "O\nTHREE\nFO" }),
+              )
+              expect(crossing.status).toBe("completed")
+              const single = yield* executeTool(
+                registry,
+                call({ path: "mostly-crlf.txt", oldString: "one", newString: "ONE\nUNO" }),
+              )
+              expect(single.status).toBe("completed")
+            }),
+          ),
+        ),
+        Effect.andThen(
+          Effect.promise(() => Promise.all([fs.readFile(mostlyLf, "utf8"), fs.readFile(mostlyCrlf, "utf8")])),
+        ),
+        Effect.tap(([lfContent, crlfContent]) =>
+          Effect.sync(() => {
+            expect(lfContent).toBe("head\r\nAAA NEW\nLINE2\nTAIL\n")
+            expect(crlfContent).toBe("ONE\r\nUNO\r\ntwO\r\nTHREE\r\nFOur\r\n")
+          }),
+        ),
+      )
+    }),
+  )
+
   it.live("serializes concurrent edit transactions", () =>
     withTempDir((tmp) => {
       const edit = makeEditFixture()
