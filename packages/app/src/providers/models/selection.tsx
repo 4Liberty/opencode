@@ -266,6 +266,11 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       },
     }
 
+    createEffect(() => {
+      if (agentsVisible() || agent.current()?.name === "build") return
+      agent.set("build")
+    })
+
     const current = createMemo(() => {
       if (!configuredModel.ready()) return
 
