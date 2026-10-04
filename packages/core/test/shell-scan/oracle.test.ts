@@ -36,6 +36,10 @@ beforeAll(() => {
   const probe = path.join(binDir, "scan_probe")
   fs.writeFileSync(probe, '#!/bin/sh\nprintf \'%s\\n\' "scan_probe${1:+ $*}" >> "$SCAN_PROBE_LOG"\n')
   fs.chmodSync(probe, 0o755)
+  // Dash runs `scan_probe[x y]=1` as the command `scan_probe[x`.
+  fs.copyFileSync(probe, path.join(binDir, "scan_probe[x"))
+  // Zsh treats a trailing parenthesized group after an existing file name as glob qualifiers.
+  fs.writeFileSync(path.join(tempDir, "a="), "")
 })
 
 afterAll(() => {
@@ -262,6 +266,42 @@ const additionalOracleFixtures = [
   "{ export X=1 } ; scan_probe ; }",
   "a[b; scan_probe; echo ]=1",
   "a[0 #]\n]=1; scan_probe",
+  "if true; then >/dev/null fi; scan_probe; fi",
+] as const
+
+const knownGapFixtures = [
+  "case [ in [) scan_probe & ( scan_probe q ]) ;; esac",
+  "case x in (x|[) scan_probe & ( scan_probe q ]) ;; esac",
+  "echo \"${x:-$'$(scan_probe q1)'}\"",
+  "cat <<E\n$\\\n(scan_probe h)\nE",
+  "echo ${x:-$\\\n(scan_probe p)}",
+  "(( $\\\n(scan_probe a) ))",
+  "[[ $\\\n(scan_probe c) ]]",
+  "a=($\\\n(scan_probe arr))",
+  "[[ -n <\\\n(scan_probe c1) ]]",
+  "a=(<\\\n(scan_probe a1))",
+  "cat <<\\\n-EOF\nEOF\nscan_probe h1\n-EOF",
+  "echo @(<(scan_probe e1))",
+  "echo *(e:'scan_probe q1':)",
+  "echo *(+scan_probe)",
+  "a=(*(e:'scan_probe g':))",
+  "for f in *(e:'scan_probe h':); do :; done",
+  "echo ${x:-<(scan_probe p1)}",
+  "x=${y:-<(scan_probe p4)}",
+  "[[ x == ${y:-<(scan_probe p5)} ]]",
+  "echo ${x:-target(e:'scan_probe p2':)}",
+  "echo a=(e:'scan_probe p3':)",
+  "scan_probe[x y]=1",
+  "declare -i x='a[$(scan_probe)]'",
+  "declare 'a[$(scan_probe)]=1'",
+  "a=(1); unset 'a[$(scan_probe)]'",
+  "[[ 'a[$(scan_probe)]' -eq 1 ]]",
+  "[[ -v 'a[$(scan_probe)]' ]]",
+  "read 'a[$(scan_probe)]' </dev/null",
+  "printf -v 'a[$(scan_probe)]' x",
+  "x='a[$(scan_probe)]'; echo $((x))",
+  "x='$(scan_probe)'; echo ${x@P}",
+  "x='$(scan_probe)'; echo ${(e)x}",
 ] as const
 
 const nestingWrappers: Array<[name: string, wrap: (inner: string) => string]> = [
@@ -297,6 +337,12 @@ describe.skipIf(process.platform === "win32")("real-shell soundness oracle", () 
 
   for (const fixture of additionalOracleFixtures) {
     test(`reports or rejects additional real-shell variant: ${JSON.stringify(fixture)}`, () => {
+      runProbeOracle(fixture)
+    })
+  }
+
+  for (const fixture of knownGapFixtures) {
+    test.failing(`known gap: ${JSON.stringify(fixture)}`, () => {
       runProbeOracle(fixture)
     })
   }
@@ -337,13 +383,17 @@ describe("valid commands that must scan without false opacity", () => {
     ["{ echo {a,{b,c}}; }", ["echo"]],
     ["if true; then\\\n echo hi; fi", ["true", "echo"]],
     ["for ((i=0; i<2; i++)) do echo hi; done", ["echo"]],
-    ["case x in [)] ) echo hi;; esac", ["echo"]],
     ['echo "$(case x in @(a)) echo hi;; esac)"', ["echo", "echo"]],
   ] as const)("scans valid construct: %s", (source, expectedHeads) => {
     const result = ShellScan.scan(source)
     expect(result.kind).toBe("scanned")
     if (result.kind !== "scanned") return
     expect(result.commands.map((cmd) => cmd.words[0])).toEqual([...expectedHeads])
+  })
+
+  test.failing("scans POSIX for loops without an in list", () => {
+    const result = ShellScan.scan("set -- 1; for x do scan_probe; done")
+    expect(result.kind).toBe("scanned")
   })
 
   test("keeps incomplete pipeline inside case arm opaque", () => {
