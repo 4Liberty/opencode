@@ -1224,12 +1224,20 @@ function bashHeredoc(input: string, start: number, delimiter: { delimiter: strin
   const bodyStart = start
   let lineStart = start
   let line = ""
+  // Backslashes ending the joined line; an odd count continues it.
+  let backslashes = 0
   for (let index = start; index <= input.length; index++) {
     if (index < input.length && input[index] !== "\n") continue
-    const text = input.slice(start, index)
-    line += delimiter.tabs && start === lineStart ? text.replace(/^\t+/, "") : text
-    if (!delimiter.quoted && /(?<!\\)(?:\\\\)*\\$/.test(line) && index < input.length) {
-      line = line.slice(0, -1)
+    const text =
+      delimiter.tabs && start === lineStart ? input.slice(start, index).replace(/^\t+/, "") : input.slice(start, index)
+    let run = 0
+    while (text[text.length - 1 - run] === "\\") run++
+    backslashes = run === text.length ? backslashes + run : run
+    const continued = !delimiter.quoted && backslashes % 2 === 1 && index < input.length
+    // Joined lines only grow, so text past the delimiter's length cannot change the comparison.
+    if (line.length <= delimiter.delimiter.length) line += continued ? text.slice(0, -1) : text
+    if (continued) {
+      backslashes--
       start = index + 1
       continue
     }
@@ -1239,6 +1247,7 @@ function bashHeredoc(input: string, start: number, delimiter: { delimiter: strin
       return { source: input.slice(bodyStart, lineStart), end: index }
     }
     line = ""
+    backslashes = 0
     start = index + 1
     lineStart = start
   }

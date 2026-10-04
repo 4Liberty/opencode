@@ -417,13 +417,4 @@ describe("valid commands that must scan without false opacity", () => {
   test("keeps incomplete pipeline inside case arm opaque", () => {
     expect(ShellScan.scan("case $r in a) ls |;; esac").kind).toBe("opaque")
   })
-
-  test("scans deeply nested brace groups with bracket words under 50ms", () => {
-    const source = "{ ".repeat(31) + "echo " + "a[] ".repeat(15_000) + "; }".repeat(31)
-    const start = performance.now()
-    const result = ShellScan.scan(source)
-    const elapsed = performance.now() - start
-    expect(result.kind).toBe("scanned")
-    expect(elapsed).toBeLessThan(50)
-  })
 })

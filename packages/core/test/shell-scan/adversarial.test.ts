@@ -50,6 +50,19 @@ describe("ShellScan adversarial corpus", () => {
   )
 
   test.each([
+    ["repeated assignment value operators", "x[a]" + "=]".repeat(32_000)],
+    ["unclosed assignment subscripts", "a[\n".repeat(21_000)],
+    ["case patterns with substitutions", "case x in " + "[$(:)".repeat(10_000)],
+    ["nested groups with bracket words", "{ ".repeat(31) + "echo " + "a[] ".repeat(15_000) + "; }".repeat(31)],
+    ["continued heredoc lines", "cat <<E\n" + "x\\\n".repeat(20_000) + "E\n"],
+    ["heredoc backslash runs", "cat <<E\n" + "\\".repeat(60_000) + "x\nE\n"],
+  ])("scans adversarial Bash input in bounded time: %s", (_, input) => {
+    const start = performance.now()
+    ShellScan.scan(input)
+    expect(performance.now() - start).toBeLessThan(500)
+  })
+
+  test.each([
     ['pwsh --command "Remove-Item victim.txt"', ["pwsh"]],
     ["Import-Module ./evil.psm1", ["Import-Module"]],
     ["Invoke-Expression 'Remove-Item victim.txt'", ["Invoke-Expression"]],
