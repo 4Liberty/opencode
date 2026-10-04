@@ -265,7 +265,7 @@ export const dict: Record<string, string> = {
   "ui.common.fileCount.other": "{{count}} berkas",
   "ui.fileMedia.audioLabel": "Audio: {{filename}}",
   "ui.lineComment.label": "Komentar di {{selection}}",
-  "ui.lineComment.editorLabel": "Sitemap _ {{selection}}",
+  "ui.lineComment.editorLabel": "Mengomentari {{selection}}",
   "ui.list.emptyWithFilter": "Tidak ada hasil untuk {{query}}",
   "ui.common.questionCount.one": "Pertanyaan {{count}}",
   "ui.common.questionCount.other": "Pertanyaan {{count}}",
