@@ -633,6 +633,18 @@ function scanBashKeyword(state: BashState, index: number, depth: number): number
     state.compoundEnd = true
     return end
   }
+  // POSIX `for name do` omits the in list.
+  if (
+    structure?.kind === "for" &&
+    structure.phase === "header" &&
+    !structure.sawIn &&
+    state.words.length === 1 &&
+    !state.hasRedirect &&
+    token === "do"
+  ) {
+    finishBashCommand(state)
+    structure.phase = "do"
+  }
   const inHeader = bashInHeader(state)
   if (
     token &&

@@ -430,7 +430,7 @@ describe("valid commands that must scan without false opacity", () => {
     expect(result.commands.map((cmd) => cmd.words[0])).toEqual([...expectedHeads])
   })
 
-  test.failing("scans POSIX for loops without an in list", () => {
+  test("scans POSIX for loops without an in list", () => {
     const result = ShellScan.scan("set -- 1; for x do scan_probe; done")
     expect(result.kind).toBe("scanned")
   })
