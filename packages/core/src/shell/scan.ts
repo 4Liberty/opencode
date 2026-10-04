@@ -55,6 +55,7 @@ const TIME_AHEAD_RE = /time[ \t]+(?:-p[ \t]+)?(?=[{(]|(?:if|while|until|for|case
 const COMPOUND_KEYWORD_AHEAD_RE = /(?:if|while|until|for|select|case)(?=(?:\\\n)*(?:[ \t\n(]|$))/y
 const DO_AHEAD_RE = /(?:[ \t\n;]|\\\n|#[^\n]*(?:\n|$))*(?:do(?=(?:\\\n)*(?:[ \t\n;{(]|$))|\{(?=(?:\\\n)*[ \t\n]))/y
 const NOFORK_OPEN_RE = /\$\{(?:\\\n)*(?:[ \t\n]|\|)/y
+const ZSH_EVALUATION_RE = /\([^)]*e[^)]*\)|(?:\([^)]*\))?[\^=]*~/y
 const PARAMETER_SUBSCRIPT_RE = /[!#]?[A-Za-z_][A-Za-z0-9_]*\[/y
 const BASH_ANSI_ESCAPES: Record<string, string> = {
   a: "\x07",
@@ -91,6 +92,7 @@ type BashState = {
     parenthesized?: boolean
   }>
   word: string
+  literal: string
   wordStarted: boolean
   wordStart: number
   wordEnd: number
@@ -103,8 +105,7 @@ type BashState = {
   commandWordIndex: number
   assignmentWord: boolean
   assignmentHeadUnsafe: boolean
-  invalidRedirect: boolean
-  invalidStructure: boolean
+  invalid: OpaqueReason | undefined
   redirectTarget: boolean
   hasRedirect: boolean
   compoundEnd: boolean
@@ -113,6 +114,9 @@ type BashState = {
 }
 
 type Opaque = { kind: "opaque"; reason: OpaqueReason }
+
+// Cooked word text, and the literal text the word decodes to apart from its expansions.
+type BashText = { word: string; literal: string }
 
 export function scan(input: string): Result {
   if (input.length > MAX_INPUT_LENGTH) return { kind: "opaque", reason: "invalid-structure" }
@@ -146,14 +150,15 @@ function endBashList(state: BashState) {
 }
 
 function closeBashList(state: BashState, end: number): BashResult {
-  if (!endBashList(state) || state.invalidStructure) return { kind: "opaque", reason: "invalid-structure" }
-  if (state.invalidRedirect) return { kind: "opaque", reason: "invalid-redirect" }
+  if (!endBashList(state)) return { kind: "opaque", reason: "invalid-structure" }
+  if (state.invalid) return { kind: "opaque", reason: state.invalid }
   if (state.structures.length) return { kind: "opaque", reason: "compound-command" }
   return { kind: "scanned", commands: state.commands, end }
 }
 
 function finishBashWord(state: BashState) {
   if (!state.wordStarted) return
+  if (bashEvaluatesSubscript(state.literal)) state.invalid ??= "dynamic-execution"
   if (!state.redirectTarget) {
     if (!state.assignmentWord && state.commandWordIndex < 0) state.commandWordIndex = state.words.length
     state.commandStart ??= state.wordStart
@@ -164,6 +169,7 @@ function finishBashWord(state: BashState) {
   }
   state.redirectTarget = false
   state.word = ""
+  state.literal = ""
   state.wordStarted = false
   state.assignmentWord = false
   state.assignmentHeadUnsafe = false
@@ -171,12 +177,12 @@ function finishBashWord(state: BashState) {
 
 function finishBashCommand(state: BashState, boundary = false) {
   finishBashWord(state)
-  if (state.redirectTarget) state.invalidRedirect = true
+  if (state.redirectTarget) state.invalid ??= "invalid-redirect"
   state.redirectTarget = false
-  if (state.compoundEnd && state.words.length > 0) state.invalidStructure = true
+  if (state.compoundEnd && state.words.length > 0) state.invalid ??= "invalid-structure"
   const name = state.commandWordIndex
   const inHeader = bashInHeader(state)
-  if (name >= 0 && !state.words[name]) state.invalidStructure = true
+  if (name >= 0 && !state.words[name]) state.invalid ??= "invalid-structure"
   if (name >= 0 && !inHeader) {
     const resource = state.input
       .slice(state.commandStart, state.resourceEnd ?? state.wordEnd)
@@ -202,8 +208,8 @@ function finishBashCommand(state: BashState, boundary = false) {
     }
   }
   if (boundary && !state.words.length && !state.hasRedirect && !state.compoundEnd && !inHeader)
-    state.invalidStructure = true
-  if (state.words.length > (state.ampersandRedirectWords ?? Infinity)) state.invalidRedirect = true
+    state.invalid ??= "invalid-structure"
+  if (state.words.length > (state.ampersandRedirectWords ?? Infinity)) state.invalid ??= "invalid-redirect"
   state.commands.push(...state.nestedCommands.splice(0))
   if (!inHeader && (state.words.length > 0 || state.hasRedirect)) bashStatement(state)
   state.words.length = 0
@@ -235,6 +241,7 @@ function scanBash(
     heredocs: [],
     structures: [],
     word: "",
+    literal: "",
     wordStarted: false,
     wordStart: start,
     wordEnd: start,
@@ -246,20 +253,17 @@ function scanBash(
     commandWordIndex: -1,
     assignmentWord: false,
     assignmentHeadUnsafe: false,
-    invalidRedirect: false,
-    invalidStructure: false,
+    invalid: undefined,
     redirectTarget: false,
     hasRedirect: false,
     compoundEnd: false,
     dangling: false,
   }
-  let quote: "single" | "double" | undefined
-
   for (let index = start; index < input.length; index++) {
     if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
     const char = input[index]
     if (!state.wordStarted) state.wordStart = index
-    if (!quote && !state.wordStarted) {
+    if (!state.wordStarted) {
       if (char === " " || char === "\t") continue
       if (char === "\\" && input[index + 1] === "\n") {
         index++
@@ -284,109 +288,44 @@ function scanBash(
         continue
       }
     }
-    if (quote === "single") {
-      state.wordStarted = true
-      state.wordEnd = index + 1
-      if (char === "'") {
-        quote = undefined
-        continue
-      }
-      state.word += char
-      continue
-    }
-    if (quote === "double") {
-      state.wordStarted = true
-      if (char === '"') {
-        quote = undefined
-        state.wordEnd = index + 1
-        continue
-      }
-      if (char === "\\" && '$`"\\\n'.includes(input[index + 1] ?? "\0")) {
-        if (input[++index] !== "\n") state.word += input[index]
-        state.wordEnd = index + 1
-        continue
-      }
-      const allowBracket = state.commandWordIndex >= 0 && !BASH_DECLARATIONS.has(state.rawWords[0])
-      const unit = scanBashUnit(input, index, depth, budget, state.nestedCommands, "quoted", allowBracket)
-      if (typeof unit === "object") return unit
-      state.word += input.slice(index, (unit ?? index) + 1)
-      index = unit ?? index
-      state.wordEnd = index + 1
-      continue
-    }
-    if (char === "$" && input[index + 1] === "$") {
-      if (input[index + 2] === "'") {
-        const nextQuote = input.indexOf("'", index + 3)
-        if (nextQuote < 0) return { kind: "opaque", reason: "unterminated-quote" }
-        // Zsh parses $$'...' with ANSI-C escapes while Bash/Dash treat $$ as PID followed by '...'.
-        if (input.slice(index + 3, nextQuote).includes("\\") && input.includes("'", nextQuote + 1)) {
-          const lineEnd = input.indexOf("\n", nextQuote + 1)
-          const tail = input.slice(nextQuote + 1, lineEnd < 0 ? input.length : lineEnd)
-          const hashIndex = tail.indexOf("#")
-          if (hashIndex < 0 || tail.slice(0, hashIndex).includes("'"))
-            return { kind: "opaque", reason: "unterminated-quote" }
-        }
-      }
-      state.wordStarted = true
-      state.word += "$$"
+    if (char === "\\" && index + 1 >= input.length) return { kind: "opaque", reason: "unterminated-escape" }
+    if (char === "\\" && input[index + 1] === "\n") {
       index++
-      state.wordEnd = index + 1
       continue
     }
-    if (char === "$" && input[index + 1] === "'") {
-      const literal = bashAnsiQuote(input, index + 1)
-      if (!literal) return { kind: "opaque", reason: "unterminated-quote" }
-      state.wordStarted = true
-      if (!state.assignmentWord) state.assignmentHeadUnsafe = true
-      state.word += literal.value
-      index = literal.end
-      state.wordEnd = index + 1
-      continue
-    }
-    if (char === "$" && input[index + 1] === '"') {
-      quote = "double"
-      state.wordStarted = true
-      if (!state.assignmentWord) state.assignmentHeadUnsafe = true
-      state.wordEnd = ++index + 1
-      continue
-    }
-    if (char === "'") {
-      quote = "single"
-      state.wordStarted = true
-      state.wordEnd = index + 1
-      if (!state.assignmentWord) state.assignmentHeadUnsafe = true
-      continue
-    }
-    if (char === '"') {
-      quote = "double"
-      state.wordStarted = true
-      state.wordEnd = index + 1
-      if (!state.assignmentWord) state.assignmentHeadUnsafe = true
-      continue
-    }
-    if (char === "\\") {
-      if (index + 1 >= input.length) return { kind: "opaque", reason: "unterminated-escape" }
-      if (input[index + 1] === "\n") {
-        index++
-        continue
+    if (input.startsWith("$$'", index)) {
+      const nextQuote = input.indexOf("'", index + 3)
+      if (nextQuote < 0) return { kind: "opaque", reason: "unterminated-quote" }
+      // Zsh parses $$'...' with ANSI-C escapes while Bash/Dash treat $$ as PID followed by '...'.
+      if (input.slice(index + 3, nextQuote).includes("\\") && input.includes("'", nextQuote + 1)) {
+        const lineEnd = input.indexOf("\n", nextQuote + 1)
+        const tail = input.slice(nextQuote + 1, lineEnd < 0 ? input.length : lineEnd)
+        const hashIndex = tail.indexOf("#")
+        if (hashIndex < 0 || tail.slice(0, hashIndex).includes("'"))
+          return { kind: "opaque", reason: "unterminated-quote" }
       }
+    }
+    if (
+      !state.assignmentWord &&
+      ("'\"\\".includes(char) || (char === "$" && (input[index + 1] === "'" || input[index + 1] === '"')))
+    )
+      state.assignmentHeadUnsafe = true
+    const inCasePattern = state.structures.at(-1)?.phase === "pattern"
+    if (char === "=" && !state.wordStarted && input[index + 1] === "(") {
+      const end = scanBashNested(input, index + 2, depth, budget, state.nestedCommands, ")")
+      if (typeof end === "object") return end
       state.wordStarted = true
-      if (!state.assignmentWord) state.assignmentHeadUnsafe = true
-      state.word += input[++index]
+      state.word += input.slice(index, end + 1)
+      index = end
       state.wordEnd = index + 1
       continue
     }
-    const inCasePattern = state.structures.at(-1)?.phase === "pattern"
     const allowBracket =
       !state.assignmentWord && state.commandWordIndex >= 0 && !BASH_DECLARATIONS.has(state.rawWords[0])
-    const unit =
-      char === "=" && !state.wordStarted && input[index + 1] === "("
-        ? scanBashNested(input, index + 2, depth, budget, state.nestedCommands, ")")
-        : scanBashUnit(input, index, depth, budget, state.nestedCommands, "word", allowBracket)
+    const unit = scanBashUnit(input, index, depth, budget, state.nestedCommands, "word", allowBracket, state)
     if (typeof unit === "object") return unit
     if (unit !== undefined) {
       state.wordStarted = true
-      state.word += input.slice(index, unit + 1)
       index = unit
       state.wordEnd = index + 1
       continue
@@ -461,12 +400,11 @@ function scanBash(
       /^[A-Za-z_][A-Za-z0-9_]*\+?$/.test(state.word)
     )
       state.assignmentWord = true
-    state.word += char
+    bashAppend(state, char)
     state.wordEnd = index + 1
   }
 
   if (close) return { kind: "opaque", reason: close === ")" ? "command-substitution" : "invalid-structure" }
-  if (quote) return { kind: "opaque", reason: "unterminated-quote" }
   if (state.heredocs.length) return { kind: "opaque", reason: "heredoc" }
   return closeBashList(state, input.length)
 }
@@ -485,13 +423,14 @@ function scanBashOperatorOrSeparator(
   if (redirect) {
     state.hasRedirect = true
     state.commandStart ??= state.wordStart
-    if (state.redirectTarget) state.invalidRedirect = true
+    if (state.redirectTarget) state.invalid ??= "invalid-redirect"
     const fdPrefix =
       state.wordStarted && !state.assignmentHeadUnsafe && /^(?:\d+|\{[A-Za-z_][A-Za-z0-9_]*\})$/.test(state.word)
     if (fdPrefix) {
       // A continuation separates the legacy number token from the redirect descriptor.
       if (state.wordEnd < index) state.commandEnd = state.wordEnd
       state.word = ""
+      state.literal = ""
       state.wordStarted = false
     }
     if (!fdPrefix) finishBashWord(state)
@@ -850,8 +789,8 @@ const BASH_SPANS = {
   parameterQuote: { close: "'", reject: '"}[]', mode: "quoted" },
 } satisfies Record<string, BashSpan>
 
-// Scans one quoting or expansion unit at index into commands. Returns the unit's last index, or undefined
-// when the character is ordinary text.
+// Scans one quoting or expansion unit at index into commands, appending its text when given a sink.
+// Returns the unit's last index, or undefined when the character is ordinary text.
 function scanBashUnit(
   input: string,
   index: number,
@@ -860,21 +799,42 @@ function scanBashUnit(
   commands: Command[],
   mode: BashTextMode,
   allowBracket: boolean,
+  text?: BashText,
 ): number | Opaque | undefined {
   const char = input[index]
   const next = input[index + 1] ?? "\0"
-  if (char === "\\") return mode === "quoted" && !'$`"\\\n'.includes(next) ? undefined : index + 1
-  if (char === "$" && next === "$") return index + 1
-  if (mode === "word" && char === "$" && next === "'")
-    return bashAnsiQuote(input, index + 1)?.end ?? { kind: "opaque", reason: "unterminated-quote" }
+  if (char === "\\") {
+    if (mode === "quoted" && !'$`"\\\n'.includes(next)) return undefined
+    if (text && next !== "\n") bashAppend(text, input.slice(index + 1, index + 2))
+    return index + 1
+  }
+  // Zsh globs the value of $~name, which can run glob qualifier code.
+  if (char === "$" && next === "~") return { kind: "opaque", reason: "dynamic-execution" }
+  if (char === "$" && next === "$") {
+    if (text) {
+      text.word += "$$"
+      text.literal += "\0"
+    }
+    return index + 1
+  }
+  if (mode === "word" && char === "$" && next === "'") {
+    const quote = bashAnsiQuote(input, index + 1)
+    if (!quote) return { kind: "opaque", reason: "unterminated-quote" }
+    if (text) bashAppend(text, quote.value)
+    return quote.end
+  }
   if (mode === "word" && char === "'") {
     const end = input.indexOf("'", index + 1)
-    return end < 0 ? { kind: "opaque", reason: "unterminated-quote" } : end
+    if (end < 0) return { kind: "opaque", reason: "unterminated-quote" }
+    if (text) bashAppend(text, input.slice(index + 1, end))
+    return end
   }
   if (mode === "arithmetic" && char === "'")
     return scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.arithmeticQuote, allowBracket)
+  if (mode === "word" && char === "$" && next === '"')
+    return scanBashSpan(input, index + 2, depth, budget, commands, BASH_SPANS.double, allowBracket, text)
   if (mode !== "quoted" && char === '"')
-    return scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.double, allowBracket)
+    return scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.double, allowBracket, text)
   const opener =
     char === "$"
       ? bashOperator(input, index, ["$(", "${", "$["])
@@ -882,10 +842,46 @@ function scanBashUnit(
         ? bashOperator(input, index, [`${char}(`])
         : undefined
   if (typeof opener === "object") return opener
-  if (opener === "<(" || opener === ">(") return scanBashNested(input, index + 2, depth, budget, commands, ")")
-  if (opener || char === "`")
-    return scanBashDollarOrBacktick(input, index, depth, budget, commands, mode !== "word", allowBracket)
-  return undefined
+  const end =
+    opener === "<(" || opener === ">("
+      ? scanBashNested(input, index + 2, depth, budget, commands, ")")
+      : opener || char === "`"
+        ? scanBashDollarOrBacktick(input, index, depth, budget, commands, mode !== "word", allowBracket, text)
+        : undefined
+  if (text && typeof end === "number") {
+    text.word += input.slice(index, end + 1)
+    if (char !== "$" || input[index + 1] !== "{") text.literal += "\0"
+  }
+  return end
+}
+
+function bashAppend(text: BashText, value: string) {
+  text.word += value
+  text.literal += value
+}
+
+// Builtins such as declare, unset, read, and printf -v, and arithmetic on a variable's value, evaluate
+// `name[subscript]`, and declare evaluates `([subscript]=value)`. A literal expansion inside such a subscript
+// runs when the word is evaluated. Quotes and escapes inside the brackets hide a closing bracket. NUL marks
+// where an expansion's value may supply the name.
+function bashEvaluatesSubscript(literal: string) {
+  let depth = 0
+  let quote: string | undefined
+  let previous = ""
+  for (let index = 0; index < literal.length; index++) {
+    const char = literal[index]
+    if (depth && (char === "`" || (char === "$" && "({".includes(literal[index + 1] ?? "\0")))) return true
+    if (quote) {
+      if (char === quote) quote = undefined
+      continue
+    }
+    if (depth && (char === "'" || char === '"')) quote = char
+    else if (depth && char === "\\") index++
+    else if (char === "[" && (depth || /[\w\0(]/.test(previous))) depth++
+    else if (char === "]" && depth) depth--
+    if (!/\s/.test(char)) previous = char
+  }
+  return false
 }
 
 // Scans to the span's unnested close character and returns its index; a span without one runs to the end.
@@ -897,6 +893,7 @@ function scanBashSpan(
   commands: Command[],
   span: BashSpan,
   allowBracket: boolean,
+  text?: BashText,
 ): number | Opaque {
   let nesting = 0
   for (let index = start; index < input.length; index++) {
@@ -912,9 +909,10 @@ function scanBashSpan(
       if (++nesting + depth > MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "invalid-structure" }
       continue
     }
-    const unit = scanBashUnit(input, index, depth, budget, commands, span.mode, allowBracket)
+    const unit = scanBashUnit(input, index, depth, budget, commands, span.mode, allowBracket, text)
     if (typeof unit === "object") return unit
     if (unit !== undefined) index = unit
+    else if (text) bashAppend(text, char)
   }
   return span.close ? { kind: "opaque", reason: "unterminated-quote" } : input.length
 }
@@ -954,6 +952,7 @@ function scanBashDollarOrBacktick(
   commands: Command[],
   quoted: boolean,
   allowBracket: boolean,
+  text?: BashText,
 ): number | Opaque {
   if (depth >= MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "command-substitution" }
   if (input[start] === "`") return scanBashBacktick(input, start, depth + 1, budget, commands, quoted)
@@ -970,7 +969,13 @@ function scanBashDollarOrBacktick(
   NOFORK_OPEN_RE.lastIndex = start
   const nofork = NOFORK_OPEN_RE.exec(input)
   if (nofork) return scanBashNested(input, start + nofork[0].length, depth, budget, commands, "nofork")
-  if (input.startsWith("${", start)) return scanBashParameter(input, start + 2, depth + 1, budget, commands, quoted)
+  if (input.startsWith("${", start)) {
+    // Literal text in parameter words reaches the enclosing word's value.
+    const parameter = { word: "", literal: "" }
+    const end = scanBashParameter(input, start + 2, depth + 1, budget, commands, quoted, parameter)
+    if (text) text.literal += `\0${parameter.literal}\0`
+    return end
+  }
   if (!allowBracket) return { kind: "opaque", reason: "command-substitution" }
   return scanBashSpan(input, start + 2, depth + 1, budget, commands, BASH_SPANS.bracketArithmetic, true)
 }
@@ -1010,23 +1015,29 @@ function scanBashParameter(
   budget: { remaining: number },
   commands: Command[],
   quoted: boolean,
+  text: BashText,
 ): number | Opaque {
+  // Bash ${name@P} and Zsh ${(e)name} and ${~name} evaluate the parameter's value as shell text.
+  ZSH_EVALUATION_RE.lastIndex = start
+  if (ZSH_EVALUATION_RE.test(input)) return { kind: "opaque", reason: "dynamic-execution" }
   PARAMETER_SUBSCRIPT_RE.lastIndex = start
   const subscript = PARAMETER_SUBSCRIPT_RE.test(input) ? PARAMETER_SUBSCRIPT_RE.lastIndex - 1 : -1
   for (let index = start; index < input.length; index++) {
     if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
     const char = input[index]
     if (char === "}") return index
+    if (input.startsWith("@P}", index)) return { kind: "opaque", reason: "dynamic-execution" }
     const unit =
       index === subscript
         ? scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.subscript, false)
         : quoted && char === "'"
-          ? scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.parameterQuote, false)
+          ? scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.parameterQuote, false, text)
           : quoted && char === '"'
-            ? scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.double, false)
-            : scanBashUnit(input, index, depth, budget, commands, quoted ? "quoted" : "word", false)
+            ? scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.double, false, text)
+            : scanBashUnit(input, index, depth, budget, commands, quoted ? "quoted" : "word", false, text)
     if (typeof unit === "object") return unit
     if (unit !== undefined) index = unit
+    else bashAppend(text, char)
   }
   return { kind: "opaque", reason: "command-substitution" }
 }
@@ -1038,6 +1049,7 @@ function scanBashConditional(
   budget: { remaining: number },
   commands: Command[],
 ): number | Opaque {
+  const text = { word: "", literal: "" }
   let wordStarted = false
   let parenDepth = 0
   for (let index = start; index < input.length; index++) {
@@ -1046,6 +1058,10 @@ function scanBashConditional(
     if (char === "\\" && input[index + 1] === "\n") {
       index++
       continue
+    }
+    if (!wordStarted && text.literal) {
+      if (bashEvaluatesSubscript(text.literal)) return { kind: "opaque", reason: "dynamic-execution" }
+      text.literal = ""
     }
     if (!wordStarted && input.startsWith("]]", index)) {
       BRACE_CLOSE_AHEAD_RE.lastIndex = index + 2
@@ -1071,10 +1087,11 @@ function scanBashConditional(
       wordStarted = false
       continue
     }
-    const unit = scanBashUnit(input, index, depth, budget, commands, "word", true)
+    const unit = scanBashUnit(input, index, depth, budget, commands, "word", true, text)
     if (typeof unit === "object") return unit
     if (unit !== undefined) index = unit
     wordStarted = unit !== undefined || !"&|<>".includes(char)
+    if (unit === undefined && wordStarted) text.literal += char
   }
   return { kind: "opaque", reason: "invalid-structure" }
 }

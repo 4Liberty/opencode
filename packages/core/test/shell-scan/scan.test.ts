@@ -234,8 +234,6 @@ describe("ShellScan", () => {
     "{fd}>/tmp/log touch /tmp/victim",
     "time touch /tmp/victim",
     "printf '%s' \"$(printf safe ${x%)}; touch /tmp/victim)\"",
-    "s=abc; x='a[$(touch /tmp/victim)0]'; printf '%s' \"${s:x}\"",
-    "ref='x[$(touch /tmp/victim)0]'; printf '%s' \"${!ref}\"",
     "if true; then echo safe; fi > /tmp/victim",
     "if true; then :; 'if' victim; fi",
   ])("scans Bash lexical forms without interpreting shell values: %s", (command) => {
