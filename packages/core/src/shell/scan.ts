@@ -70,8 +70,7 @@ const BASH_ANSI_ESCAPES: Record<string, string> = {
   "?": "?",
 }
 
-type BashListResult = { kind: "scanned"; commands: Command[]; end: number } | { kind: "opaque"; reason: OpaqueReason }
-type BashSpanResult = { kind: "scanned"; commands: Command[]; end: number } | { kind: "opaque"; reason: OpaqueReason }
+type BashResult = { kind: "scanned"; commands: Command[]; end: number } | { kind: "opaque"; reason: OpaqueReason }
 
 type BashState = {
   input: string
@@ -102,11 +101,9 @@ type BashState = {
   segment: number
   invalidRedirect: boolean
   invalidStructure: boolean
-  separated: boolean
   redirectTarget: boolean
   hasRedirect: boolean
   compoundEnd: boolean
-  statements: number
 }
 
 export function scan(input: string): Result {
@@ -117,7 +114,6 @@ export function scan(input: string): Result {
 }
 
 function bashStatement(state: BashState) {
-  state.statements++
   const structure = state.structures.at(-1)
   if (structure) structure.count++
 }
@@ -154,8 +150,7 @@ function finishBashCommand(state: BashState, boundary = false) {
   const name = state.commandWordIndex
   const inHeader = bashInHeader(state)
   if (name >= 0 && !state.words[name]) state.invalidStructure = true
-  if (state.rawWords.includes("}")) state.invalidStructure = true
-  if (resource && name >= 0 && !inHeader) {
+  if (name >= 0 && !inHeader) {
     const command: Command = {
       resource,
       words: state.words.slice(name),
@@ -176,21 +171,13 @@ function finishBashCommand(state: BashState, boundary = false) {
       }
     }
   }
-  if (
-    (!resource || name < 0) &&
-    !inHeader &&
-    !state.compoundEnd &&
-    (state.hasRedirect || boundary || state.separated)
-  ) {
-    const assignmentOnly = state.words.length > 0 && name < 0
-    if (!assignmentOnly && !state.hasRedirect) state.invalidStructure = true
-  }
+  if (boundary && !state.words.length && !state.hasRedirect && !state.compoundEnd && !inHeader)
+    state.invalidStructure = true
   state.commands.push(...state.nestedCommands.splice(0))
   if (!inHeader && (state.words.length > 0 || state.hasRedirect)) bashStatement(state)
   state.words.length = 0
   state.rawWords.length = 0
   state.commandWordIndex = -1
-  state.separated = true
   state.hasRedirect = false
   state.resourceEnd = undefined
   state.redirectWordCount = undefined
@@ -210,7 +197,7 @@ function scanBash(
   depth: number,
   budget: { remaining: number },
   close?: ")" | "}" | "nofork",
-): BashListResult {
+): BashResult {
   if (depth > MAX_SUBSTITUTION_DEPTH || budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
   const state: BashState = {
     input,
@@ -233,11 +220,9 @@ function scanBash(
     segment: start,
     invalidRedirect: false,
     invalidStructure: false,
-    separated: false,
     redirectTarget: false,
     hasRedirect: false,
     compoundEnd: false,
-    statements: 0,
   }
   let quote: "single" | "double" | undefined
   let dangling = false
@@ -266,8 +251,7 @@ function scanBash(
           finishBashCommand(state)
           dangling = false
         }
-        if (dangling || state.invalidStructure || !state.statements)
-          return { kind: "opaque", reason: "invalid-structure" }
+        if (dangling || state.invalidStructure) return { kind: "opaque", reason: "invalid-structure" }
         if (state.invalidRedirect) return { kind: "opaque", reason: "invalid-redirect" }
         return { kind: "scanned", commands: state.commands, end: index }
       }
@@ -320,7 +304,7 @@ function scanBash(
       if (char === "$" && input[index + 1] === "\\" && input[index + 2] === "\n")
         return { kind: "opaque", reason: "command-substitution" }
       if ((char === "$" && "({[".includes(input[index + 1] ?? "\0")) || char === "`") {
-        const allowBracket = state.commandWordIndex >= 0 && !BASH_DECLARATIONS.has(state.rawWords[0] ?? state.word)
+        const allowBracket = state.commandWordIndex >= 0 && !BASH_DECLARATIONS.has(state.rawWords[0])
         const substitution = scanBashDollarOrBacktick(input, index, depth, budget, true, allowBracket)
         if (substitution.kind === "opaque") return substitution
         state.nestedCommands.push(...substitution.commands)
@@ -412,7 +396,7 @@ function scanBash(
     }
     if ((char === "$" && "({[".includes(input[index + 1] ?? "\0")) || char === "`") {
       const allowBracket =
-        !state.assignmentWord && state.commandWordIndex >= 0 && !BASH_DECLARATIONS.has(state.rawWords[0] ?? "")
+        !state.assignmentWord && state.commandWordIndex >= 0 && !BASH_DECLARATIONS.has(state.rawWords[0])
       const substitution = scanBashDollarOrBacktick(input, index, depth, budget, false, allowBracket)
       if (substitution.kind === "opaque") return substitution
       state.nestedCommands.push(...substitution.commands)
@@ -482,15 +466,13 @@ function scanBash(
     }
     if ("<>&|;\n".includes(char)) {
       const step = scanBashOperatorOrSeparator(state, index, depth, budget, dangling, inList)
-      if (step !== undefined) {
-        if (step.kind === "opaque") return step
-        index = step.index
-        dangling = step.dangling
-        inList = step.inList ?? inList
-        continue
-      }
+      if (step.kind === "opaque") return step
+      index = step.index
+      dangling = step.dangling
+      inList = step.inList ?? inList
+      continue
     }
-    if (inCasePattern && (char === ")" || char === "|")) {
+    if (inCasePattern && char === ")") {
       finishBashWord(state)
       index--
       continue
@@ -544,7 +526,7 @@ function scanBashOperatorOrSeparator(
   budget: { remaining: number },
   dangling: boolean,
   inList: boolean,
-): BashStepResult | undefined {
+): BashStepResult {
   const input = state.input
   const char = input[index]
   const redirect = "<>&".includes(char) ? bashRedirect(input, index) : undefined
@@ -596,12 +578,7 @@ function scanBashOperatorOrSeparator(
   )
     return { kind: "opaque", reason: "invalid-structure" }
   const separator =
-    (char === "&" && next === "&") || (char === "|" && (next === "|" || next === "&"))
-      ? char + next
-      : char === ";" || char === "|" || char === "&" || char === "\n"
-        ? char
-        : undefined
-  if (!separator) return undefined
+    (char === "&" && next === "&") || (char === "|" && (next === "|" || next === "&")) ? char + next : char
   const structure = state.structures.at(-1)
   if (
     char === ";" &&
@@ -891,12 +868,8 @@ function scanBashKeyword(
     state.structures.pop()
     bashStatement(state)
     state.compoundEnd = true
-    structure.count = 0
     state.segment = nextIndex + 1
     return { kind: "step", index: nextIndex, dangling: false, resetList: true }
-  }
-  if (structure?.kind === "for" && structure.phase === "do") {
-    return { kind: "opaque", reason: "compound-command" }
   }
   if (inHeader || state.words.length || state.hasRedirect || state.compoundEnd) return undefined
   const definitionLength = bashFunctionHeadLength(input, index)
@@ -1006,7 +979,7 @@ function scanBashDollarOrBacktick(
   budget: { remaining: number },
   quoted: boolean,
   allowBracket: boolean,
-): BashSpanResult {
+): BashResult {
   if (depth >= MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "command-substitution" }
   if (input[start] === "`") return scanBashBacktick(input, start, depth + 1, budget, quoted)
   if (input.startsWith("$((", start)) {
@@ -1045,8 +1018,7 @@ function scanBashBacktick(
   depth: number,
   budget: { remaining: number },
   quoted: boolean,
-): BashSpanResult {
-  if (depth > MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "command-substitution" }
+): BashResult {
   let source = ""
   for (let index = start + 1; index < input.length; index++) {
     if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
@@ -1072,8 +1044,7 @@ function scanBashArithmetic(
   depth: number,
   budget: { remaining: number },
   allowSemicolon: boolean,
-): BashSpanResult | { kind: "opaque"; reason: OpaqueReason | "not-arithmetic" } {
-  if (depth > MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "invalid-structure" }
+): BashResult | { kind: "opaque"; reason: OpaqueReason | "not-arithmetic" } {
   const commands: Command[] = []
   let parenDepth = 0
   for (let index = start; index < input.length; index++) {
@@ -1140,7 +1111,7 @@ function scanBashArithmeticSingleQuote(
   start: number,
   depth: number,
   budget: { remaining: number },
-): BashSpanResult {
+): BashResult {
   const commands: Command[] = []
   for (let index = start; index < input.length; index++) {
     if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
@@ -1163,8 +1134,7 @@ function scanBashBracketArithmetic(
   start: number,
   depth: number,
   budget: { remaining: number },
-): BashSpanResult {
-  if (depth > MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "command-substitution" }
+): BashResult {
   const commands: Command[] = []
   for (let index = start; index < input.length; index++) {
     if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
@@ -1188,8 +1158,7 @@ function scanBashSubscript(
   depth: number,
   budget: { remaining: number },
   allowBracket: boolean,
-): BashSpanResult {
-  if (depth > MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "command-substitution" }
+): BashResult {
   const commands: Command[] = []
   let bracketDepth = 0
   for (let index = start + 1; index < input.length; index++) {
@@ -1245,8 +1214,7 @@ function scanBashParameter(
   depth: number,
   budget: { remaining: number },
   quoted: boolean,
-): BashSpanResult {
-  if (depth > MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "command-substitution" }
+): BashResult {
   const commands: Command[] = []
   for (let index = start; index < input.length; index++) {
     if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
@@ -1320,8 +1288,7 @@ function scanBashDoubleQuoteSpan(
   depth: number,
   budget: { remaining: number },
   allowBracket: boolean,
-): BashSpanResult {
-  if (depth > MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "command-substitution" }
+): BashResult {
   const commands: Command[] = []
   for (let index = start; index < input.length; index++) {
     if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
@@ -1348,13 +1315,7 @@ function scanBashDoubleQuoteSpan(
   return { kind: "opaque", reason: "unterminated-quote" }
 }
 
-function scanBashConditional(
-  input: string,
-  start: number,
-  depth: number,
-  budget: { remaining: number },
-): BashSpanResult {
-  if (depth > MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "invalid-structure" }
+function scanBashConditional(input: string, start: number, depth: number, budget: { remaining: number }): BashResult {
   const commands: Command[] = []
   let wordStarted = false
   let parenDepth = 0
@@ -1457,7 +1418,7 @@ function scanBashArrayOrPattern(
   depth: number,
   budget: { remaining: number },
   mode: "array" | "pattern",
-): BashSpanResult {
+): BashResult {
   if (depth > MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "command-substitution" }
   const commands: Command[] = []
   let wordStarted = false
@@ -1551,8 +1512,7 @@ function scanBashPatternBracket(
   start: number,
   depth: number,
   budget: { remaining: number },
-): BashSpanResult | undefined {
-  if (depth > MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "command-substitution" }
+): BashResult | undefined {
   const commands: Command[] = []
   let first = start + 1
   if (input[first] === "!" || input[first] === "^") first++
@@ -1584,8 +1544,7 @@ function scanBashPatternBracket(
   return undefined
 }
 
-function scanBashHeredocBody(source: string, depth: number, budget: { remaining: number }): BashSpanResult {
-  if (depth > MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "command-substitution" }
+function scanBashHeredocBody(source: string, depth: number, budget: { remaining: number }): BashResult {
   const commands: Command[] = []
   for (let index = 0; index < source.length; index++) {
     if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
