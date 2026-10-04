@@ -15,6 +15,7 @@ export const createBrowserNetwork = Effect.fn("BrowserNetwork.create")(function*
   partition: string
 }) {
   const options = { location: input.location }
+
   const proxy = yield* Effect.acquireRelease(
     Effect.tryPromise(() =>
       BrowserProxy.make({
@@ -35,6 +36,7 @@ export const createBrowserNetwork = Effect.fn("BrowserNetwork.create")(function*
     ),
     (proxy) => Effect.promise(() => proxy.close()),
   )
+
   const partition = session.fromPartition(input.partition)
   yield* Effect.addFinalizer(() => Effect.promise(() => partition.closeAllConnections()))
   // This is the browser's private partition, not the app/API connection. Never
@@ -43,6 +45,7 @@ export const createBrowserNetwork = Effect.fn("BrowserNetwork.create")(function*
     partition.setProxy({ mode: "fixed_servers", proxyRules: proxy.url, proxyBypassRules: "<-loopback>" }),
   )
   yield* Effect.tryPromise(() => partition.closeAllConnections())
+
   return {
     attach(contents: WebContents) {
       const login = (
@@ -62,8 +65,10 @@ export const createBrowserNetwork = Effect.fn("BrowserNetwork.create")(function*
         event.preventDefault()
         callback(proxy.credentials.username, proxy.credentials.password)
       }
+
       contents.on("login", login)
       contents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp")
+
       return () => contents.off("login", login)
     },
   }

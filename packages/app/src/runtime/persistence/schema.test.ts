@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Effect, Schema, SchemaGetter } from "effect"
+import { Effect, Predicate, Schema, SchemaGetter } from "effect"
 import { Persistence } from "./schema"
 
 describe("persistence schemas", () => {
@@ -12,6 +12,7 @@ describe("persistence schemas", () => {
       }),
       { enabled: true, appearance: { width: 240, font: "default" }, variant: "high" },
     )
+
     const decode = Schema.decodeUnknownSync(schema)
     expect(decode({ appearance: { width: 300 } })).toEqual({
       enabled: true,
@@ -32,6 +33,7 @@ describe("persistence schemas", () => {
 
   test("legacy migration observes missing fields before initial defaults are applied", () => {
     const current = Persistence.struct({ mode: Schema.Literals(["compact", "full"]), enabled: Schema.Boolean })
+
     const stored = Persistence.legacy({
       mode: Schema.optional(Schema.Unknown),
       expanded: Schema.optional(Schema.Boolean),
@@ -45,6 +47,7 @@ describe("persistence schemas", () => {
         encode: SchemaGetter.passthrough(),
       }),
     )
+
     const schema = Persistence.withInitial(Persistence.migrate(current, stored), { mode: "compact", enabled: true })
     const decode = Schema.decodeUnknownSync(schema)
     expect(decode({ expanded: true, enabled: false })).toEqual({ mode: "full", enabled: false })
@@ -62,22 +65,27 @@ describe("persistence schemas", () => {
       }),
       other: Persistence.struct({ flag: Schema.Boolean }),
     })
+
     const stored = Persistence.legacy({
       general: Persistence.optional(Persistence.legacy({ expanded: Persistence.optional(Schema.Boolean) })),
     }).pipe(
       Schema.decode({
         decode: SchemaGetter.transform((value) => {
           const general = value.general
+
           if (!general || general.expanded === undefined) return value
+
           return { ...value, general: { ...general, mode: general.expanded ? "full" : "compact" } }
         }),
         encode: SchemaGetter.passthrough(),
       }),
     )
+
     const schema = Persistence.withInitial(Persistence.migrate(current, stored), {
       general: { mode: "compact", theme: "light", nested: { keep: false } },
       other: { flag: false },
     })
+
     const decode = Schema.decodeUnknownSync(schema)
     expect(decode({ general: { expanded: true, theme: "dark", nested: { keep: true } }, other: { flag: true } })).toEqual({
       general: { mode: "full", theme: "dark", nested: { keep: true } },
@@ -90,6 +98,7 @@ describe("persistence schemas", () => {
       amount: Schema.NumberFromString.check(Schema.isFinite()),
       items: Schema.mutable(Schema.Array(Schema.String)),
     })
+
     const schema = Persistence.withInitial(current, { amount: 7, items: ["initial"] })
     const decode = Schema.decodeUnknownSync(schema)
     expect(decode({ amount: "12", items: [] })).toEqual({ amount: 12, items: [] })
@@ -101,6 +110,7 @@ describe("persistence schemas", () => {
     const schema = Persistence.struct({
       enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
     })
+
     const decode = Schema.decodeUnknownSync(schema)
     expect(decode({})).toEqual({ enabled: true })
     expect(decode({ enabled: undefined })).toEqual({ enabled: true })
@@ -116,6 +126,7 @@ describe("persistence schemas", () => {
       label: Persistence.fallback(Schema.String, () => "default"),
       amount: Persistence.fallback(Schema.NumberFromString.check(Schema.isFinite()), () => 7),
     })
+
     const decode = Schema.decodeUnknownSync(schema)
     expect(decode({})).toEqual({ enabled: true, label: "default", amount: 7 })
     expect(decode({ enabled: "false", label: "saved", amount: "invalid" })).toEqual({
@@ -174,14 +185,16 @@ describe("persistence schemas", () => {
 
   test("recovers and migrates individual array entries", () => {
     const current = Schema.Struct({ name: Schema.String })
+
     const schema = Persistence.array(
       Schema.Union([current, Schema.String]).pipe(
         Schema.decodeTo(current, {
-          decode: SchemaGetter.transform((value) => (typeof value === "string" ? { name: value } : value)),
+          decode: SchemaGetter.transform((value) => (Predicate.isString(value) ? { name: value } : value)),
           encode: SchemaGetter.passthrough(),
         }),
       ),
     )
+
     const decode = Schema.decodeUnknownSync(schema)
     const value = decode(["old", { name: "new" }, null, { name: false }])
     expect(value).toEqual([{ name: "old" }, { name: "new" }])

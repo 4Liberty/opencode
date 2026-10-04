@@ -19,12 +19,14 @@ const request = Effect.fn("test.askpass.request")(function* (
     [
       Effect.gen(function* () {
         const pull = yield* Socket.readerString(socket)
+
         while (true) result.text += (yield* pull).join("")
       }).pipe(Effect.ignore),
       writer.write(JSON.stringify({ token: env.OPENCODE_SSH_ASKPASS_TOKEN, text, confirm }) + "\n").pipe(Effect.ignore),
     ],
     { concurrency: "unbounded" },
   )
+
   return result.text
 }, Effect.scoped)
 
@@ -32,11 +34,13 @@ it.live(
   "per-prompt replies are isolated, including confirmation and OTP",
   Effect.gen(function* () {
     const prompts = yield* Queue.unbounded<{ id: string; text: string; confirm: boolean }>()
+
     const bridge = yield* createAskpass({
       binary: "unused",
       prompt: (prompt) => Queue.offer(prompts, prompt).pipe(Effect.asVoid),
       clear: () => Effect.void,
     })
+
     const password = yield* request(bridge.env, "Password:").pipe(Effect.forkScoped)
     const first = yield* Queue.take(prompts)
     expect(first.text).toBe("Password:")
@@ -56,11 +60,13 @@ it.live(
     const parent = yield* Scope.Scope
     const scope = yield* Scope.fork(parent)
     const prompted = yield* Deferred.make<void>()
+
     const bridge = yield* createAskpass({
       binary: "unused",
       prompt: () => Deferred.succeed(prompted, undefined).pipe(Effect.asVoid),
       clear: () => Effect.void,
     }).pipe(Scope.provide(scope))
+
     expect(yield* request({ ...bridge.env, OPENCODE_SSH_ASKPASS_TOKEN: "incorrect" }, "Password:")).toBe("")
     const reply = yield* request(bridge.env, "Trust fingerprint?", true).pipe(Effect.forkScoped)
     yield* Deferred.await(prompted)
