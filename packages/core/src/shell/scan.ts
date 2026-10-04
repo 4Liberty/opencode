@@ -817,7 +817,7 @@ function scanBashUnit(
         : undefined
   if (text && typeof end === "number") {
     text.word += input.slice(index, end + 1)
-    if (char !== "$" || input[index + 1] !== "{") text.literal += "\0"
+    text.literal += "\0"
   }
   return end
 }
@@ -940,7 +940,7 @@ function scanBashDollarOrBacktick(
     // Literal text in parameter words reaches the enclosing word's value.
     const parameter = { word: "", literal: "" }
     const end = scanBashParameter(input, start + 2, depth + 1, budget, commands, quoted, parameter)
-    if (text) text.literal += `\0${parameter.literal}\0`
+    if (text) text.literal += `\0${parameter.literal}`
     return end
   }
   if (!allowBracket) return { kind: "opaque", reason: "command-substitution" }
