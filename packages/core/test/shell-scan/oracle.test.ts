@@ -267,6 +267,12 @@ const additionalOracleFixtures = [
   "a[b; scan_probe; echo ]=1",
   "a[0 #]\n]=1; scan_probe",
   "if true; then >/dev/null fi; scan_probe; fi",
+  "cat <<\\\n-EOF\nEOF\nscan_probe h1\n-EOF",
+  "scan_probe[x y]=1",
+  "cat <<\\\n-EOF\n-EOF\nscan_probe z\nEOF",
+  "true &\\\n>/dev/null scan_probe",
+  "a[x '$(scan_probe)']=1",
+  "a[1 + $(scan_probe)]=1",
   "case [ in [) scan_probe & ( scan_probe q ]) ;; esac",
   "case x in (x|[) scan_probe & ( scan_probe q ]) ;; esac",
   "echo \"${x:-$'$(scan_probe q1)'}\"",
@@ -296,14 +302,12 @@ const additionalOracleFixtures = [
 ] as const
 
 const knownGapFixtures = [
-  "cat <<\\\n-EOF\nEOF\nscan_probe h1\n-EOF",
   "echo *(e:'scan_probe q1':)",
   "echo *(+scan_probe)",
   "a=(*(e:'scan_probe g':))",
   "for f in *(e:'scan_probe h':); do :; done",
   "echo ${x:-target(e:'scan_probe p2':)}",
   "echo a=(e:'scan_probe p3':)",
-  "scan_probe[x y]=1",
   "declare -i x='a[$(scan_probe)]'",
   "declare 'a[$(scan_probe)]=1'",
   "a=(1); unset 'a[$(scan_probe)]'",

@@ -27,6 +27,8 @@ type Command = {
 export type Result = { kind: "scanned"; commands: Command[] } | { kind: "opaque"; reason: OpaqueReason }
 
 const BASH_REDIRECTS = ["&>>", "&>", "<<<", "<<-", "<<", "<>", "<&", ">&", ">|", ">>", ">", "<"]
+const BASH_LIST_OPERATORS = ["&&", "||", "|&"]
+const BASH_CASE_OPERATORS = [";;&", ";;", ";&", ";|", ...BASH_LIST_OPERATORS]
 const BASH_DECLARATIONS = new Set(["declare", "typeset", "export", "readonly", "local", "unset", "unsetenv"])
 const BASH_NON_FUNCTION_KEYWORDS = new Set([
   "if",
@@ -54,7 +56,6 @@ const COMPOUND_KEYWORD_AHEAD_RE = /(?:if|while|until|for|select|case)(?=(?:\\\n)
 const DO_AHEAD_RE = /(?:[ \t\n;]|\\\n|#[^\n]*(?:\n|$))*(?:do(?=(?:\\\n)*(?:[ \t\n;{(]|$))|\{(?=(?:\\\n)*[ \t\n]))/y
 const NOFORK_OPEN_RE = /\$\{(?:\\\n)*(?:[ \t\n]|\|)/y
 const PARAMETER_SUBSCRIPT_RE = /[!#]?[A-Za-z_][A-Za-z0-9_]*\[/y
-const SUBSCRIPT_ASSIGN_RE = /\[(?:[^\]\n;|&<>'"`\\$()]|\$\([^)]*\)|`[^`]*`|\$\{[^}]*\})+\]\+?=/y
 const BASH_ANSI_ESCAPES: Record<string, string> = {
   a: "\x07",
   b: "\b",
@@ -211,13 +212,6 @@ function finishBashCommand(state: BashState, boundary = false) {
   state.redirectWordCount = undefined
   state.compoundEnd = false
   state.dangling = false
-}
-
-function bashRedirect(input: string, index: number) {
-  for (let i = 0; i < BASH_REDIRECTS.length; i++) {
-    const candidate = BASH_REDIRECTS[i]
-    if (input.startsWith(candidate, index)) return candidate
-  }
 }
 
 function scanBash(
@@ -400,17 +394,17 @@ function scanBash(
       state.commandWordIndex < 0 &&
       /^[A-Za-z_][A-Za-z0-9_]*$/.test(state.word)
     ) {
-      SUBSCRIPT_ASSIGN_RE.lastIndex = index
-      if (SUBSCRIPT_ASSIGN_RE.test(input)) {
-        const end = scanBashSpan(input, index + 1, depth, budget, state.nestedCommands, BASH_SPANS.subscript, false)
-        if (typeof end === "object") return end
-        state.wordStarted = true
+      const subscript: Command[] = []
+      const end = scanBashSpan(input, index + 1, depth, budget, subscript, BASH_SPANS.assignmentSubscript, false)
+      if (typeof end === "object") return end
+      if (input[end + 1] === "=" || input.startsWith("+=", end + 1)) {
+        state.nestedCommands.push(...subscript)
+        state.assignmentWord = true
         state.word += input.slice(index, end + 1)
         index = end
         state.wordEnd = index + 1
         continue
       }
-      if (/\]\+?=/.test(input.slice(index + 1))) return { kind: "opaque", reason: "invalid-structure" }
     }
     if (
       char === "(" &&
@@ -455,7 +449,12 @@ function scanBash(
       continue
     }
     state.wordStarted = true
-    if (char === "=" && !state.assignmentHeadUnsafe && /^[A-Za-z_][A-Za-z0-9_]*(?:\[.*\])?\+?$/.test(state.word))
+    if (
+      char === "=" &&
+      !state.assignmentWord &&
+      !state.assignmentHeadUnsafe &&
+      /^[A-Za-z_][A-Za-z0-9_]*\+?$/.test(state.word)
+    )
       state.assignmentWord = true
     state.word += char
     state.wordEnd = index + 1
@@ -476,14 +475,9 @@ function scanBashOperatorOrSeparator(
 ): number | Opaque {
   const input = state.input
   const char = input[index]
-  const redirect = "<>&".includes(char) ? bashRedirect(input, index) : undefined
+  const redirect = "<>&".includes(char) ? bashOperator(input, index, BASH_REDIRECTS) : undefined
+  if (typeof redirect === "object") return redirect
   if (redirect) {
-    if (
-      input[index + redirect.length] === "\\" &&
-      input[index + redirect.length + 1] === "\n" &&
-      "<>&|".includes(input[index + redirect.length + 2] ?? "\0")
-    )
-      return { kind: "opaque", reason: "invalid-redirect" }
     state.hasRedirect = true
     state.commandStart ??= state.wordStart
     if (state.redirectTarget) state.invalidRedirect = true
@@ -503,7 +497,7 @@ function scanBashOperatorOrSeparator(
       if (state.dangling) state.resourceEnd = state.commandEnd
     }
     if (redirect === "<<" || redirect === "<<-") {
-      const delimiter = bashHeredocDelimiter(input, index)
+      const delimiter = bashHeredocDelimiter(input, index + redirect.length, redirect === "<<-")
       if (!delimiter) return { kind: "opaque", reason: "invalid-redirect" }
       state.heredocs.push(delimiter)
       state.wordEnd = delimiter.end + 1
@@ -517,27 +511,16 @@ function scanBashOperatorOrSeparator(
     finishBashWord(state)
     return index - 1
   }
-  const next = input[index + 1]
-  if (
-    (char === "|" || char === "&" || char === ";") &&
-    next === "\\" &&
-    input[index + 2] === "\n" &&
-    "|&;".includes(input[index + 3] ?? "\0")
-  )
-    return { kind: "opaque", reason: "invalid-structure" }
-  const separator =
-    (char === "&" && next === "&") || (char === "|" && (next === "|" || next === "&")) ? char + next : char
   const structure = state.structures.at(-1)
-  if (
-    char === ";" &&
-    structure?.kind === "case" &&
-    structure.phase === "body" &&
-    (next === ";" || next === "&" || next === "|")
-  ) {
+  const caseBody = structure?.kind === "case" && structure.phase === "body"
+  const operator = bashOperator(input, index, caseBody ? BASH_CASE_OPERATORS : BASH_LIST_OPERATORS)
+  if (typeof operator === "object") return operator
+  const separator = operator ?? char
+  if (caseBody && separator.startsWith(";") && separator.length > 1) {
     if (!endBashList(state)) return { kind: "opaque", reason: "invalid-structure" }
     structure.phase = "pattern"
     structure.patternStarted = false
-    return index + (input.startsWith(";;&", index) ? 2 : 1)
+    return index + separator.length - 1
   }
   if (structure?.kind === "case" && (structure.phase === "header" || structure.phase === "pattern")) {
     if (separator !== "\n") return { kind: "opaque", reason: "compound-command" }
@@ -618,8 +601,8 @@ function scanBashCommandStart(
     state.structures.pop()
   }
   const atStart = atCommandStart(state)
-  if (atStart && char === "(" && bashFunctionHeadLength(input, index) > 0)
-    return index + bashFunctionHeadLength(input, index) - 1
+  const functionHead = atStart && char === "(" ? bashFunctionHeadLength(input, index) : 0
+  if (functionHead) return index + functionHead - 1
   if (atStart && char === "!") {
     NEGATION_AHEAD_RE.lastIndex = index + 1
     if (NEGATION_AHEAD_RE.test(input)) return index
@@ -853,6 +836,8 @@ const BASH_SPANS = {
   forArithmetic: { open: "(", close: ")", reject: "", mode: "arithmetic" },
   bracketArithmetic: { close: "]", reject: ";|&<>()[\n'\"\\#", mode: "arithmetic" },
   subscript: { open: "[", close: "]", reject: "", mode: "arithmetic" },
+  // Dash splits an assignment subscript at blanks and operators, so Bash and Zsh assignments diverge.
+  assignmentSubscript: { open: "[", close: "]", reject: " \t\n\r\v\f;&|<>()", mode: "arithmetic" },
   // Single quotes are literal here in some shells and quoting in others, so reject what either reading
   // would parse structurally and scan the contents for expansions.
   arithmeticQuote: { close: "'", reject: "()[];", mode: "quoted" },
@@ -873,9 +858,6 @@ function scanBashUnit(
   const char = input[index]
   const next = input[index + 1] ?? "\0"
   if (char === "\\") return mode === "quoted" && !'$`"\\\n'.includes(next) ? undefined : index + 1
-  // A continuation inside an expansion opener is removed before the opener is recognized.
-  if (char === "$" && next === "\\" && input[index + 2] === "\n")
-    return { kind: "opaque", reason: "command-substitution" }
   if (char === "$" && next === "$") return index + 1
   if (mode === "word" && char === "$" && next === "'")
     return bashAnsiQuote(input, index + 1)?.end ?? { kind: "opaque", reason: "unterminated-quote" }
@@ -887,10 +869,15 @@ function scanBashUnit(
     return scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.arithmeticQuote, allowBracket)
   if (mode !== "quoted" && char === '"')
     return scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.double, allowBracket)
-  const process =
-    mode === "word" && (char === "<" || char === ">") ? bashOperatorEnd(input, index, `${char}(`) : undefined
-  if (process !== undefined) return scanBashNested(input, process + 1, depth, budget, commands, ")")
-  if ((char === "$" && "({[".includes(next)) || char === "`")
+  const opener =
+    char === "$"
+      ? bashOperator(input, index, ["$(", "${", "$["])
+      : mode === "word" && (char === "<" || char === ">")
+        ? bashOperator(input, index, [`${char}(`])
+        : undefined
+  if (typeof opener === "object") return opener
+  if (opener === "<(" || opener === ">(") return scanBashNested(input, index + 2, depth, budget, commands, ")")
+  if (opener || char === "`")
     return scanBashDollarOrBacktick(input, index, depth, budget, commands, mode !== "word", allowBracket)
   return undefined
 }
@@ -941,13 +928,16 @@ function scanBashNested(
   return nested.end
 }
 
-// Returns the index of the operator's last character; line continuations may split its characters.
-function bashOperatorEnd(input: string, index: number, operator: string) {
-  for (let offset = 0; offset < operator.length; offset++, index++) {
-    while (offset > 0 && input.startsWith("\\\n", index)) index += 2
-    if (input[index] !== operator[offset]) return undefined
+// Returns the first listed operator at index. Shells disagree about operators split by line continuations.
+function bashOperator(input: string, index: number, operators: string[]): string | Opaque | undefined {
+  let text = input[index]
+  for (let cursor = index + 1; text.length < 3 && cursor < input.length; cursor++) {
+    if (input.startsWith("\\\n", cursor)) cursor++
+    else text += input[cursor]
   }
-  return index - 1
+  const operator = operators.find((candidate) => text.startsWith(candidate))
+  if (operator && !input.startsWith(operator, index)) return { kind: "opaque", reason: "invalid-structure" }
+  return operator
 }
 
 function scanBashDollarOrBacktick(
@@ -1166,14 +1156,13 @@ function bashAnsiQuote(input: string, start: number) {
   }
 }
 
-function bashHeredocDelimiter(input: string, start: number) {
-  const tabs = input[start + 2] === "-"
+function bashHeredocDelimiter(input: string, start: number, tabs: boolean) {
   let delimiter = ""
   let quoted = false
   let quote: "'" | '"' | undefined
   let end = start
   let started = false
-  for (let index = start + (tabs ? 3 : 2); index < input.length; index++) {
+  for (let index = start; index < input.length; index++) {
     const char = input[index]
     if (!started && /[ \t]/.test(char)) continue
     if (!started && char === "#") return
