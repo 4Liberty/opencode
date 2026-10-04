@@ -43,8 +43,17 @@ export function createSessionRevert(input: {
     if (!sessionID) return
     const owner = input.session.ownership.capture()
     const target = prompt.capture()
+    // An undelivered prompt has no history to rewind. Withdraw it like the TUI
+    // instead of interrupting the work it is waiting behind.
+    if (data.session.input.has(sessionID, message.id)) {
+      if (await request(() => server.api.session.inbox.cancel({ sessionID, inboxID: message.id })))
+        restore(target, message)
+      return
+    }
     if (data.session.status(sessionID) === "running") {
+      // Interrupt acknowledges before the execution settles, and staging a busy Session fails.
       await server.api.session.interrupt({ sessionID }).catch(() => undefined)
+      await server.api.session.wait({ sessionID }).catch(() => undefined)
     }
     if (!(await request(() => server.api.session.revert.stage({ sessionID, messageID: message.id })))) return
     // Reverting to a previous prompt discards the pending queue (and pending

@@ -277,6 +277,34 @@ test("Undo does not discard hidden file context", async ({ page }) => {
   expect(mock.changes).toEqual([])
 })
 
+test("Revert withdraws a pending steer without interrupting the running session", async ({ page }) => {
+  const mock = createQueueMock([])
+  const view = await openQueue(page, mock, "steer")
+  const stops: string[] = []
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname
+    if (path.endsWith("/interrupt") || path.endsWith("/revert/stage")) stops.push(path)
+  })
+  const text = "U2: Also check the retry path."
+  await view.input.fill(text)
+  await view.input.press("Enter")
+  await expect.poll(() => mock.rows.map((row) => row.delivery)).toEqual(["steer"])
+  await expect(view.input).toHaveText("")
+
+  const inboxID = mock.rows[0].id
+  const pending = page.locator(
+    `[data-timeline-virtual-content] [data-timeline-row="UserMessage"][data-message-id="${inboxID}"]`,
+  )
+  await expect(pending).toContainText(text)
+  await pending.hover()
+  await pending.getByRole("button", { name: "Revert message" }).click()
+
+  await expect(pending).toHaveCount(0)
+  await expect(view.input).toHaveText(text)
+  expect(mock.changes).toEqual([{ inboxID, action: "cancel" }])
+  expect(stops).toEqual([])
+})
+
 for (const delivery of ["steer", "queue"] as const) {
   test(`keeps finished tools above a pending ${delivery === "queue" ? "queue-to-steer" : "steer"} follow-up`, async ({
     page,

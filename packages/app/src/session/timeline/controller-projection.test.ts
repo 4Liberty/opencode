@@ -113,7 +113,7 @@ describe("visibleTimelineMessages", () => {
     expect(visibleTimelineMessages(delivered, [])).toBe(delivered)
   })
 
-  test("preserves steer order and excludes reverted steers", () => {
+  test("preserves pending input order and excludes reverted steers", () => {
     const source = [...messages, work]
     const pending = [steer, { ...steer, id: "msg_4" }]
     expect(visibleTimelineMessages(source, pending).map((message) => message.id)).toEqual([
@@ -123,6 +123,20 @@ describe("visibleTimelineMessages", () => {
       "msg_3",
       "msg_4",
     ])
+    const notice = {
+      id: "msg_0",
+      sessionID: "ses_1",
+      time: { created: 0 },
+      type: "synthetic",
+      delivery: "queue",
+      payload: { text: "", description: "Task finished" },
+    } satisfies SessionInboxInfo
+    expect(
+      visibleTimelineMessages(
+        [{ id: notice.id, type: "synthetic", ...notice.payload, time: notice.time }, ...source],
+        [...pending, notice],
+      ).map((message) => message.id),
+    ).toEqual(["msg_1", "msg_2", "msg_5", "msg_0", "msg_3", "msg_4"])
     expect(visibleTimelineMessages(source, pending, "msg_4").map((message) => message.id)).toEqual([
       "msg_1",
       "msg_2",
