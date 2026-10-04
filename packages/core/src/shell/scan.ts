@@ -653,7 +653,8 @@ function scanBashKeyword(state: BashState, index: number, depth: number): number
     !state.redirectTarget &&
     (!inHeader || (token === "do" && structure?.phase === "do"))
   ) {
-    if (!endBashList(state) || !structure) return { kind: "opaque", reason: "compound-command" }
+    // Bash and Dash read a reserved word after a redirect as a command word, while Zsh reads a keyword.
+    if (state.hasRedirect || !endBashList(state) || !structure) return { kind: "opaque", reason: "compound-command" }
     if (token === "then") {
       if (structure.kind !== "if" || structure.phase !== "condition" || !structure.count)
         return { kind: "opaque", reason: "compound-command" }

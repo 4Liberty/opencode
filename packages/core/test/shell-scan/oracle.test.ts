@@ -267,6 +267,8 @@ const additionalOracleFixtures = [
   "a[b; scan_probe; echo ]=1",
   "a[0 #]\n]=1; scan_probe",
   "if true; then >/dev/null fi; scan_probe; fi",
+  "if true; then >/dev/null fi; scan_probe",
+  "case x in x) >/dev/null esac; scan_probe; esac",
   "echo *(e:'scan_probe q1':)",
   "echo *(+scan_probe)",
   "a=(*(e:'scan_probe g':))",
