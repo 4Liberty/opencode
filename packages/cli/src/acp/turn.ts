@@ -17,7 +17,7 @@ import {
   Stream,
 } from "effect"
 import type { Capabilities } from "./capabilities"
-import type { ACPCatalog } from "./catalog"
+import { findModel, type ACPCatalog } from "./catalog"
 import { ACPChild } from "./child"
 import { ACPClient } from "./client"
 import { currentModel } from "./config-option"
@@ -323,8 +323,7 @@ export const make = Effect.fnUntraced(function* (input: {
       const used = state.usage ? TokenUsage.total(state.usage.last) : 0
       if (!used) return
       const catalog = yield* input.catalog.get(attached.cwd)
-      const current = currentModel(catalog, yield* Ref.get(attached.selection))
-      const model = catalog.models.find((item) => item.providerID === current.providerID && item.id === current.id)
+      const model = findModel(catalog.models, currentModel(catalog, yield* Ref.get(attached.selection)))
       if (!model?.limit.context) return
       const info = yield* input.client.session.get({ sessionID: attached.id }).pipe(Effect.catch(ACPClient.classify))
       yield* input.connection.sessionUpdate({
