@@ -72,7 +72,7 @@ const COPROC_AHEAD_RE = /coproc[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?(?=[{(]|(?
 const TIME_AHEAD_RE = /time[ \t]+(?:-p[ \t]+)?(?=[{(]|(?:if|while|until|for|case)\b)/y
 // [function] name [()] then blanks, continuations, and comments before the body.
 const FUNCTION_HEAD_RE =
-  /(function[ \t](?:[ \t]|\\\n)*)?([A-Za-z_][\w.:+@%-]*)?(?:[ \t]|\\\n)*(\([ \t]*\))?(?:[ \t\n]|\\\n|#[^\n]*\n)*/y
+  /(function[ \t](?:[ \t]|\\\n)*)?([A-Za-z_][\w.:+@%-]*)?(?:[ \t]|\\\n)*(\([ \t]*\))?((?:[ \t\n]|\\\n|#[^\n]*\n)*)/y
 const FUNCTION_BODY_RE = /[{(]|\[\[(?=(?:\\\n)*[ \t\n])|(?:if|while|until|for|select|case)(?=(?:\\\n)*(?:[ \t\n(]|$))/y
 const DO_AHEAD_RE = /(?:[ \t\n;]|\\\n|#[^\n]*(?:\n|$))*(?:do(?=(?:\\\n)*(?:[ \t\n;{(]|$))|\{(?=(?:\\\n)*[ \t\n]))/y
 const NOFORK_OPEN_RE = /\$\{(?:\\\n)*(?:[ \t\n]|\|)/y
@@ -98,13 +98,16 @@ type Opaque = { kind: "opaque"; reason: OpaqueReason }
 
 type BashResult = { kind: "scanned"; commands: Command[]; end: number } | Opaque
 
+type BashHeredoc = { delimiter: string; quoted: boolean; tabs: boolean; command?: Command; start?: number }
+
 type BashState = {
   input: string
   commands: Command[]
   nestedCommands: Command[]
   words: string[]
   rawWords: string[]
-  heredocs: Array<{ delimiter: string; quoted: boolean; tabs: boolean; command?: Command; start?: number }>
+  // Pending heredocs, shared with nested groups: a body starts after the next newline token at any nesting.
+  heredocs: BashHeredoc[]
   structures: Array<{
     kind: "if" | "while" | "until" | "for" | "case"
     phase: "header" | "condition" | "pattern" | "body" | "do"
@@ -268,6 +271,8 @@ function scanBash(
   depth: number,
   budget: { remaining: number },
   close?: ")" | "}" | "nofork",
+  // A group shares its parent's heredocs; a substitution starts its own.
+  heredocs?: BashHeredoc[],
 ): BashResult {
   if (depth > MAX_SUBSTITUTION_DEPTH || budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
   const state: BashState = {
@@ -276,7 +281,7 @@ function scanBash(
     nestedCommands: [],
     words: [],
     rawWords: [],
-    heredocs: [],
+    heredocs: heredocs ?? [],
     structures: [],
     word: "",
     literal: "",
@@ -314,7 +319,7 @@ function scanBash(
         !state.redirectTarget &&
         (close === "}" || close === "nofork") &&
         state.structures.length === 0 &&
-        state.heredocs.length === 0 &&
+        (heredocs !== undefined || state.heredocs.length === 0) &&
         (close === "nofork" || ((BRACE_CLOSE_AHEAD_RE.lastIndex = index + 1), BRACE_CLOSE_AHEAD_RE.test(input)))
       )
         return closeBashList(state, index)
@@ -404,6 +409,7 @@ function scanBash(
       const mode = array ? "array" : "pattern"
       const end = scanBashArrayOrPattern(input, index, depth + 1, budget, state.nestedCommands, mode)
       if (typeof end === "object") return end
+      if (bashCrossesHeredoc(state, index, end)) return { kind: "opaque", reason: "heredoc" }
       state.wordStarted = true
       state.word += input.slice(index, end + 1)
       index = end
@@ -428,7 +434,7 @@ function scanBash(
       continue
     }
     if (char === ")") {
-      if (close !== ")" || state.structures.length > 0 || state.heredocs.length > 0)
+      if (close !== ")" || state.structures.length > 0 || (heredocs === undefined && state.heredocs.length > 0))
         return { kind: "opaque", reason: "compound-command" }
       return closeBashList(state, index)
     }
@@ -466,6 +472,9 @@ function scanBashOperatorOrSeparator(
   const char = input[index]
   const redirect = "<>&".includes(char) ? bashOperator(input, index, BASH_REDIRECTS) : undefined
   if (typeof redirect === "object") return redirect
+  const caseHead = state.structures.at(-1)
+  if (redirect && caseHead?.kind === "case" && caseHead.phase !== "body")
+    return { kind: "opaque", reason: "invalid-redirect" }
   if (redirect) {
     state.hasRedirect = true
     state.commandStart ??= state.wordStart
@@ -518,33 +527,41 @@ function scanBashOperatorOrSeparator(
     if (structure.phase === "pattern" && (state.wordStarted || state.words.length > 0))
       return { kind: "opaque", reason: "compound-command" }
     finishBashWord(state)
-    return index
+    return readBashHeredocs(state, index, depth, budget)
   }
   if (structure?.kind === "for" && (structure.phase === "header" || structure.phase === "do")) {
     if (separator !== ";" && separator !== "\n") return { kind: "opaque", reason: "compound-command" }
     if (structure.phase === "header" && !structure.sawIn && !state.wordStarted && state.words.length === 0)
       return { kind: "opaque", reason: "compound-command" }
   }
-  if (separator === "\n" && !pending(state)) {
-    let nextIndex = index
-    for (const heredoc of state.heredocs.splice(0)) {
-      const body = bashHeredoc(input, nextIndex + 1, heredoc)
-      if (!body) return { kind: "opaque", reason: "heredoc" }
-      if (heredoc.command) heredoc.command.resource = input.slice(heredoc.start, body.end).trim()
-      if (!heredoc.quoted) {
-        const expansion = scanBashSpan(body.source, 0, depth, budget, state.commands, BASH_SPANS.heredoc, true)
-        if (typeof expansion === "object") return expansion
-      }
-      nextIndex = body.end
-    }
-    return nextIndex
-  }
+  if (separator === "\n" && !pending(state)) return readBashHeredocs(state, index, depth, budget)
   finishBashCommand(state, true)
   if (structure?.kind === "for" && structure.phase === "header") structure.phase = "do"
   state.dangling = separator !== "&" && separator !== ";" && separator !== "\n"
   // Reprocess the newline to read pending heredoc bodies.
   if (separator === "\n" && state.heredocs.length) return index - 1
   return index + separator.length - 1
+}
+
+// Reads the pending heredoc bodies after the newline at index and returns the last index they cover.
+function readBashHeredocs(state: BashState, index: number, depth: number, budget: { remaining: number }) {
+  let end = index
+  for (const heredoc of state.heredocs.splice(0)) {
+    const body = bashHeredoc(state.input, end + 1, heredoc)
+    if (!body) return { kind: "opaque", reason: "heredoc" } satisfies Opaque
+    if (heredoc.command) heredoc.command.resource = state.input.slice(heredoc.start, body.end).trim()
+    if (!heredoc.quoted) {
+      const expansion = scanBashSpan(body.source, 0, depth, budget, state.commands, BASH_SPANS.heredoc, true)
+      if (typeof expansion === "object") return expansion
+    }
+    end = body.end
+  }
+  return end
+}
+
+// Whether a construct read as one unit holds a newline token that would start pending heredoc bodies.
+function bashCrossesHeredoc(state: BashState, start: number, end: number) {
+  return state.heredocs.length > 0 && state.input.slice(start, end).includes("\n")
 }
 
 function scanBashCommandStart(
@@ -576,6 +593,7 @@ function scanBashCommandStart(
   if (structure?.kind === "for" && structure.phase === "header" && char === "(" && input[index + 1] !== "(") {
     const end = scanBashArrayOrPattern(input, index, depth + 1, budget, state.nestedCommands, "array")
     if (typeof end === "object") return end
+    if (bashCrossesHeredoc(state, index, end)) return { kind: "opaque", reason: "heredoc" }
     finishBashCommand(state)
     // Zsh permits a sublist or brace group directly after the value list, without do/done.
     structure.phase = "do"
@@ -604,6 +622,7 @@ function scanBashCommandStart(
     const span = forHeader ? BASH_SPANS.forArithmetic : BASH_SPANS.arithmetic
     const end = scanBashArithmetic(input, index + 2, depth, budget, state.commands, span)
     if (typeof end === "number") {
+      if (bashCrossesHeredoc(state, index, end)) return { kind: "opaque", reason: "heredoc" }
       if (forHeader) {
         structure.phase = "do"
         structure.sawIn = true
@@ -622,7 +641,7 @@ function scanBashCommandStart(
     (char === "(" ||
       (char === "{" && ((SPACE_CONTINUATION_AHEAD_RE.lastIndex = index + 1), SPACE_CONTINUATION_AHEAD_RE.test(input))))
   ) {
-    const group = scanBash(input, index + 1, depth + 1, budget, char === "{" ? "}" : ")")
+    const group = scanBash(input, index + 1, depth + 1, budget, char === "{" ? "}" : ")", state.heredocs)
     if (group.kind === "opaque") return group
     if (!input.slice(index + 1, group.end).trim()) return { kind: "opaque", reason: "invalid-structure" }
     state.commands.push(...group.commands)
@@ -637,6 +656,7 @@ function scanBashCommandStart(
   ) {
     const end = scanBashConditional(input, index + 2, depth, budget, state.commands)
     if (typeof end === "object") return end
+    if (bashCrossesHeredoc(state, index, end)) return { kind: "opaque", reason: "heredoc" }
     bashStatement(state)
     state.compoundEnd = true
     return end
@@ -776,7 +796,8 @@ function bashFunctionHeadLength(input: string, start: number) {
   const head = FUNCTION_HEAD_RE.exec(input)
   if (!head || (head[1] ? !head[2] : !head[3] || BASH_NON_FUNCTION_KEYWORDS.has(head[2] ?? ""))) return 0
   FUNCTION_BODY_RE.lastIndex = start + head[0].length
-  return FUNCTION_BODY_RE.test(input) ? head[0].length : 0
+  // Blanks, comments, and newlines before the body stay for the caller, where newlines start heredoc bodies.
+  return FUNCTION_BODY_RE.test(input) ? head[0].length - head[4].length : 0
 }
 
 // Word text is unquoted. Quoted text follows double-quote rules. Arithmetic text, including subscripts,

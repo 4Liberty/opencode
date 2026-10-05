@@ -69,6 +69,9 @@ const fixtures = [
   ['echo "$(case x in @(a)) echo hi;; esac)"', ["echo", "echo"]],
   ["set -- 1; for x do scan_probe; done", ["set", "scan_probe"]],
   ["'q'; x=1 a", ["q", "a"]],
+  ["cat <<E; ( true\nscan_ignored\nE\n)", ["cat", "true"]],
+  ["cat <<E; f() { true\nscan_ignored\nE\n}; f", ["cat", "true", "f"]],
+  ["cat <<E; case x in\nscan_ignored\nE\nx) scan_probe;; esac", ["cat", "scan_probe"]],
 ] as const
 
 describe("ordinary Bash and Zsh syntax", () => {

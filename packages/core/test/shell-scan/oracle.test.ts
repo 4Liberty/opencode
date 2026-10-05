@@ -72,6 +72,18 @@ function expectProbesReported(source: string) {
 
 // Each fixture runs scan_probe in at least one real shell, which the scanner must report or reject.
 const fixtures = [
+  "cat <<'}'; {\n:\n}\nscan_probe; cat <<'}'; }\n}",
+  "cat <<'x)'; case x in\nx)\nx) scan_probe; cat <<'x)'\nx)\n;; esac",
+  "cat <<'if'; f()\nif\nif scan_probe; cat <<'if'\nif\ntrue; then :; fi; f",
+  "cat <<E; ( true\nE\nscan_probe g\n)",
+  "cat <<E; { true\nE\nscan_probe g\n}",
+  "cat <<E; f() { true\nE\nscan_probe f\n}; f",
+  "cat <<E; if true\nE\nscan_probe i\nthen :; fi",
+  "cat <<E; echo $(true\nscan_probe s\n)\nE\nscan_probe after",
+  "cat <<E; echo `true\nscan_probe b\n`\nE\nscan_probe after",
+  "cat <<E; cat <(true\nscan_probe s\n)\nE\nscan_probe after",
+  "cat <<E; x=$(cat <<F\nF\n)\nE\nscan_probe out",
+  "{ cat <<E; }\nscan_probe x\nE\nscan_probe y",
   "[[ a]]b# ]] && scan_probe",
   '[[ "a]]"# ]] && scan_probe',
   "[[ 'a]]'# ]] && scan_probe",
@@ -274,9 +286,6 @@ const fixtures = [
 // These also run inside every wrapper below.
 // Confirmed misses awaiting fixes.
 const knownGaps = [
-  "cat <<'}'; {\n:\n}\nscan_probe; cat <<'}'; }\n}",
-  "cat <<'x)'; case x in\nx)\nx) scan_probe; cat <<'x)'\nx)\n;; esac",
-  "cat <<'if'; f()\nif\nif scan_probe; cat <<'if'\nif\ntrue; then :; fi; f",
   "(( scan_probe ))",
   "(( (scan_probe) & (scan_probe) ))",
   "(( (scan_probe)\n(scan_probe) ))",
