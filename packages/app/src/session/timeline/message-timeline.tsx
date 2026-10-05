@@ -27,6 +27,7 @@ import { useCommand } from "@/shell/commands/command"
 import { SessionAncestorTrail, SessionProjectMenu, SessionTitleHeader } from "../session-identity-header"
 import { SessionHeaderSpacer } from "@/session/header/session-header"
 import { SessionRunningMenu } from "@/session/header/session-running-menu"
+import { SessionWorkingIndicator } from "@/session/header/session-working-indicator"
 
 type BlockingTask = { type: "shell" | "subagent"; partID: string; id?: string; label?: string }
 
@@ -391,6 +392,17 @@ function MessageTimelineView(
     })
   })
 
+  const runningMenu = (separator: "before" | "after") => (
+    <SessionRunningMenu
+      sessionID={sessionID()}
+      owner={props.background.running.sessionID()}
+      blocking={props.background.running.blocking()}
+      tasks={props.background.running.tasks()}
+      onReveal={virtualized.revealPart}
+      separator={separator}
+    />
+  )
+
   return (
     <VirtualizedTimeline
       workspaceSession={workspaceSession}
@@ -456,6 +468,8 @@ function MessageTimelineView(
                       />
                     )}
                   </Show>
+                  <Show when={parentID()}>{runningMenu("after")}</Show>
+                  <SessionWorkingIndicator sessionID={sessionID()} />
                   <Show when={childTitle() || title.editing}>
                     <Show
                       when={title.editing}
@@ -506,6 +520,7 @@ function MessageTimelineView(
                       />
                     </Show>
                   </Show>
+                  <Show when={!parentID()}>{runningMenu("before")}</Show>
                   <Show when={!parentID() && sessionID()} keyed>
                     {(id) => (
                       <Menu
@@ -559,13 +574,6 @@ function MessageTimelineView(
                       </Menu>
                     )}
                   </Show>
-                  <SessionRunningMenu
-                    sessionID={sessionID()}
-                    owner={props.background.running.sessionID()}
-                    blocking={props.background.running.blocking()}
-                    tasks={props.background.running.tasks()}
-                    onReveal={virtualized.revealPart}
-                  />
                 </div>
               </div>
               <Show when={sessionID()} keyed>
