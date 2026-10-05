@@ -312,10 +312,11 @@ export const make = Effect.fnUntraced(function* (input: {
     exit: Exit.Exit<ACPTranslate.Terminal, ACPError.Failure>,
   ) {
     if (Exit.isFailure(exit) && !Cause.hasInterrupts(exit.cause)) return yield* Effect.failCause(exit.cause)
-    const failure = ACPTranslate.failure(current)
+    const terminal = Exit.isSuccess(exit) ? exit.value : "interrupted"
+    const failure = terminal === "interrupted" ? undefined : ACPTranslate.failure(current)
     if (failure) return yield* failure
     yield* sendUsageUpdate(attached, current)
-    return ACPTranslate.response(current, attached.id, Exit.isSuccess(exit) ? exit.value : "interrupted")
+    return ACPTranslate.response(current, attached.id, terminal)
   })
 
   const sendUsageUpdate = Effect.fn("cli.acp.turn.usage")(

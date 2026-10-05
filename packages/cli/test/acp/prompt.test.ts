@@ -32,10 +32,25 @@ import {
   type WireOptions,
 } from "./wire-fixture"
 
-// A "hold" prompt is admitted and starts streaming, then only finishes when interrupted.
+const lost = { type: "provider.transport", message: "stream connection lost" }
+
+// A "hold" prompt is admitted, streams, and fails a step, then waits on its retry until interrupted.
 const held = {
   onPrompt: ({ sessionID, id, text }) =>
-    text === "hold" ? [delivered(sessionID, id), textDelta(sessionID, "msg_held", "working")] : turn(sessionID, id),
+    text === "hold"
+      ? [
+          delivered(sessionID, id),
+          textDelta(sessionID, "msg_held", "working"),
+          durableEvent("session.step.failed", { sessionID, assistantMessageID: "msg_held", error: lost }),
+          durableEvent("session.retry.scheduled", {
+            sessionID,
+            assistantMessageID: "msg_held",
+            attempt: 1,
+            at: 0,
+            error: lost,
+          }),
+        ]
+      : turn(sessionID, id),
   onInterrupt: ({ sessionID }) => [interrupted(sessionID)],
 } satisfies WireOptions
 
