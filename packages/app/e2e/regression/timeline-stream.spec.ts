@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Locator, type Page } from "@playwright/test"
 import type { SessionMessageAssistant, SessionMessageInfo, ShellInfo } from "@opencode/client/promise"
 import { timelinePresets } from "@opencode/session-ui/timeline/detail"
 import { createTwoFilesPatch } from "diff"
@@ -1012,6 +1012,153 @@ test.describe("background shortcut", () => {
     await expect(backgroundCard).toContainText("Background task (background)")
   })
 
+  test("hides the running switcher when viewing the only running subagent", async ({ page }) => {
+    const childID = "ses_only_running_child"
+
+    const timeline = await setupTimeline(page, {
+      sessionMessages: [user, completed],
+      sessions: [
+        session(),
+        session({ id: childID, parentID: sessionID, title: "Only running task", agent: "explore" }),
+      ],
+      sessionStatus: { [childID]: { type: "busy" } },
+    })
+
+    const header = page.locator("[data-session-title]")
+    const trigger = header.getByRole("button", { name: "1 working", exact: true })
+
+    await trigger.click()
+    await page.getByRole("menuitem", { name: /Only running task/ }).click()
+    await expect(page).toHaveURL(new RegExp(`/session/${childID}$`))
+    await expect(header.getByRole("heading")).toHaveText("Only running task")
+    await expect(trigger).toHaveCount(0)
+
+    const working = header.getByRole("status", { name: "Working", exact: true })
+
+    await expect(working.locator('[data-component="session-progress-indicator-v2"]')).toBeVisible()
+    const gap = await working.evaluate((element) => {
+      const title = document.createRange()
+
+      title.selectNodeContents(element.nextElementSibling!)
+
+      return title.getBoundingClientRect().left - element.getBoundingClientRect().right
+    })
+
+    expect(gap).toBe(8)
+
+    const before = await header.getByRole("heading").boundingBox()
+    const exit = await pauseExitAnimations(working)
+
+    await timeline.transport.send(status("idle", 1, childID))
+    await expect.poll(() => exit.evaluate((animations) => animations.length)).toBeGreaterThan(0)
+    await exit.evaluate((animations) => animations.forEach((animation) => (animation.currentTime = 100)))
+    await expect(working).toBeAttached()
+
+    const midway = await header.getByRole("heading").boundingBox()
+
+    expect(midway!.x).toBeLessThan(before!.x)
+    await exit.evaluate((animations) => animations.forEach((animation) => animation.finish()))
+    await expect(working).toHaveCount(0)
+
+    const after = await header.getByRole("heading").boundingBox()
+
+    expect(after!.x).toBeLessThan(midway!.x)
+    expect(after!.x).toBeCloseTo(before!.x - 24, 0)
+    await exit.dispose()
+    await header.locator('[data-slot="session-title-parent"]').click()
+    await expect(page).toHaveURL(new RegExp(`/session/${sessionID}$`))
+    await expect(trigger).toHaveCount(0)
+  })
+
+  test("keeps the running menu closed when work restarts after all subagents finish", async ({ page }) => {
+    const childID = "ses_restarted_child"
+    const otherID = "ses_counted_child"
+    const timeline = await setupTimeline(page, {
+      sessionMessages: [user, completed],
+      sessions: [
+        session(),
+        session({ id: childID, parentID: sessionID, title: "Restarted task", agent: "explore" }),
+        session({ id: otherID, parentID: sessionID, title: "Other task", agent: "build" }),
+      ],
+      sessionStatus: {},
+    })
+
+    const trigger = page.locator("[data-session-title]").getByRole("button", { name: /^[12] working$/ })
+    const menu = page.getByRole("menu", { name: "1 working", exact: true })
+
+    await timeline.transport.send(status("busy", 1, childID))
+    await expect(trigger).toHaveAccessibleName("1 working")
+    await timeline.transport.send(status("busy", 1, otherID))
+    await expect(trigger).toHaveAccessibleName("2 working")
+    await expect(trigger.locator("..")).toHaveCSS("animation-name", "none")
+    await timeline.transport.send(status("idle", 1, otherID))
+    await expect(trigger).toHaveAccessibleName("1 working")
+    // Inspect the update itself, not the settled state after a replayed fade finishes.
+    expect(await trigger.evaluate((element) => getComputedStyle(element.parentElement!).animationName)).toBe("none")
+
+    await trigger.click()
+    await expect(menu.getByRole("menuitem", { name: /Restarted task/ })).toBeVisible()
+    await timeline.transport.send(status("idle", 1, childID))
+    await expect(trigger).toHaveCount(0)
+    await expect(menu).toHaveCount(0)
+    await timeline.transport.send(status("busy", 1, childID))
+    await expect(trigger).toBeEnabled()
+    await expect(trigger).toHaveAttribute("aria-expanded", "false")
+    await expect(menu).toHaveCount(0)
+    await trigger.click()
+    await expect(menu.getByRole("menuitem", { name: /Restarted task/ })).toBeVisible()
+  })
+
+  test("slides the subagent title left when its running switcher disappears", async ({ page }) => {
+    const childID = "ses_collapsing_viewed"
+    const otherID = "ses_collapsing_sibling"
+    const timeline = await setupTimeline(page, {
+      sessionMessages: [user, completed],
+      sessions: [
+        session(),
+        session({ id: childID, parentID: sessionID, title: "Viewed task", agent: "explore" }),
+        session({ id: otherID, parentID: sessionID, title: "Other task", agent: "build" }),
+      ],
+      sessionStatus: { [childID]: { type: "busy" }, [otherID]: { type: "busy" } },
+    })
+
+    const header = page.locator("[data-session-title]")
+    const trigger = header.getByRole("button", { name: "2 working", exact: true })
+
+    await trigger.click()
+    await page.getByRole("menuitem", { name: /Viewed task/ }).click()
+    await expect(header.getByRole("heading")).toHaveText("Viewed task")
+    await expect(trigger).toBeEnabled()
+
+    const before = await header.getByRole("heading").boundingBox()
+    const width = await trigger.evaluate((element) => element.parentElement!.getBoundingClientRect().width)
+    const exit = await pauseExitAnimations(trigger.locator(".."))
+
+    await timeline.transport.send(status("idle", 1, otherID))
+    await expect.poll(() => exit.evaluate((animations) => animations.length)).toBeGreaterThan(0)
+    expect(
+      await exit.evaluate((animations) =>
+        animations.some(
+          (animation) =>
+            animation.effect instanceof KeyframeEffect && animation.effect.getKeyframes().some((frame) => "width" in frame),
+        ),
+      ),
+    ).toBe(true)
+    await exit.evaluate((animations) => animations.forEach((animation) => (animation.currentTime = 75)))
+
+    const midway = await header.getByRole("heading").boundingBox()
+
+    expect(midway!.x).toBeLessThan(before!.x)
+    await exit.evaluate((animations) => animations.forEach((animation) => animation.finish()))
+    await expect(trigger).toHaveCount(0)
+
+    const after = await header.getByRole("heading").boundingBox()
+
+    expect(after!.x).toBeLessThan(midway!.x)
+    expect(after!.x).toBeCloseTo(before!.x - width - 2, 0)
+    await exit.dispose()
+  })
+
   test("moves between siblings and to the parent's shell from inside a subagent", async ({ page }) => {
     const siblings = [
       { id: "ses_sibling_one", agent: "explore", description: "Draft TUI proposal" },
@@ -1099,6 +1246,15 @@ test.describe("background shortcut", () => {
     await trigger.click()
     await list.getByRole("menuitem", { name: /Draft TUI proposal/ }).click()
     await expect(page).toHaveURL(/\/session\/ses_sibling_one$/)
+    await expect(list).toHaveCount(0)
+    await expect(header.getByRole("heading")).toHaveText("Draft TUI proposal")
+    await expect(trigger.locator('[data-component="text-shimmer"]')).toHaveCSS("font-variant-numeric", "tabular-nums")
+
+    const breadcrumbOrder = await header
+      .locator('[data-slot="session-title-parent"], button[aria-label="3 running"], [data-slot="session-title-child"]')
+      .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-slot") ?? "running"))
+
+    expect(breadcrumbOrder).toEqual(["session-title-parent", "running", "session-title-child"])
 
     await trigger.click()
     await expect(list.getByRole("menuitem")).toHaveText([
@@ -1108,8 +1264,26 @@ test.describe("background shortcut", () => {
     ])
     await expect(list.getByRole("menuitem", { name: /Draft TUI proposal/ })).toHaveAttribute("aria-current", "page")
     await expect(list.getByRole("menuitem", { name: /Fix context controls/ })).not.toHaveAttribute("aria-current")
+
+    const requested = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+
+    await page.route(
+      (url) => url.pathname === "/api/session/ses_sibling_two/message",
+      async (route) => {
+        requested.resolve()
+        await release.promise
+        await route.fallback()
+      },
+    )
     await list.getByRole("menuitem", { name: /Fix context controls/ }).click()
-    await expect(page).toHaveURL(/\/session\/ses_sibling_two$/)
+    await requested.promise
+    await Promise.all([
+      expect(page).toHaveURL(/\/session\/ses_sibling_two$/),
+      expect(header.getByRole("heading")).toHaveText("Fix context controls"),
+      expect(trigger).toBeEnabled(),
+    ]).finally(() => release.resolve())
+    await expect(list).toHaveCount(0)
 
     // The shell call lives in the parent: the row opens it there, expanded.
     await trigger.click()
@@ -1530,6 +1704,22 @@ test.describe("shell completion", () => {
     )
   })
 })
+
+function pauseExitAnimations(locator: Locator) {
+  return locator.evaluateHandle((element) => {
+    const animations: Animation[] = []
+    const pause = (event: AnimationEvent) => {
+      if (event.target !== element || event.animationName !== "exit") return
+
+      animations.push(...element.getAnimations())
+      animations.forEach((animation) => animation.pause())
+      element.removeEventListener("animationstart", pause)
+    }
+
+    element.addEventListener("animationstart", pause)
+    return animations
+  })
+}
 
 function runningSubagent(): SessionMessageAssistant {
   return {
