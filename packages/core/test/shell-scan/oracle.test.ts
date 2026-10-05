@@ -343,8 +343,6 @@ const fixtures = [
 
 // These also run inside every wrapper below.
 // Confirmed misses awaiting fixes.
-const knownGaps = [] as const
-
 const nestedFixtures = [
   "[[ a]]# ]] && scan_probe",
   "{ export X={}# ; scan_probe; }",
@@ -376,10 +374,6 @@ const wrappers: Array<[name: string, wrap: (inner: string) => string]> = [
 describe.skipIf(process.platform === "win32")("real-shell soundness oracle", () => {
   test("discovers at least bash on PATH", () => {
     expect(shells.some((item) => item.endsWith("/bash"))).toBe(true)
-  })
-
-  test.failing.each([...knownGaps])("known gap: %j", (source) => {
-    expectProbesReported(source)
   })
 
   test.each([...fixtures, ...nestedFixtures])("reports or rejects real-shell execution: %j", (source) => {
