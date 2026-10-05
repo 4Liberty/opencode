@@ -299,8 +299,10 @@ describe("Bash dialects", () => {
   test("scans safe Zsh parameter flags, Zsh repeat loops, and Bash extglob arguments", () => {
     expect(heads("print -l ${(M)files:#*.ts}", "zsh")).toEqual(["print"])
     expect(heads("print -l ${(ps:\\n:)text}", "zsh")).toEqual(["print"])
+    expect(heads("print -r -- ${(q-)x} ${(q+)x} ${(on-)x}", "zsh")).toEqual(["print"])
     expect(heads("repeat 3; do echo hi; done", "zsh")).toEqual(["echo"])
     expect(heads("repeat 3; do echo hi; done", "posix")).toEqual(["echo"])
+    expect(heads("f() repeat 3; do echo hi; done", "zsh")).toEqual(["echo"])
     expect(heads("ls @(foo|bar)", "bash")).toEqual(["ls"])
   })
 
