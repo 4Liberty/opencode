@@ -273,7 +273,7 @@ describe("acp prompt turns over the wire", () => {
     expect(await rpcError(acp.prompt(acp.sessionId, "hello"))).toMatchObject(expected)
   })
 
-  test("session/cancel before the turn registers or is admitted returns cancelled", async () => {
+  test("session/cancel during prompt setup or before admission returns cancelled", async () => {
     await using dir = await tmpdir()
     await Bun.write(path.join(dir.path, "notes.md"), "# notes\n")
     const aborted = Promise.withResolvers<void>()
@@ -291,7 +291,7 @@ describe("acp prompt turns over the wire", () => {
         }),
     })
 
-    // Checking that the linked file is readable holds the prompt before its turn registers.
+    // The linked file's readability check holds the prompt in setup, before it submits.
     const preparing = acp.prompt(acp.sessionId, [
       { type: "resource_link", uri: pathToFileURL(path.join(dir.path, "notes.md")).href, name: "notes.md" },
     ])
@@ -420,17 +420,17 @@ describe("acp prompt turns over the wire", () => {
       const other = await acp.newSession()
 
       const order: string[] = []
-      const prompt = acp.prompt(acp.sessionId, "hold").then((response) => {
+      const prompt = acp.prompt(acp.sessionId, "hold").then((result) => {
         order.push("prompt")
-        return response
+        return result
       })
       await admitted(acp, acp.sessionId)
-      const close = await acp.request(method, { sessionId: acp.sessionId }).then((response) => {
+      const response = await acp.request(method, { sessionId: acp.sessionId }).then((result) => {
         order.push(method)
-        return response
+        return result
       })
 
-      expect(close).toEqual({})
+      expect(response).toEqual({})
       expect(await prompt).toMatchObject({ stopReason: "cancelled" })
       expect(order).toEqual(["prompt", method])
       expect(acp.server.interrupts).toEqual([acp.sessionId])
