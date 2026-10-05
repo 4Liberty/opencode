@@ -678,6 +678,12 @@ const fixtures = [
   'false && export X="${unset:+$(( 0 }"; scan_probe; : "))}"',
   'false && export X="${unset:+$(echo a}"; scan_probe; : ")}"',
   'false && export X="${unset:+$(echo {a}"; scan_probe; : ")}"',
+  'false && export X="${unset:+$(echo a})}"; scan_probe; : "}"',
+  "export X=$$'\\' # '; scan_probe",
+  "export X=$$'\\' #\nexport Y='; scan_probe # '",
+  "export X=$^$'\\' # '; scan_probe",
+  "export X=$#$'\\' # '; scan_probe",
+  "export X=$'\\'\nscan_probe\n'",
 ] as const
 
 // These also run inside every wrapper below.

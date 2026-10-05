@@ -1071,14 +1071,9 @@ function scanBashUnit(
     if (input[quoteStart] === "'") {
       const nextQuote = input.indexOf("'", quoteStart + 1)
       if (nextQuote < 0) return { kind: "opaque", reason: "unterminated-quote" }
-      // Zsh parses $$'...' with ANSI-C escapes while Bash/Dash treat $$ as PID followed by '...'.
-      if (input.slice(quoteStart + 1, nextQuote).includes("\\") && input.includes("'", nextQuote + 1)) {
-        const lineEnd = input.indexOf("\n", nextQuote + 1)
-        const tail = input.slice(nextQuote + 1, lineEnd < 0 ? input.length : lineEnd)
-        const hashIndex = tail.indexOf("#")
-        if (hashIndex < 0 || tail.slice(0, hashIndex).includes("'"))
-          return { kind: "opaque", reason: "unterminated-quote" }
-      }
+      // Zsh and Bash 3.2 inside ${...} can parse $$'...' with ANSI-C escapes while Bash 5/Dash treat $$ as PID.
+      if (input.slice(quoteStart + 1, nextQuote).includes("\\") && input.includes("'", nextQuote + 1))
+        return { kind: "opaque", reason: "unterminated-quote" }
     }
     if (text) text.word += "$$"
     return index + 1
@@ -1089,11 +1084,10 @@ function scanBashUnit(
     const firstQuote = input.indexOf("'", index + 2)
     // Dash does not support $'...' and closes the single-quoted span at the first `'`, even after `\`.
     if (
-      context.dialect === "posix" &&
       quote.end !== firstQuote &&
-      (input.indexOf("'", firstQuote + 1) < quote.end ||
-        /[#"]|\\'/.test(input.slice(firstQuote + 1)) ||
-        input.slice(quote.end + 1).includes("\n"))
+      ((context.dialect !== "bash" && index >= 2 && input[index - 2] === "$") ||
+        (context.dialect === "posix" &&
+          (input.indexOf("'", firstQuote + 1) < quote.end || /[#"\n]|\\'/.test(input.slice(firstQuote + 1)))))
     )
       return { kind: "opaque", reason: "unterminated-quote" }
     if (text) bashAppend(text, quote.value)
@@ -1439,7 +1433,7 @@ function scanBashParameter(
           : scanBashUnit(input, index, depth, context, commands, quoted ? "quoted" : "word", false, text)
     if (typeof unit === "object") return unit
     // Bash 3.2 ends a double-quoted parameter at an unquoted `}` inside `$(...)`.
-    if (quoted && unit !== undefined && input.startsWith("$(", index) && /\}.*"/s.test(input.slice(index, unit + 1)))
+    if (quoted && unit !== undefined && input.startsWith("$(", index) && input.slice(index, unit + 1).includes("}"))
       return { kind: "opaque", reason: "command-substitution" }
     if (subscript || (index === nameStart && input.startsWith("${", index) && unit !== undefined)) {
       LINE_CONTINUATION_RE.lastIndex = Number(unit) + 1
