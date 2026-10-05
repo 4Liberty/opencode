@@ -8,7 +8,7 @@ import { useLanguage } from "@/runtime/i18n/language"
 import { usePlatform } from "@/runtime/platform/platform"
 import { useCheckServerHealth } from "@/runtime/server/health"
 import { useServers } from "@/runtime/server/registry"
-import { pairingLink, redeemPairingLink, serverAddress } from "./pairing"
+import { serverAddress } from "./pairing"
 import { isMixedContent } from "./browser"
 import { createCameraAvailability } from "./camera"
 import "./screen.css"
@@ -30,16 +30,6 @@ export function ConnectServerScreen(props: { url?: string } = {}) {
     )
   const request = useMutation(() => ({
     mutationFn: async () => {
-      const link = pairingLink(state.url)
-      if (link) {
-        const redeemed = await redeemPairingLink(link)
-        if (!redeemed) {
-          setState("error", language.t("server.connect.link.expired"))
-          return
-        }
-        // Keep the token in the form so a failed connection check can retry without the spent code.
-        setState({ url: link.url, password: redeemed.password })
-      }
       const url = serverAddress(state.url)
       if (!url) {
         setState("error", language.t("server.connect.address.invalid"))
@@ -64,7 +54,9 @@ export function ConnectServerScreen(props: { url?: string } = {}) {
         </div>
         <header>
           <h1 id="server-connect-title">{language.t("server.connect.title")}</h1>
-          <p>{language.t("server.connect.description")}</p>
+          <Show when={!state.scanning}>
+            <p>{language.t("server.connect.description")}</p>
+          </Show>
         </header>
         <Show
           when={!state.scanning}
@@ -153,10 +145,6 @@ export function ConnectServerScreen(props: { url?: string } = {}) {
               </p>
             </Show>
           </Show>
-          <footer>
-            <p>{language.t("server.connect.pair.description")}</p>
-            <code dir="ltr">opencode pair</code>
-          </footer>
         </Show>
       </div>
     </main>

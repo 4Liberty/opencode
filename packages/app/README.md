@@ -83,23 +83,23 @@ Changes merged into `v2` reach the beta site when they are promoted to `beta`. T
 only the web app, using the same `WebApp` StaticSite definition as production. It sets the build channel
 and Sentry environment to `beta` without deploying the API, console, database, or billing infrastructure.
 
-`VITE_OPENCODE_SERVER_MODE` controls which server the web build provides at startup:
+`VITE_OPENCODE_SERVER_MODE` controls whether the web build expects an API on its own origin:
 
-| Mode               | Initial server                                                                       |
-| ------------------ | ------------------------------------------------------------------------------------ |
-| `none`             | No initial server. The beta deployment uses this mode.                               |
-| `origin` (default) | The current page's origin. CLI builds explicitly use this mode for `opencode serve`. |
+| Mode               | Same-origin API                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------- |
+| `none`             | Not expected. The beta deployment and `bun run dev:web` use this mode.                |
+| `origin` (default) | Expected. CLI builds use this mode because `opencode serve` hosts the API and web UI. |
 
 In Vite development mode, `origin` uses `VITE_OPENCODE_SERVER_HOST` / `VITE_OPENCODE_SERVER_PORT`
-(default: `http://localhost:4096`) instead of the frontend origin. Both modes restore user-added servers
-from storage. Desktop provides the local server it discovers or starts through native initialization.
+(default: `http://localhost:4096`) instead of the frontend origin. The expected server is registered at startup
+only when the URL includes credentials; an unauthenticated visit starts with an empty server list. Both modes
+restore user-added servers from storage. Desktop provides the local server it discovers or starts through native
+initialization.
 
 With no configured servers, or when the only server rejects the saved credentials, the app shows a full-screen
-connection form. Enter a server address and password, paste a link from `opencode pair`, or choose
-**Scan QR code** to read its QR code. Pairing links are single-use; the app exchanges them for a session token
-and immediately attempts to connect. Failed connections leave the details available
-to edit and retry with **Connect**. Credentials are checked before saving the server. Camera access requires
-HTTPS (or localhost) and browser permission. Saved offline servers continue to use the normal app UI.
+connection form. Enter a server address and password or scan a pairing QR code to connect. Failed connections
+leave the details available to edit and retry with **Connect**. Credentials are checked before saving the server.
+Saved offline servers continue to use the normal app UI.
 
 When the service is exposed through an HTTPS reverse proxy, advertise its external address at runtime:
 

@@ -1,4 +1,4 @@
-import { OpenCode } from "@opencode/client/promise"
+import { isUnauthorizedError, OpenCode } from "@opencode/client/promise"
 import { normalizeServerUrl } from "@/runtime/server/registry"
 
 export function serverAddress(value: string) {
@@ -22,12 +22,18 @@ export function pairingLink(value: string) {
 }
 
 export type Pairing = { readonly url: string; readonly password: string }
+export type PairingRedemption =
+  | { readonly ok: true; readonly pairing: Pairing }
+  | { readonly ok: false; readonly reason: "expired" | "connection" }
 
-export function redeemPairingLink(link: { url: string; code: string }) {
-  return OpenCode.make({ baseUrl: link.url })
+export function redeemPairingLink(link: { url: string; code: string }, fetch?: typeof globalThis.fetch) {
+  return OpenCode.make({ baseUrl: link.url, fetch })
     .server.connect({ code: link.code })
     .then(
-      (session): Pairing => ({ url: link.url, password: session.token }),
-      () => undefined,
+      (session): PairingRedemption => ({ ok: true, pairing: { url: link.url, password: session.token } }),
+      (error): PairingRedemption => ({
+        ok: false,
+        reason: isUnauthorizedError(error) ? "expired" : "connection",
+      }),
     )
 }

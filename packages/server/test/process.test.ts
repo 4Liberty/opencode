@@ -217,8 +217,11 @@ it.live("pairing links sign in browsers with a cookie and API clients with a tok
     expect((yield* request("/api/info", { headers: { cookie: `${cookie}x` } })).status).toBe(401)
 
     const client = yield* pair
-    const redeemed = yield* request(`/auth/connect/${client.code}`)
+    const redeemed = yield* request(`/auth/connect/${client.code}`, {
+      headers: { origin: "https://device.example.ts.net" },
+    })
     expect(redeemed.status).toBe(200)
+    expect(redeemed.headers.get("access-control-allow-origin")).toBe("*")
     const session = (yield* Effect.promise(() => redeemed.json())) as { token: string }
     expect(
       (yield* request("/api/info", { headers: { authorization: `Basic ${btoa(`opencode:${session.token}`)}` } }))

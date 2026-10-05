@@ -77,21 +77,4 @@
   .server-connect-error {
     color: var(--v2-state-fg-danger);
   }
-
-  footer {
-    text-align: center;
-    margin-block-start: 16px;
-  }
-
-  code {
-    display: inline-block;
-    margin-block-start: 12px;
-    border: 1px solid var(--v2-border-border-base);
-    border-radius: 6px;
-    padding: 8px 16px;
-    font-size: 13px;
-    line-height: var(--line-height-base);
-    background: var(--v2-background-bg-layer-01);
-    user-select: all;
-  }
 }

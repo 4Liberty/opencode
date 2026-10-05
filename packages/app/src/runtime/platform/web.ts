@@ -48,7 +48,7 @@ export function createWebPlatform(version: string) {
   return {
     platform,
     currentServerUrl,
-    defaultServerUrl: storedServerUrl ?? currentServerUrl,
+    defaultServerUrl: storedServerUrl,
   }
 }
 

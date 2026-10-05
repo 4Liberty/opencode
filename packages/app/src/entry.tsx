@@ -77,23 +77,31 @@ if (root instanceof HTMLElement && root.dataset.opencodeMounted === undefined) {
     const standalone = isStandalone()
     root.dataset.standalone = String(standalone)
     if (standalone) restorePwaRoute()
-    const server: ServerConnection.Http | undefined = web.currentServerUrl
-      ? {
-          type: "http",
-          authToken: !!auth,
-          http: {
-            url: web.currentServerUrl,
-            ...auth,
-          },
-        }
-      : undefined
+    const currentServer = web.currentServerUrl ? ServerConnection.Key.make(web.currentServerUrl) : undefined
+    const server: ServerConnection.Http | undefined =
+      web.currentServerUrl && auth
+        ? {
+            type: "http",
+            authToken: true,
+            http: {
+              url: web.currentServerUrl,
+              ...auth,
+            },
+          }
+        : undefined
     render(
       () => (
         <PlatformProvider value={web.platform}>
           <AppBaseProviders locale={locale}>
             <AppInterface
-              defaultServer={web.defaultServerUrl ? ServerConnection.Key.make(web.defaultServerUrl) : undefined}
-              canonicalLocalServer={server ? ServerConnection.key(server) : undefined}
+              defaultServer={
+                web.defaultServerUrl
+                  ? ServerConnection.Key.make(web.defaultServerUrl)
+                  : server
+                    ? currentServer
+                    : undefined
+              }
+              canonicalLocalServer={currentServer}
               servers={server ? [server] : []}
             >
               <KeyboardInsets />

@@ -18,6 +18,12 @@
     color: var(--v2-state-fg-danger);
   }
 
+  .server-connect-scan-alert {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
   .server-connect-video {
     position: relative;
     aspect-ratio: 1;

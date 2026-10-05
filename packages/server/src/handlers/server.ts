@@ -1,5 +1,5 @@
 import { Duration, Effect } from "effect"
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { PersistentPty } from "@opencode/core/persistent-pty"
 import { UnauthorizedError } from "@opencode/protocol/errors"
@@ -31,6 +31,10 @@ export const ServerHandler = HttpApiBuilder.group(Api, "server.server", (handler
         "server.connect",
         Effect.fn(function* (ctx) {
           const request = yield* HttpServerRequest.HttpServerRequest
+          // The single-use URL is the credential, and scanners may run on a different origin from the advertised server.
+          yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+            Effect.succeed(HttpServerResponse.setHeader(response, "access-control-allow-origin", "*")),
+          )
           // Browser navigations ask for HTML; everything else is an API client that wants the token.
           const browser = request.headers.accept?.includes("text/html") === true
           const token = (yield* pairing.consume(ctx.params.code)) ? ServerAuth.issueSession(auth) : undefined
