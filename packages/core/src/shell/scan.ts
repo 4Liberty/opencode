@@ -234,12 +234,7 @@ function bashWordEvaluation(state: BashState): BashEvaluation | undefined {
   const structure = state.structures.at(-1)
   if (structure?.kind === "for" && structure.phase === "header" && structure.sawIn) return "deferred"
   if (state.commandWordIndex < 0) return state.assignmentWord ? "deferred" : undefined
-  // Only command and builtin can run a builtin; skip them with their options.
-  let name = state.commandWordIndex
-  while (state.words[name] === "builtin" || state.words[name] === "command") {
-    name++
-    while (state.words[name]?.startsWith("-")) name++
-  }
+  const name = bashBuiltinIndex(state)
   const command = state.words[name]
   if (command === undefined) return undefined
   if (command === "let") return "arithmetic"
@@ -248,6 +243,17 @@ function bashWordEvaluation(state: BashState): BashEvaluation | undefined {
   if ((command === "printf" || command === "print") && (state.words[name + 1] ?? state.word).startsWith("-v"))
     return "binding"
   return state.words.at(-1) === BASH_BINDING_OPTIONS[command] ? "binding" : undefined
+}
+
+// Index of the word naming the builtin that runs. Only command and builtin can run a builtin; skip them with
+// their options.
+function bashBuiltinIndex(state: BashState) {
+  let name = state.commandWordIndex
+  while (state.words[name] === "builtin" || state.words[name] === "command") {
+    name++
+    while (state.words[name]?.startsWith("-")) name++
+  }
+  return name
 }
 
 function finishBashCommand(state: BashState, boundary = false) {
@@ -274,6 +280,10 @@ function finishBashCommand(state: BashState, boundary = false) {
         : {}),
     }
     state.commands.push(command)
+    // Dash expands an alias defined earlier in the same script, which can name any command.
+    const builtin = bashBuiltinIndex(state)
+    if (state.words[builtin] === "alias" && state.words.slice(builtin + 1).some((word) => word.includes("=")))
+      state.invalid ??= "dynamic-execution"
     if (state.resourceEnd === undefined) {
       for (const heredoc of state.heredocs) {
         if (heredoc.command) continue
@@ -447,6 +457,9 @@ function scanBash(
       const end = scanBashArrayOrPattern(input, index, depth + 1, context, state.nestedCommands, mode)
       if (typeof end === "object") return end
       if (bashCrossesHeredoc(state, index, end)) return { kind: "opaque", reason: "heredoc" }
+      // Zsh ends an array assignment at its closing parenthesis, so text right after it starts a command.
+      if (array && end + 1 < input.length && !" \t\n;&|<>)".includes(input[end + 1]))
+        return { kind: "opaque", reason: "invalid-structure" }
       state.wordStarted = true
       state.word += input.slice(index, end + 1)
       index = end

@@ -82,6 +82,11 @@ function expectProbesReported(source: string) {
 
 // Each fixture runs scan_probe in at least one real shell, which the scanner must report or reject.
 const fixtures = [
+  "a=(1)scan_probe",
+  "a=(\n1)scan_probe; ",
+  "a=(1)'scan_probe'",
+  "alias p=scan_probe\np",
+  "command alias p=scan_probe\np",
   "x='*(e:scan_probe:)'; echo $^~x",
   "x='$(scan_probe)'; echo \"${\\\n(e)x}\"",
   "x='$(scan_probe)'; echo ${(j:):e)x}",
