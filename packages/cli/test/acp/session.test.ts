@@ -206,6 +206,10 @@ describe("acp session lifecycle over the wire", () => {
       await rpcError(acp.request("session/load", { cwd: "workspace", sessionId: "ses_saved", mcpServers: [] })),
     ).toEqual(relative)
     expect(await rpcError(acp.request("session/list", { cwd: "workspace" }))).toEqual(relative)
+    expect(await rpcError(acp.request("session/list", { cwd: "" }))).toMatchObject({
+      code: -32602,
+      data: { field: "cwd" },
+    })
     expect(new Set(acp.server.sessions.keys())).toEqual(existing)
     expect(acp.server.requests.filter((request) => request.path.includes("ses_saved"))).toEqual([])
     expect(acp.logs).toEqual([])
