@@ -114,7 +114,8 @@ including its models, agents, commands, skills, instructions, plugins, and MCP s
 - `session/list` returns up to 100 sessions per page. It accepts a `cwd` filter and a `cursor`.
 - `session/close` interrupts active work and detaches the session from the ACP process. OpenCode keeps the saved
   session.
-- `session/delete` removes the session. Deleting a session that doesn't exist succeeds.
+- `session/delete` ends an active prompt like `session/cancel`, then removes the session. Deleting a session that
+  doesn't exist succeeds.
 - A session runs one prompt at a time. OpenCode returns an error for a second `session/prompt` while the first is
   active.
 

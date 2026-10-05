@@ -398,35 +398,39 @@ describe("acp prompt turns over the wire", () => {
     expect((await acp.prompt(acp.sessionId, "again")).stopReason).toBe("end_turn")
   })
 
-  test("session/close settles the active turn before responding and detaches only that session", async () => {
-    await using acp = await startSession(held)
-    const other = await acp.newSession()
+  test.each(["session/close", "session/delete"] as const)(
+    "%s settles the active turn before responding and detaches only that session",
+    async (method) => {
+      await using acp = await startSession(held)
+      const other = await acp.newSession()
 
-    const order: string[] = []
-    const prompt = acp.prompt(acp.sessionId, "hold").then((response) => {
-      order.push("prompt")
-      return response
-    })
-    await admitted(acp, acp.sessionId)
-    const close = await acp.request("session/close", { sessionId: acp.sessionId }).then((response) => {
-      order.push("close")
-      return response
-    })
+      const order: string[] = []
+      const prompt = acp.prompt(acp.sessionId, "hold").then((response) => {
+        order.push("prompt")
+        return response
+      })
+      await admitted(acp, acp.sessionId)
+      const close = await acp.request(method, { sessionId: acp.sessionId }).then((response) => {
+        order.push(method)
+        return response
+      })
 
-    expect(close).toEqual({})
-    expect(await prompt).toMatchObject({ stopReason: "cancelled" })
-    expect(order).toEqual(["prompt", "close"])
-    expect(acp.server.interrupts).toEqual([acp.sessionId])
-    expect(await rpcError(acp.prompt(acp.sessionId, "again"))).toMatchObject({
-      code: -32602,
-      data: { sessionId: acp.sessionId },
-    })
-    expect((await acp.prompt(other.sessionId, "still here")).stopReason).toBe("end_turn")
+      expect(close).toEqual({})
+      expect(await prompt).toMatchObject({ stopReason: "cancelled" })
+      expect(order).toEqual(["prompt", method])
+      expect(acp.server.interrupts).toEqual([acp.sessionId])
+      expect(acp.server.sessions.has(acp.sessionId)).toBe(method === "session/close")
+      expect(await rpcError(acp.prompt(acp.sessionId, "again"))).toMatchObject({
+        code: -32602,
+        data: { sessionId: acp.sessionId },
+      })
+      expect((await acp.prompt(other.sessionId, "still here")).stopReason).toBe("end_turn")
 
-    expect((await acp.prompt(other.sessionId, "/review now")).stopReason).toBe("end_turn")
-    await acp.request("session/close", { sessionId: other.sessionId })
-    expect(acp.server.interrupts).toEqual([acp.sessionId, other.sessionId])
-  })
+      expect((await acp.prompt(other.sessionId, "/review now")).stopReason).toBe("end_turn")
+      await acp.request("session/close", { sessionId: other.sessionId })
+      expect(acp.server.interrupts).toEqual([acp.sessionId, other.sessionId])
+    },
+  )
 })
 
 // The server answered admission before streaming the chunk, and this request round-trips through the server after it,
