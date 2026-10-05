@@ -117,7 +117,8 @@ export const ensure = Effect.fn("service.ensure")(function* (options: EnsureOpti
 
     const failed = pool.reap()
     if (failed !== undefined) return yield* Effect.fail(failed)
-    if (pool.shouldRecruit(info !== undefined)) {
+    const incumbentAlive = info !== undefined && isPidAlive(info.pid)
+    if (!incumbentAlive && pool.shouldRecruit(info !== undefined)) {
       yield* announce("missing")
       pool.add(yield* spawnContender)
     }
@@ -177,6 +178,15 @@ const registered = Effect.fnUntraced(function* (file?: string, timeout?: number)
 // discovery window.
 const poll = (timing: EnsureTiming) =>
   Schedule.max([Schedule.spaced(timing.stopPollInterval), Schedule.recurs(timing.stopPollAttempts)])
+
+function isPidAlive(pid: number) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
 
 const signal = (pid: number, name: NodeJS.Signals) =>
   Effect.try({ try: () => process.kill(pid, name), catch: (cause) => cause }).pipe(Effect.ignore)
