@@ -554,12 +554,6 @@ export const make = Effect.fn("PluginHost.make")(function* (
             },
           }
         }),
-      active: () =>
-        sessions.active.pipe(
-          Effect.map((active) =>
-            Object.fromEntries(Array.from(active, (sessionID) => [sessionID, { type: "running" as const }])),
-          ),
-        ),
       create: (input) =>
         sessions.create({
           id: input?.id,
