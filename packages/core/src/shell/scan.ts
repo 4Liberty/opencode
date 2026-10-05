@@ -842,7 +842,8 @@ function bashAppend(text: BashText, value: string) {
 // Builtins such as declare, unset, read, and printf -v, and arithmetic on a variable's value, evaluate
 // `name[subscript]`, and declare evaluates `([subscript]=value)`. A literal expansion inside such a subscript
 // runs when the word is evaluated. Quotes and escapes inside the brackets hide a closing bracket. NUL marks
-// where an expansion's value may supply the name.
+// where an expansion's value may supply the name. Values that only exist at runtime, such as environment
+// variables later used in $((name)), remain out of reach.
 function bashEvaluatesSubscript(literal: string) {
   if (!literal.includes("[")) return false
   let depth = 0
