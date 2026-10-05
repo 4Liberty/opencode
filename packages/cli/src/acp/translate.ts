@@ -7,7 +7,14 @@ import { TokenUsage } from "@opencode/schema/token-usage"
 import { ACPChild } from "./child"
 import { ACPCompaction } from "./compaction"
 import { ACPError } from "./error"
-import { completedToolUpdate, errorToolUpdate, pendingToolCall, runningToolUpdate, type ToolInput } from "./tool"
+import {
+  completedToolUpdate,
+  errorToolUpdate,
+  pendingToolCall,
+  runningToolUpdate,
+  type DiffSource,
+  type ToolInput,
+} from "./tool"
 
 const RetryMeta = "opencode/retry"
 
@@ -56,8 +63,8 @@ type FormEvent = Extract<OpenCodeEvent, { type: "form.created" }>
 type CreatedEvent = Extract<OpenCodeEvent, { type: "session.created" }>
 
 export type Output =
-  | { readonly _tag: "SessionUpdate"; readonly update: SessionUpdate }
-  | { readonly _tag: "ChildUpdate"; readonly update: ACPChild.Update }
+  | { readonly _tag: "SessionUpdate"; readonly update: SessionUpdate; readonly diff?: DiffSource }
+  | { readonly _tag: "ChildUpdate"; readonly update: ACPChild.Update; readonly diff?: DiffSource }
   | {
       readonly _tag: "PermissionAsk"
       readonly event: PermissionEvent
@@ -249,7 +256,11 @@ function sessionEvent(
   child: ACPChild.Session | undefined,
 ): Folded {
   const sessionID = child?.id ?? ctx.sessionID
-  const send = (update: SessionUpdate) => route(ctx, child, update)
+  const send = (update: SessionUpdate, diff?: DiffSource) =>
+    route(ctx, child, update).map((output) => {
+      if (!diff || (output._tag !== "SessionUpdate" && output._tag !== "ChildUpdate")) return output
+      return { ...output, diff }
+    })
   switch (event.type) {
     case "session.step.started":
       if (!state.retries.has(sessionID)) return { state, outputs: [] }
@@ -276,7 +287,10 @@ function sessionEvent(
         state.compactions,
         ACPCompaction.usesStandardUpdates(ctx, child !== undefined),
       )
-      return { state: { ...state, compactions: applied.tracked }, outputs: applied.updates.flatMap(send) }
+      return {
+        state: { ...state, compactions: applied.tracked },
+        outputs: applied.updates.flatMap((update) => send(update)),
+      }
     }
     case "session.compaction.delta": {
       const update = ACPCompaction.chunk(
@@ -364,17 +378,20 @@ function sessionEvent(
       const tool = state.tools.get(key) ?? newTool(event.data.sessionID, event.data.id)
       return {
         state: { ...state, tools: without(state.tools, key) },
-        outputs: send({
-          sessionUpdate: "tool_call_update",
-          ...completedToolUpdate({
-            toolCallId: event.data.id,
-            toolName: tool.name,
-            input: tool.input,
-            metadata: event.data.metadata,
-            content: event.data.content,
-            cwd: ctx.cwd,
-          }),
-        }),
+        outputs: send(
+          {
+            sessionUpdate: "tool_call_update",
+            ...completedToolUpdate({
+              toolCallId: event.data.id,
+              toolName: tool.name,
+              input: tool.input,
+              metadata: event.data.metadata,
+              content: event.data.content,
+              cwd: ctx.cwd,
+            }),
+          },
+          { toolName: tool.name, input: tool.input, metadata: event.data.metadata },
+        ),
       }
     }
     case "session.tool.failed": {

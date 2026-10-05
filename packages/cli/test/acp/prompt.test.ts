@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionNotification } from "@agentclientprotocol/sdk"
 import type { OpenCodeEventEncoded } from "@opencode/protocol/groups/event"
+import { createTwoFilesPatch } from "diff"
 import { Schema } from "effect"
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
@@ -142,6 +143,100 @@ describe("acp prompt turns over the wire", () => {
       sessionId: sessionID,
       update: { sessionUpdate: "usage_update", used: 171, size: 200_000, cost: { amount: 3.5, currency: "USD" } },
     })
+  })
+
+  test("reports full-file diffs on a completed edit or patch, and the tool name on the first call", async () => {
+    await using dir = await tmpdir()
+    const file = (name: string) => path.resolve(dir.path, name)
+    const edited = "one\r\nthree\r\n"
+    const added = "two\n"
+    const indented = "  const x = 1\n  const y = 3\n"
+    await Promise.all([
+      Bun.write(file("edited.ts"), edited),
+      Bun.write(file("added.ts"), added),
+      Bun.write(file("indented.ts"), indented),
+    ])
+    const patch = [
+      "*** Begin Patch",
+      "*** Update File: indented.ts",
+      "@@",
+      "   const x = 1",
+      "-  const y = 2",
+      "+  const y = 3",
+      "*** End Patch",
+    ].join("\n")
+    await using acp = await startWire({
+      onPrompt: ({ sessionID, id }) =>
+        turn(
+          sessionID,
+          id,
+          toolStarted(sessionID, "call_edit", "edit"),
+          toolCalled(sessionID, "call_edit", { path: "edited.ts", oldString: "two", newString: "three" }),
+          toolSucceeded(
+            sessionID,
+            "call_edit",
+            {
+              files: [
+                fileDiff("edited.ts", "one\r\ntwo\r\n", edited),
+                fileDiff("added.ts", "", added, "added"),
+                fileDiff("gone.ts", "gone\n", "", "deleted"),
+              ],
+            },
+            "edited",
+          ),
+          toolStarted(sessionID, "call_patch", "patch"),
+          toolCalled(sessionID, "call_patch", { patchText: patch }),
+          toolSucceeded(
+            sessionID,
+            "call_patch",
+            { files: [fileDiff("indented.ts", "const x = 1\nconst y = 2\n", "const x = 1\nconst y = 3\n")] },
+            "patched",
+          ),
+          toolStarted(sessionID, "call_write", "write"),
+          toolCalled(sessionID, "call_write", { path: "written.ts", content: "two\n" }),
+          toolSucceeded(sessionID, "call_write", {}, "written"),
+          toolStarted(sessionID, "call_snippet", "edit"),
+          toolCalled(sessionID, "call_snippet", { path: "edited.ts", oldString: "two", newString: "three" }),
+          toolSucceeded(sessionID, "call_snippet", {}, "edited"),
+        ),
+    })
+    await acp.initialize()
+    const session = await acp.newSession(dir.path)
+
+    await acp.prompt(session.sessionId, "edit the files")
+
+    const completed = (id: string) =>
+      turnUpdates(acp.updates).find(
+        (item) =>
+          item.update.sessionUpdate === "tool_call_update" &&
+          item.update.toolCallId === id &&
+          item.update.status === "completed",
+      )?.update
+    expect(
+      turnUpdates(acp.updates).find((item) => item.update.sessionUpdate === "tool_call")?.update,
+    ).toMatchObject({ toolCallId: "call_edit", name: "edit" })
+    expect(completed("call_edit")).toMatchObject({
+      content: [
+        { type: "content", content: { type: "text", text: "edited" } },
+        { type: "diff", path: file("edited.ts"), oldText: "one\r\ntwo\r\n", newText: edited },
+        { type: "diff", path: file("added.ts"), oldText: null, newText: added },
+        { type: "diff", path: file("gone.ts"), oldText: "gone\n", newText: "" },
+      ],
+    })
+    expect(completed("call_patch")).toMatchObject({
+      content: [
+        { type: "content", content: { type: "text", text: "patched" } },
+        { type: "diff", path: file("indented.ts"), oldText: "  const x = 1\n  const y = 2\n", newText: indented },
+      ],
+    })
+    const written = completed("call_write")
+    const snippet = completed("call_snippet")
+    expect(written?.sessionUpdate === "tool_call_update" ? written.content : undefined).toEqual([
+      { type: "content", content: { type: "text", text: "written" } },
+    ])
+    expect(snippet?.sessionUpdate === "tool_call_update" ? snippet.content : undefined).toEqual([
+      { type: "content", content: { type: "text", text: "edited" } },
+    ])
   })
 
   test("routes slash commands and compact through their session endpoints", async () => {
@@ -437,6 +532,10 @@ function receivedBeforeResponse(acp: Wire) {
     .slice(0, response)
     .filter((message) => "method" in message && message.method === "session/update").length
   return acp.updates.slice(0, count).map((item) => item.update)
+}
+
+function fileDiff(file: string, before: string, after: string, status: "added" | "deleted" | "modified" = "modified") {
+  return { file, patch: createTwoFilesPatch(file, file, before, after), additions: 1, deletions: 1, status }
 }
 
 function turnUpdates(updates: readonly SessionNotification[]) {
