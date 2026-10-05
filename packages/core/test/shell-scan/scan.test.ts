@@ -217,6 +217,8 @@ describe("ShellScan", () => {
     ["CDPATH=/usr # comment\ncd bin; rm victim", ["cd", "rm"]],
     ["HOME=/etc # comment\ncd; rm victim", ["cd", "rm"]],
     ["VALUE=$(printf 2); echo $((VALUE + 1))", ["printf", "echo"]],
+    ["MSG='Use ${FOO} here'; some_cmd || exit $?", ["some_cmd", "exit"]],
+    ["f() { local REGEX='[0-9]+${FOO}'; return $?; }", ["local", "return"]],
   ] as const)("scans assignment-only boundaries without evaluating their effects: %s", (command, names) => {
     const result = ShellScan.scan(command)
     expect(result.kind).toBe("scanned")
