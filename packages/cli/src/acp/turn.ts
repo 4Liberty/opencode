@@ -343,7 +343,10 @@ export const make = Effect.fnUntraced(function* (input: {
   )
 
   // Forked uninterruptible: interruption reaches only `execute`, so the fiber still settles with a response.
-  const run = Effect.fn("cli.acp.turn.run")(function* (attached: Attached, prompt: ACPPrompt.Prepared) {
+  const run = Effect.fn("cli.acp.turn.run")(function* (params: PromptRequest) {
+    const attached = yield* input.sessions.require(params.sessionId)
+    const catalog = yield* input.catalog.get(attached.cwd)
+    const prompt = yield* ACPPrompt.prepare(catalog, params.prompt)
     const capabilities = yield* Ref.get(input.capabilities)
     const state = yield* Ref.make(ACPTranslate.initial)
     const exit = yield* Effect.acquireUseRelease(
@@ -365,21 +368,18 @@ export const make = Effect.fnUntraced(function* (input: {
 
   return {
     prompt: Effect.fnUntraced(function* (params, signal) {
-      const attached = yield* input.sessions.require(params.sessionId)
-      const catalog = yield* input.catalog.get(attached.cwd)
-      const prompt = yield* ACPPrompt.prepare(catalog, params.prompt)
-      // Synchronous, so concurrent prompts for one session cannot both register.
+      // Synchronous and before setup, so concurrent prompts cannot both register and an early cancel still applies.
       const turn = yield* Effect.withFiber((fiber) => {
-        if (FiberMap.hasUnsafe(turns, attached.id)) {
+        if (FiberMap.hasUnsafe(turns, params.sessionId)) {
           return Effect.fail(
             new ACPError.ServiceFailureError({
-              safeMessage: `Session already has an active ACP prompt: ${attached.id}`,
+              safeMessage: `Session already has an active ACP prompt: ${params.sessionId}`,
               service: "session",
             }),
           )
         }
-        const forked = Effect.runForkWith(fiber.context)(run(attached, prompt), { uninterruptible: true })
-        FiberMap.setUnsafe(turns, attached.id, forked)
+        const forked = Effect.runForkWith(fiber.context)(run(params), { uninterruptible: true })
+        FiberMap.setUnsafe(turns, params.sessionId, forked)
         return Effect.succeed(forked)
       })
       // A `$/cancel_request` for this prompt cancels its turn like `session/cancel`, rather than failing the request.
