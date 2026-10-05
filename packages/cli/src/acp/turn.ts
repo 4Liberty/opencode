@@ -316,7 +316,8 @@ export const make = Effect.fnUntraced(function* (input: {
     const failure = terminal === "interrupted" ? undefined : ACPTranslate.failure(current)
     if (failure) return yield* failure
     yield* sendUsageUpdate(attached, current)
-    return ACPTranslate.response(current, attached.id, terminal)
+    const cancelledWhileSettling = Exit.isFailure(yield* Effect.exit(Effect.interruptible(Effect.void)))
+    return ACPTranslate.response(current, attached.id, cancelledWhileSettling ? "interrupted" : terminal)
   })
 
   const sendUsageUpdate = Effect.fn("cli.acp.turn.usage")(
@@ -342,7 +343,7 @@ export const make = Effect.fnUntraced(function* (input: {
     ),
   )
 
-  // Forked uninterruptible: interruption reaches only `execute`, so the fiber still settles with a response.
+  // Forked uninterruptible: interruption lands only in `execute` and the last check in `settle`, so a response follows.
   const run = Effect.fn("cli.acp.turn.run")(function* (params: PromptRequest) {
     const attached = yield* input.sessions.require(params.sessionId)
     const catalog = yield* input.catalog.get(attached.cwd)
