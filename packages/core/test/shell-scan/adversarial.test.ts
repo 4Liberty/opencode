@@ -42,13 +42,20 @@ describe("ShellScan adversarial corpus", () => {
     expect(result.commands.map((command) => command.words[0])).toEqual([...names])
   })
 
-  // Only shell sinks evaluate subscripts; ordinary arguments and heredoc bodies are data.
-  test.each(["bun -e 'f(`a[${x}]`)'", "rg 'a[$(x)]'", "cat <<'EOF'\na[$(x)]\nEOF", "echo 'a[$(x)]'"])(
-    "scans subscript-shaped text outside shell sinks: %s",
-    (input) => {
-      expect(ShellScan.scan(input).kind).toBe("scanned")
-    },
-  )
+  // Only shell sinks evaluate subscripts; ordinary arguments, heredoc bodies, and bound data without a sink are safe.
+  test.each([
+    "bun -e 'f(`a[${x}]`)'",
+    "rg 'a[$(x)]'",
+    "cat <<'EOF'\na[$(x)]\nEOF",
+    "echo 'a[$(x)]'",
+    'BODY="- [x] Fix \\`scan.ts\\`"; gh pr create --title "fix" --body "$BODY"',
+    "MSG='[feat] Fix `foo`'; git commit -m \"$MSG\"",
+    "PATTERN='a[${b}]'; rg \"$PATTERN\"",
+    "export REGEX='[0-9]+${foo}'",
+    "cat <<< 'const a = arr[0]; const b = `${a}`'",
+  ])("scans subscript-shaped text outside shell sinks: %s", (input) => {
+    expect(ShellScan.scan(input).kind).toBe("scanned")
+  })
 
   test.each(['printf "unterminated', "printf ok &&", "printf ok >", "echo > >out"])(
     "keeps structurally uncertain Bash input opaque: %s",

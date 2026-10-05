@@ -36,21 +36,20 @@ const BASH_BINDING_BUILTINS = new Set([
   "local",
   "export",
   "readonly",
-  "integer",
-  "float",
   "unset",
   "read",
-  "set",
   "getopts",
   "mapfile",
   "readarray",
   "zparseopts",
 ])
 // Builtins whose operand after this option names a variable.
-const BASH_BINDING_OPTIONS: Record<string, string> = { test: "-v", "[": "-v", wait: "-p" }
+const BASH_BINDING_OPTIONS: Record<string, string> = { test: "-v", "[": "-v" }
 const BASH_ARITHMETIC_COMPARISONS = new Set(["-eq", "-ne", "-lt", "-le", "-gt", "-ge"])
 const BASH_EXPANSION_RE = /\$(?:\\\n)*[({]|`/
 const BASH_DECLARATIONS = new Set(["declare", "typeset", "export", "readonly", "local", "unset", "unsetenv"])
+const BASH_PRECOMMANDS = new Set(["builtin", "command", "time", "coproc", "!"])
+const ZSH_PRECOMMANDS = new Set(["noglob", "nocorrect"])
 const BASH_NON_FUNCTION_KEYWORDS = new Set([
   "if",
   "for",
@@ -73,8 +72,10 @@ const TOKEN_RE = /[A-Za-z_][A-Za-z0-9_]*(?=(?:\\\n)*(?:[ \t\n;|&()<>]|$))/y
 const BRACE_CLOSE_AHEAD_RE = /(?:\\\n)*(?:[ \t\n;&|()<>]|$)/y
 const SPACE_CONTINUATION_AHEAD_RE = /(?:\\\n)*[ \t\n]/y
 const NEGATION_AHEAD_RE = /(?:\\\n)*[ \t\n(]/y
-const COPROC_AHEAD_RE = /coproc[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?(?=[{(]|(?:if|while|until|for|case)\b)/y
-const TIME_AHEAD_RE = /time[ \t]+(?:-p[ \t]+)?(?=[{(]|(?:if|while|until|for|case)\b)/y
+const COPROC_AHEAD_RE =
+  /coproc(?:[ \t]|\\\n)+(?:--(?:[ \t]|\\\n)+)?(?:[A-Za-z_][A-Za-z0-9_]*(?:[ \t]|\\\n)+)?(?=(?:!(?:[ \t]|\\\n)*)*(?:[{(]|\[\[(?:\\\n)*[ \t\n]|(?:if|while|until|for|select|case|repeat)\b))/y
+const TIME_AHEAD_RE =
+  /time(?:[ \t]|\\\n)+(?:-p(?:[ \t]|\\\n)+)?(?:--(?:[ \t]|\\\n)+)?(?=(?:!(?:[ \t]|\\\n)*)*(?:[{(]|\[\[(?:\\\n)*[ \t\n]|(?:if|while|until|for|select|case|repeat)\b))/y
 // [function] name [()] then blanks, continuations, and comments before the body.
 const FUNCTION_HEAD_RE =
   /(function[ \t](?:[ \t]|\\\n)*)?([A-Za-z_][\w.:+@%-]*)?(?:[ \t]|\\\n)*(\([ \t]*\))?((?:[ \t\n]|\\\n|#[^\n]*\n)*)/y
@@ -82,10 +83,13 @@ const FUNCTION_BODY_RE = /[{(]|\[\[(?=(?:\\\n)*[ \t\n])|(?:if|while|until|for|se
 const DO_AHEAD_RE = /(?:[ \t\n;]|\\\n|#[^\n]*(?:\n|$))*(?:do(?=(?:\\\n)*(?:[ \t\n;{(]|$))|\{(?=(?:\\\n)*[ \t\n]))/y
 const NOFORK_OPEN_RE = /\$\{(?:\\\n)*(?:[ \t\n]|\|)/y
 // Zsh flags that neither evaluate nor glob a value; s and j take an argument between repeated delimiters.
-const ZSH_SAFE_FLAGS_RE = /\$\{\((?:[@AaCcDFfikLnOoQqtUuVvWwXZz0]|[js]([^({[<\\])(?:(?!\1).)*\1)*\)/y
-const ZSH_GLOB_MODIFIER_RE = /[\^=~#+]*~/y
-const PARAMETER_NAME_RE = /[!#]?(?:[A-Za-z_]\w*|\d+|[@*#?$!-])/y
-const PARAMETER_SUBSCRIPT_RE = /[!#]?[A-Za-z_][A-Za-z0-9_]*\[/y
+const ZSH_SAFE_FLAGS_RE = /\$\{\((?:[@AaBbCcDEfFikLMmNnOoQpqStUuVvWwXZz0]|[js]([^({[<\\])(?:(?!\1).)*\1)*\)/y
+const ZSH_GLOB_MODIFIER_RE = /(?:[\^=~#+]|\\\n)*~/y
+const LINE_CONTINUATION_RE = /(?:\\\n)*/y
+const PARAMETER_PREFIX_RE = /(?:\\\n)*(?:\([^)]*\))?(?:[!#^=+~]|\\\n)*/y
+const PARAMETER_NAME_RE = /(?:[A-Za-z_](?:[A-Za-z0-9_]|\\\n)*|\d+|[@*#?$!-])(?:\\\n)*/y
+const PARAMETER_SUBSCRIPT_RE = /[A-Za-z_](?:[A-Za-z0-9_]|\\\n)*\[/y
+const PARAMETER_PROMPT_RE = /@(?:\\\n)*P(?:\\\n)*\}/y
 const BASH_ANSI_ESCAPES: Record<string, string> = {
   a: "\x07",
   b: "\b",
@@ -106,13 +110,26 @@ type Opaque = { kind: "opaque"; reason: OpaqueReason }
 
 type BashResult = { kind: "scanned"; commands: Command[]; end: number } | Opaque
 
-// Shared across one scan: the work budget and the shell dialect.
-type BashContext = { remaining: number; dialect: Dialect }
+// Shared across one scan: the work budget, the shell dialect, and whether a bound expansion reaches a variable sink.
+type BashContext = {
+  remaining: number
+  dialect: Dialect
+  boundExpansion?: boolean
+  variableSink?: boolean
+}
 
-type BashHeredoc = { delimiter: string; quoted: boolean; tabs: boolean; command?: Command; start?: number }
+type BashHeredoc = {
+  delimiter: string
+  dashDelimiter?: string
+  quoted: boolean
+  tabs: boolean
+  command?: Command
+  start?: number
+}
 
 type BashState = {
   input: string
+  context: BashContext
   commands: Command[]
   nestedCommands: Command[]
   words: string[]
@@ -120,7 +137,7 @@ type BashState = {
   // Pending heredocs, shared with nested groups: a body starts after the next newline token at any nesting.
   heredocs: BashHeredoc[]
   structures: Array<{
-    kind: "if" | "while" | "until" | "for" | "case"
+    kind: "if" | "while" | "until" | "for" | "case" | "repeat"
     phase: "header" | "condition" | "pattern" | "body" | "do"
     count: number
     sawElse?: boolean
@@ -154,7 +171,6 @@ type BashState = {
   outer: BashText | undefined
 }
 
-// Cooked word text, and the literal text the word decodes to apart from its expansions.
 // A word's cooked text, the literal text it decodes to apart from its expansions, and the literal text of its
 // command substitutions' words, which stands in for their output.
 type BashText = { word: string; literal: string; output: string }
@@ -168,8 +184,10 @@ export type Dialect = "bash" | "zsh" | "posix"
 
 export function scan(input: string, dialect: Dialect = "posix"): Result {
   if (input.length > MAX_INPUT_LENGTH) return { kind: "opaque", reason: "invalid-structure" }
-  const result = scanBash(input, 0, 0, { remaining: MAX_INPUT_LENGTH * MAX_SUBSTITUTION_DEPTH, dialect })
+  const context: BashContext = { remaining: MAX_INPUT_LENGTH * MAX_SUBSTITUTION_DEPTH, dialect }
+  const result = scanBash(input, 0, 0, context)
   if (result.kind === "opaque") return result
+  if (context.boundExpansion && context.variableSink) return { kind: "opaque", reason: "dynamic-execution" }
   return { kind: "scanned", commands: result.commands }
 }
 
@@ -207,9 +225,12 @@ function closeBashList(state: BashState, end: number): BashResult {
 function finishBashWord(state: BashState) {
   if (!state.wordStarted) return
   const evaluation = bashWordEvaluation(state)
-  if (evaluation && bashEvaluatesExpansion(state, evaluation)) state.invalid ??= "dynamic-execution"
+  if (evaluation && bashEvaluatesExpansion(state, evaluation, state.context)) state.invalid ??= "dynamic-execution"
   if (state.outer) state.outer.output += ` ${state.literal} ${state.output}`
-  if (!state.redirectTarget) {
+  const structure = state.structures.at(-1)
+  const repeatHeader = structure?.kind === "repeat" && structure.phase === "header"
+  if (!state.redirectTarget && repeatHeader) structure.phase = "do"
+  if (!state.redirectTarget && !repeatHeader) {
     if (!state.assignmentWord && state.commandWordIndex < 0) state.commandWordIndex = state.words.length
     state.commandStart ??= state.wordStart
     state.words.push(state.word)
@@ -232,24 +253,39 @@ function finishBashWord(state: BashState) {
 function bashWordEvaluation(state: BashState): BashEvaluation | undefined {
   if (state.redirectTarget) return state.hereString ? "deferred" : undefined
   const structure = state.structures.at(-1)
+  if (structure?.kind === "repeat" && structure.phase === "header") return "arithmetic"
   if (structure?.kind === "for" && structure.phase === "header" && structure.sawIn) return "deferred"
   if (state.commandWordIndex < 0) return state.assignmentWord ? "deferred" : undefined
   const name = bashBuiltinIndex(state)
   const command = state.words[name]
   if (command === undefined) return undefined
-  if (command === "let") return "arithmetic"
-  if (BASH_BINDING_BUILTINS.has(command)) return "binding"
-  // printf -v and print -v bind the formatted operands; the option comes first.
-  if ((command === "printf" || command === "print") && (state.words[name + 1] ?? state.word).startsWith("-v"))
+  if (command === "let" || command === "integer" || command === "float") return "arithmetic"
+  if (command === "set") return "deferred"
+  if (BASH_BINDING_BUILTINS.has(command)) {
+    const options = state.words.slice(name + 1)
+    if (options.some((word) => word.startsWith("-") && word.includes("i"))) return "arithmetic"
+    // A plain `name=value` declaration without options only binds a scalar for later.
+    if (state.assignmentWord && BASH_DECLARATIONS.has(command) && options.every((word) => !word.startsWith("-")))
+      return "deferred"
     return "binding"
+  }
+  if (command === "printf" || command === "print") {
+    const options = [...state.words.slice(name + 1), state.word]
+    const flag = command === "print" ? /^-[A-Za-z]*v/ : /^-v/
+    return options.some((word) => flag.test(word)) ? "binding" : undefined
+  }
+  if (command === "wait")
+    return /^-[nf]*p/.test(state.word) || /^-[nf]*p$/.test(state.words.at(-1) ?? "") ? "binding" : undefined
   return state.words.at(-1) === BASH_BINDING_OPTIONS[command] ? "binding" : undefined
 }
 
-// Index of the word naming the builtin that runs. Only command and builtin can run a builtin; skip them with
-// their options.
+// Index of the word naming the builtin that runs, skipping precommand wrappers and their options.
 function bashBuiltinIndex(state: BashState) {
   let name = state.commandWordIndex
-  while (state.words[name] === "builtin" || state.words[name] === "command") {
+  while (
+    BASH_PRECOMMANDS.has(state.words[name] ?? "") ||
+    (state.context.dialect !== "bash" && ZSH_PRECOMMANDS.has(state.words[name] ?? ""))
+  ) {
     name++
     while (state.words[name]?.startsWith("-")) name++
   }
@@ -280,9 +316,25 @@ function finishBashCommand(state: BashState, boundary = false) {
         : {}),
     }
     state.commands.push(command)
-    // Dash expands an alias defined earlier in the same script, which can name any command.
     const builtin = bashBuiltinIndex(state)
-    if (state.words[builtin] === "alias" && state.words.slice(builtin + 1).some((word) => word.includes("=")))
+    const builtinName = state.words[builtin]
+    const builtinArgs = state.words.slice(builtin + 1)
+    if (builtinName === "eval") state.context.variableSink = true
+    // Dash expands an alias defined earlier in the same script, which can name any command.
+    if (builtinName === "alias" && builtinArgs.some((word) => word.includes("="))) state.invalid ??= "dynamic-execution"
+    // Zsh options such as globsubst and kshglob enable glob qualifiers on ordinary parameter expansions.
+    if (
+      state.context.dialect !== "bash" &&
+      (builtinName === "setopt" || (builtinName === "set" && builtinArgs.includes("-o"))) &&
+      builtinArgs.some((word) => /^(?:globsubst|kshglob|aliases)$/.test(word.toLowerCase().replace(/[_-]/g, "")))
+    )
+      state.invalid ??= "dynamic-execution"
+    // Bash compgen -C and -F execute their argument immediately to generate completions.
+    if (
+      state.context.dialect !== "zsh" &&
+      builtinName === "compgen" &&
+      builtinArgs.some((word) => word.startsWith("-") && /[CF]/.test(word))
+    )
       state.invalid ??= "dynamic-execution"
     if (state.resourceEnd === undefined) {
       for (const heredoc of state.heredocs) {
@@ -322,6 +374,7 @@ function scanBash(
   if (depth > MAX_SUBSTITUTION_DEPTH || context.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
   const state: BashState = {
     input,
+    context,
     commands: [],
     nestedCommands: [],
     words: [],
@@ -439,6 +492,9 @@ function scanBash(
       const end = scanBashSubscript(input, index + 1, depth, context, subscript, BASH_SPANS.assignmentSubscript)
       if (typeof end === "object") return end
       if (input[end + 1] === "=" || input.startsWith("+=", end + 1)) {
+        // Dash has no arrays and word-splits unquoted expansions inside `name[subscript]=value`.
+        if (context.dialect === "posix" && /[$`]/.test(input.slice(index + 1, end)))
+          return { kind: "opaque", reason: "invalid-structure" }
         state.nestedCommands.push(...subscript)
         state.assignmentWord = true
         state.word += input.slice(index, end + 1)
@@ -452,7 +508,7 @@ function scanBash(
       state.assignmentWord &&
       state.word.endsWith("=") &&
       (state.commandWordIndex < 0 || BASH_DECLARATIONS.has(state.rawWords[state.commandWordIndex]))
-    if (char === "(" && (array || (inCasePattern && /[?*+@!]$/.test(state.word)))) {
+    if (char === "(" && (array || ((inCasePattern || context.dialect === "bash") && /[?*+@!]$/.test(state.word)))) {
       const mode = array ? "array" : "pattern"
       const end = scanBashArrayOrPattern(input, index, depth + 1, context, state.nestedCommands, mode)
       if (typeof end === "object") return end
@@ -581,7 +637,10 @@ function scanBashOperatorOrSeparator(
     finishBashWord(state)
     return readBashHeredocs(state, index, depth, context)
   }
-  if (structure?.kind === "for" && (structure.phase === "header" || structure.phase === "do")) {
+  if (
+    (structure?.kind === "for" || structure?.kind === "repeat") &&
+    (structure.phase === "header" || structure.phase === "do")
+  ) {
     if (separator !== ";" && separator !== "\n") return { kind: "opaque", reason: "compound-command" }
     if (structure.phase === "header" && !structure.sawIn && !state.wordStarted && state.words.length === 0)
       return { kind: "opaque", reason: "compound-command" }
@@ -657,6 +716,10 @@ function scanBashCommandStart(
     DO_AHEAD_RE.lastIndex = end + 1
     if (!DO_AHEAD_RE.test(input)) state.structures.pop()
     return end
+  }
+  if (structure?.kind === "repeat" && structure.phase === "do" && char !== "\n" && char !== "#" && char !== ";") {
+    TOKEN_RE.lastIndex = index
+    if (TOKEN_RE.exec(input)?.[0] !== "do") state.structures.pop()
   }
   const keywordStep = scanBashKeyword(state, index, depth, context)
   if (keywordStep !== undefined) return keywordStep
@@ -778,6 +841,8 @@ function scanBashKeyword(
     finishBashCommand(state)
     structure.phase = "do"
   }
+  if (structure?.kind === "repeat" && structure.phase === "header" && state.wordStarted && token === "do")
+    finishBashWord(state)
   const inHeader = bashInHeader(state)
   if (
     token &&
@@ -806,9 +871,9 @@ function scanBashKeyword(
     }
     if (token === "do") {
       if (
-        !["for", "while", "until"].includes(structure.kind) ||
+        !["for", "while", "until", "repeat"].includes(structure.kind) ||
         !["condition", "do"].includes(structure.phase) ||
-        (structure.kind !== "for" && !structure.count)
+        (structure.kind !== "for" && structure.kind !== "repeat" && !structure.count)
       )
         return { kind: "opaque", reason: "compound-command" }
       structure.phase = "body"
@@ -818,7 +883,9 @@ function scanBashKeyword(
     if (
       (token === "fi" && (structure.kind !== "if" || structure.phase !== "body" || !structure.count)) ||
       (token === "done" &&
-        (!["for", "while", "until"].includes(structure.kind) || structure.phase !== "body" || !structure.count)) ||
+        (!["for", "while", "until", "repeat"].includes(structure.kind) ||
+          structure.phase !== "body" ||
+          !structure.count)) ||
       (token === "esac" && (structure.kind !== "case" || structure.phase === "header"))
     )
       return { kind: "opaque", reason: "compound-command" }
@@ -836,12 +903,13 @@ function scanBashKeyword(
     token === "until" ||
     token === "for" ||
     token === "select" ||
-    token === "case"
+    token === "case" ||
+    (token === "repeat" && context.dialect !== "bash")
   ) {
     if (depth + state.structures.length >= MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "compound-command" }
     state.structures.push({
       kind: token === "select" ? "for" : token,
-      phase: ["for", "select", "case"].includes(token) ? "header" : "condition",
+      phase: ["for", "select", "case", "repeat"].includes(token) ? "header" : "condition",
       count: 0,
     })
     // The compound command itself satisfies a preceding list operator.
@@ -912,7 +980,8 @@ function scanBashUnit(
     if (text && next !== "\n") bashAppend(text, input.slice(index + 1, index + 2))
     return index + 1
   }
-  if (char === "$" && zshEvaluates(input, index)) return { kind: "opaque", reason: "dynamic-execution" }
+  if (char === "$" && context.dialect !== "bash" && zshEvaluates(input, index))
+    return { kind: "opaque", reason: "dynamic-execution" }
   if (char === "$" && next === "$") {
     if (text) text.word += "$$"
     return index + 1
@@ -920,8 +989,23 @@ function scanBashUnit(
   if (mode === "word" && char === "$" && next === "'") {
     const quote = bashAnsiQuote(input, index + 1)
     if (!quote) return { kind: "opaque", reason: "unterminated-quote" }
+    const firstQuote = input.indexOf("'", index + 2)
+    // Dash does not support $'...' and closes the single-quoted span at the first `'`, even after `\`.
+    if (
+      context.dialect === "posix" &&
+      quote.end !== firstQuote &&
+      (input.indexOf("'", firstQuote + 1) < quote.end || /[#"]/.test(input.slice(firstQuote + 1)))
+    )
+      return { kind: "opaque", reason: "unterminated-quote" }
     if (text) bashAppend(text, quote.value)
     return quote.end
+  }
+  if (mode === "arithmetic" && char === "$" && next === "'") {
+    const quote = bashAnsiQuote(input, index + 1)
+    if (!quote || quote.end !== input.indexOf("'", index + 2) || /[()[\];"}]/.test(quote.value))
+      return { kind: "opaque", reason: "invalid-structure" }
+    if (text) text.literal += quote.value
+    return scanBashSpan(input, index + 2, depth, context, commands, BASH_SPANS.arithmeticQuote, allowBracket, text)
   }
   if (mode === "word" && char === "'") {
     const end = input.indexOf("'", index + 1)
@@ -976,15 +1060,18 @@ function bashAppend(text: BashText, value: string) {
 // operands of [[ ]]. Builtins that name or bind a variable from an operand evaluate its subscript, so a literal
 // expansion there runs when the operand also has a bracket; a command substitution's words stand in for the
 // output it supplies. Values bound for later, such as assignment values, array elements, for lists, and
-// here-strings, reach arithmetic through a later $((name)), so their own literal text is checked the same way.
+// here-strings, reach arithmetic or subscript evaluation when a variable sink appears in the command.
 // A parameter's words count as its value. Text that reaches arithmetic only at runtime, through the
 // environment, a function argument, or the output a command substitution supplies to a later binding, remains
 // out of reach.
-function bashEvaluatesExpansion(text: BashText, evaluation: BashEvaluation) {
-  const subscripted = (value: string) => value.includes("[") && BASH_EXPANSION_RE.test(value)
-  if (evaluation === "deferred") return subscripted(text.literal)
-  if (evaluation === "arithmetic" && BASH_EXPANSION_RE.test(text.literal)) return true
-  return subscripted(text.literal) || subscripted(text.output)
+function bashEvaluatesExpansion(text: BashText, evaluation: BashEvaluation, context: BashContext) {
+  const combined = `${text.literal} ${text.output}`
+  const hasExpansion = BASH_EXPANSION_RE.test(combined)
+  if (hasExpansion) context.boundExpansion = true
+  if (evaluation === "deferred") return false
+  if (evaluation === "arithmetic" ? /[A-Za-z_$]/.test(text.word) : text.word.includes("$")) context.variableSink = true
+  if (evaluation === "arithmetic") return hasExpansion
+  return combined.includes("[") && hasExpansion
 }
 
 function bashText(): BashText {
@@ -1002,7 +1089,7 @@ function scanBashSubscript(
 ): number | Opaque {
   const text = bashText()
   const end = scanBashSpan(input, start, depth, context, commands, span, false, text)
-  if (typeof end === "number" && bashEvaluatesExpansion(text, "arithmetic"))
+  if (typeof end === "number" && bashEvaluatesExpansion(text, "arithmetic", context))
     return { kind: "opaque", reason: "dynamic-execution" }
   return end
 }
@@ -1095,8 +1182,10 @@ function scanBashDollarOrBacktick(
     const parameter = bashText()
     const end = scanBashParameter(input, start + 2, depth + 1, context, commands, quoted, parameter)
     // ${!name} evaluates the subscript in its name.
-    if (input[start + 2] === "!" && bashEvaluatesExpansion(parameter, "binding"))
-      return { kind: "opaque", reason: "dynamic-execution" }
+    if (input[start + 2] === "!") {
+      context.variableSink = true
+      if (bashEvaluatesExpansion(parameter, "binding", context)) return { kind: "opaque", reason: "dynamic-execution" }
+    }
     if (text) {
       text.literal += parameter.literal
       text.output += parameter.output
@@ -1116,7 +1205,7 @@ function scanBashDollarOrBacktick(
     true,
     expression,
   )
-  if (typeof end === "number" && bashEvaluatesExpansion(expression, "arithmetic"))
+  if (typeof end === "number" && bashEvaluatesExpansion(expression, "arithmetic", context))
     return { kind: "opaque", reason: "dynamic-execution" }
   return end
 }
@@ -1136,7 +1225,7 @@ function scanBashArithmetic(
   const end = scanBashSpan(input, start, depth, context, arithmetic, span, true, text)
   if (typeof end === "object") return { kind: "opaque", reason: "invalid-structure" }
   if (input[end + 1] !== ")") return undefined
-  if (bashEvaluatesExpansion(text, "arithmetic")) return { kind: "opaque", reason: "dynamic-execution" }
+  if (bashEvaluatesExpansion(text, "arithmetic", context)) return { kind: "opaque", reason: "dynamic-execution" }
   commands.push(...arithmetic)
   return end + 1
 }
@@ -1179,10 +1268,12 @@ function scanBashParameter(
   quoted: boolean,
   text: BashText,
 ): number | Opaque {
-  PARAMETER_SUBSCRIPT_RE.lastIndex = start
+  PARAMETER_PREFIX_RE.lastIndex = start
+  const nameStart = PARAMETER_PREFIX_RE.exec(input) ? PARAMETER_PREFIX_RE.lastIndex : start
+  PARAMETER_SUBSCRIPT_RE.lastIndex = nameStart
   const subscript = PARAMETER_SUBSCRIPT_RE.test(input) ? PARAMETER_SUBSCRIPT_RE.lastIndex - 1 : -1
   // The operands of ${name:offset:length} are arithmetic. A colon right after the name or subscript starts them.
-  PARAMETER_NAME_RE.lastIndex = start
+  PARAMETER_NAME_RE.lastIndex = nameStart
   let colon = PARAMETER_NAME_RE.test(input) ? PARAMETER_NAME_RE.lastIndex : -1
   let offset: number | undefined
   for (let index = start; index < input.length; index++) {
@@ -1191,16 +1282,28 @@ function scanBashParameter(
     if (char === "}") {
       if (
         offset !== undefined &&
-        bashEvaluatesExpansion({ ...text, literal: text.literal.slice(offset) }, "arithmetic")
+        bashEvaluatesExpansion(
+          { word: text.word.slice(offset), literal: text.literal.slice(offset), output: text.output },
+          "arithmetic",
+          context,
+        )
       )
         return { kind: "opaque", reason: "dynamic-execution" }
       return index
     }
     if (index === colon && char === ":" && !"-=?+".includes(input[index + 1] ?? "")) offset = text.literal.length
     // Bash ${name@P} evaluates the value as prompt text.
-    if (input.startsWith("@P}", index)) return { kind: "opaque", reason: "dynamic-execution" }
+    if (char === "@") {
+      PARAMETER_PROMPT_RE.lastIndex = index
+      if (PARAMETER_PROMPT_RE.test(input)) return { kind: "opaque", reason: "dynamic-execution" }
+    }
     // Zsh globs an unquoted parameter's words, where a parenthesized group can be a glob qualifier.
-    if (!quoted && char === "(" && index > start) return { kind: "opaque", reason: "dynamic-execution" }
+    if (!quoted && context.dialect !== "bash" && char === "(" && index > start)
+      return { kind: "opaque", reason: "dynamic-execution" }
+    if (quoted && char === "'" && input[index - 1] === "$") {
+      const ansi = bashAnsiQuote(input, index)
+      if (ansi) text.literal += ansi.value
+    }
     const unit =
       index === subscript
         ? scanBashSubscript(input, index + 1, depth, context, commands)
@@ -1210,7 +1313,10 @@ function scanBashParameter(
             ? scanBashSpan(input, index + 1, depth, context, commands, BASH_SPANS.double, false, text)
             : scanBashUnit(input, index, depth, context, commands, quoted ? "quoted" : "word", false, text)
     if (typeof unit === "object") return unit
-    if (index === subscript) colon = Number(unit) + 1
+    if (index === subscript) {
+      LINE_CONTINUATION_RE.lastIndex = Number(unit) + 1
+      colon = LINE_CONTINUATION_RE.exec(input) ? LINE_CONTINUATION_RE.lastIndex : Number(unit) + 1
+    }
     if (unit !== undefined) index = unit
     else bashAppend(text, char)
   }
@@ -1228,6 +1334,7 @@ function scanBashConditional(
   let text = bashText()
   let wordStarted = false
   let parenDepth = 0
+  let patternParenDepth = 0
   for (let index = start; index < input.length; index++) {
     if (--context.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
     const char = input[index]
@@ -1246,10 +1353,10 @@ function scanBashConditional(
         // -v names a variable, and arithmetic comparisons evaluate both operands.
         const evaluated = words.some(
           (word, at) =>
-            (words[at - 1]?.word === "-v" && bashEvaluatesExpansion(word, "binding")) ||
+            (words[at - 1]?.word === "-v" && bashEvaluatesExpansion(word, "binding", context)) ||
             ((BASH_ARITHMETIC_COMPARISONS.has(words[at - 1]?.word ?? "") ||
               BASH_ARITHMETIC_COMPARISONS.has(words[at + 1]?.word ?? "")) &&
-              bashEvaluatesExpansion(word, "arithmetic")),
+              bashEvaluatesExpansion(word, "arithmetic", context)),
         )
         if (evaluated) return { kind: "opaque", reason: "dynamic-execution" }
         return index + 1
@@ -1268,14 +1375,23 @@ function scanBashConditional(
     if (char === ";") return { kind: "opaque", reason: "invalid-structure" }
     if (char === "(" || char === ")") {
       if (char === ")" && parenDepth === 0) return { kind: "opaque", reason: "invalid-structure" }
+      const inPattern =
+        patternParenDepth > 0 ||
+        (char === "(" && (wordStarted || ["=", "==", "!=", "=~"].includes(words.at(-1)?.word ?? "")))
       parenDepth += char === "(" ? 1 : -1
+      if (inPattern) {
+        patternParenDepth += char === "(" ? 1 : -1
+        wordStarted = true
+        bashAppend(text, char)
+        continue
+      }
       wordStarted = false
       continue
     }
     const unit = scanBashUnit(input, index, depth, context, commands, "word", true, text)
     if (typeof unit === "object") return unit
     if (unit !== undefined) index = unit
-    wordStarted = unit !== undefined || !"&|<>".includes(char)
+    wordStarted = unit !== undefined || patternParenDepth > 0 || !"&|<>".includes(char)
     if (unit === undefined && wordStarted) bashAppend(text, char)
   }
   return { kind: "opaque", reason: "invalid-structure" }
@@ -1301,7 +1417,7 @@ function scanBashArrayOrPattern(
       continue
     }
     if (text && (char === ")" || char === " " || char === "\t" || char === "\n")) {
-      if (bashEvaluatesExpansion(text, "deferred")) return { kind: "opaque", reason: "dynamic-execution" }
+      if (bashEvaluatesExpansion(text, "deferred", context)) return { kind: "opaque", reason: "dynamic-execution" }
       text.literal = ""
       text.output = ""
     }
@@ -1337,19 +1453,24 @@ function scanBashArrayOrPattern(
 
 function bashAnsiQuote(input: string, start: number) {
   let value = ""
+  let nul = false
   for (let index = start + 1; index < input.length; index++) {
-    if (input[index] === "'") return { value, end: index }
+    if (input[index] === "'") return { value, end: index, nul }
     if (input[index] !== "\\") {
-      value += input[index]
+      if (!nul) value += input[index]
       continue
     }
     const escaped = input[++index]
+    if (escaped === undefined) return
     if (escaped in BASH_ANSI_ESCAPES) {
-      value += BASH_ANSI_ESCAPES[escaped]
+      if (!nul) value += BASH_ANSI_ESCAPES[escaped]
       continue
     }
-    if (escaped === "c" && index + 1 < input.length) {
-      value += String.fromCharCode(input[++index].toUpperCase().charCodeAt(0) & 31)
+    if (escaped === "c" && index + 1 < input.length && input[index + 1] !== "'") {
+      const ctrl = input[++index] === "\\" && input[index + 1] === "\\" ? input[++index] : input[index]
+      const code = ctrl.toUpperCase().charCodeAt(0) & 31
+      if (code === 0) nul = true
+      if (!nul) value += String.fromCharCode(code)
       continue
     }
     const digits =
@@ -1363,18 +1484,20 @@ function bashAnsiQuote(input: string, start: number) {
               ? /^[0-7]{1,3}/.exec(input.slice(index, index + 3))?.[0]
               : undefined
     if (!digits) {
-      value += `\\${escaped}`
+      if (!nul) value += `\\${escaped}`
       continue
     }
     const octal = /[0-7]/.test(escaped)
     const point = parseInt(digits, octal ? 8 : 16)
-    value += point <= 0x10ffff ? String.fromCodePoint(point) : ""
+    if (point === 0) nul = true
+    if (!nul && point <= 0x10ffff) value += String.fromCodePoint(point)
     index += digits.length - (octal ? 1 : 0)
   }
 }
 
 function bashHeredocDelimiter(input: string, start: number, tabs: boolean) {
   let delimiter = ""
+  let dashDelimiter: string | undefined
   let quoted = false
   let quote: "'" | '"' | undefined
   let end = start
@@ -1383,10 +1506,13 @@ function bashHeredocDelimiter(input: string, start: number, tabs: boolean) {
     const char = input[index]
     if (!started && /[ \t]/.test(char)) continue
     if (!started && char === "#") return
-    if (!quote && /[ \t\n;&|()<>]/.test(char)) return started ? { delimiter, quoted, tabs, end } : undefined
+    if (!quote && /[ \t\n;&|()<>]/.test(char))
+      return started ? { delimiter, dashDelimiter, quoted, tabs, end } : undefined
+    // Dash retains $ in $'...' heredoc delimiters while Bash and Zsh strip $.
     if (!quote && input.startsWith("$'", index)) {
       const literal = bashAnsiQuote(input, index + 1)
-      if (!literal) return
+      if (!literal || literal.nul) return
+      dashDelimiter = `${dashDelimiter ?? delimiter}$${input.slice(index + 2, literal.end)}`
       delimiter += literal.value
       quoted = true
       started = true
@@ -1412,7 +1538,9 @@ function bashHeredocDelimiter(input: string, start: number, tabs: boolean) {
       if (!quote || '$`"\\'.includes(next)) {
         quoted = true
         started = true
-        delimiter += input[++index]
+        const escaped = input[++index]
+        if (dashDelimiter !== undefined) dashDelimiter += escaped
+        delimiter += escaped
         end = index
         continue
       }
@@ -1424,14 +1552,19 @@ function bashHeredocDelimiter(input: string, start: number, tabs: boolean) {
       end = index
       continue
     }
+    if (dashDelimiter !== undefined) dashDelimiter += char
     delimiter += char
     started = true
     end = index
   }
-  if (started && !quote) return { delimiter, quoted, tabs, end }
+  if (started && !quote) return { delimiter, dashDelimiter, quoted, tabs, end }
 }
 
-function bashHeredoc(input: string, start: number, delimiter: { delimiter: string; tabs: boolean; quoted: boolean }) {
+function bashHeredoc(
+  input: string,
+  start: number,
+  delimiter: { delimiter: string; dashDelimiter?: string; tabs: boolean; quoted: boolean },
+) {
   const bodyStart = start
   let lineStart = start
   let line = ""
@@ -1445,13 +1578,15 @@ function bashHeredoc(input: string, start: number, delimiter: { delimiter: strin
     while (text[text.length - 1 - run] === "\\") run++
     backslashes = run === text.length ? backslashes + run : run
     const continued = !delimiter.quoted && backslashes % 2 === 1 && index < input.length
+    const maxLength = Math.max(delimiter.delimiter.length, delimiter.dashDelimiter?.length ?? 0)
     // Joined lines only grow, so text past the delimiter's length cannot change the comparison.
-    if (line.length <= delimiter.delimiter.length) line += continued ? text.slice(0, -1) : text
+    if (line.length <= maxLength) line += continued ? text.slice(0, -1) : text
     if (continued) {
       backslashes--
       start = index + 1
       continue
     }
+    if (delimiter.dashDelimiter !== undefined && line === delimiter.dashDelimiter) return
     if (line === delimiter.delimiter) {
       // Dash does not join backslash-continued delimiter lines; fail closed if a physical delimiter follows.
       if (start > lineStart && input.slice(index + 1).includes(delimiter.delimiter)) return

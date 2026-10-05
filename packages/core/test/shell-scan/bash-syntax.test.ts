@@ -72,6 +72,8 @@ const fixtures = [
   ["cat <<E; ( true\nscan_ignored\nE\n)", ["cat", "true"]],
   ["cat <<E; f() { true\nscan_ignored\nE\n}; f", ["cat", "true", "f"]],
   ["cat <<E; case x in\nscan_ignored\nE\nx) scan_probe;; esac", ["cat", "scan_probe"]],
+  ["time [[ ( -f foo ) ]]", []],
+  ["time ! { echo a; echo b; }", ["echo", "echo"]],
 ] as const
 
 describe("ordinary Bash and Zsh syntax", () => {
@@ -292,6 +294,14 @@ describe("Bash dialects", () => {
     expect(heads(source, "zsh")).toEqual(["true", "next"])
     expect(heads(source, "bash")).toBe("opaque")
     expect(heads(source, "posix")).toBe("opaque")
+  })
+
+  test("scans safe Zsh parameter flags, Zsh repeat loops, and Bash extglob arguments", () => {
+    expect(heads("print -l ${(M)files:#*.ts}", "zsh")).toEqual(["print"])
+    expect(heads("print -l ${(ps:\\n:)text}", "zsh")).toEqual(["print"])
+    expect(heads("repeat 3; do echo hi; done", "zsh")).toEqual(["echo"])
+    expect(heads("repeat 3; do echo hi; done", "posix")).toEqual(["echo"])
+    expect(heads("ls @(foo|bar)", "bash")).toEqual(["ls"])
   })
 
   test.each([
