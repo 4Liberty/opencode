@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionNotification } from "@agentclientprotocol/sdk"
 import type { OpenCodeEventEncoded } from "@opencode/protocol/groups/event"
-import { createTwoFilesPatch } from "diff"
 import { Schema } from "effect"
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
@@ -9,6 +8,7 @@ import { pathToFileURL } from "node:url"
 import { tmpdir } from "../fixture/tmpdir"
 import {
   delivered,
+  fileDiff,
   durableEvent,
   ephemeralEvent,
   failed,
@@ -145,16 +145,18 @@ describe("acp prompt turns over the wire", () => {
     })
   })
 
-  test("reports full-file diffs on a completed edit or patch, and the tool name on the first call", async () => {
+  test("reports full-file diffs for a completed edit and patch", async () => {
     await using dir = await tmpdir()
     const file = (name: string) => path.resolve(dir.path, name)
     const edited = "one\r\nthree\r\n"
-    const added = "two\n"
     const indented = "  const x = 1\n  const y = 3\n"
+    const formatted = "keep\nnew\n// formatted\n"
+    const added = "two\n"
     await Promise.all([
       Bun.write(file("edited.ts"), edited),
-      Bun.write(file("added.ts"), added),
       Bun.write(file("indented.ts"), indented),
+      Bun.write(file("formatted.ts"), formatted),
+      Bun.write(file("added.ts"), added),
     ])
     const patch = [
       "*** Begin Patch",
@@ -163,6 +165,14 @@ describe("acp prompt turns over the wire", () => {
       "   const x = 1",
       "-  const y = 2",
       "+  const y = 3",
+      "*** Update File: formatted.ts",
+      "@@",
+      " keep",
+      "-old",
+      "+new",
+      "*** Add File: added.ts",
+      "+two",
+      "*** Delete File: gone.ts",
       "*** End Patch",
     ].join("\n")
     await using acp = await startWire({
@@ -172,29 +182,23 @@ describe("acp prompt turns over the wire", () => {
           id,
           toolStarted(sessionID, "call_edit", "edit"),
           toolCalled(sessionID, "call_edit", { path: "edited.ts", oldString: "two", newString: "three" }),
-          toolSucceeded(
-            sessionID,
-            "call_edit",
-            {
-              files: [
-                fileDiff("edited.ts", "one\r\ntwo\r\n", edited),
-                fileDiff("added.ts", "", added, "added"),
-                fileDiff("gone.ts", "gone\n", "", "deleted"),
-              ],
-            },
-            "edited",
-          ),
+          toolSucceeded(sessionID, "call_edit", { files: [fileDiff("edited.ts", "one\r\ntwo\r\n", edited)] }, "edited"),
           toolStarted(sessionID, "call_patch", "patch"),
           toolCalled(sessionID, "call_patch", { patchText: patch }),
           toolSucceeded(
             sessionID,
             "call_patch",
-            { files: [fileDiff("indented.ts", "const x = 1\nconst y = 2\n", "const x = 1\nconst y = 3\n")] },
+            {
+              files: [
+                trimmed("indented.ts", "  const x = 1\n  const y = 2\n", indented),
+                fileDiff("formatted.ts", "keep\nold\n", formatted),
+                fileDiff("added.ts", "", added, "added"),
+                fileDiff("gone.ts", "gone\n", "", "deleted"),
+                fileDiff("missing.ts", "one\n", "two\n"),
+              ],
+            },
             "patched",
           ),
-          toolStarted(sessionID, "call_write", "write"),
-          toolCalled(sessionID, "call_write", { path: "written.ts", content: "two\n" }),
-          toolSucceeded(sessionID, "call_write", {}, "written"),
           toolStarted(sessionID, "call_snippet", "edit"),
           toolCalled(sessionID, "call_snippet", { path: "edited.ts", oldString: "two", newString: "three" }),
           toolSucceeded(sessionID, "call_snippet", {}, "edited"),
@@ -212,31 +216,24 @@ describe("acp prompt turns over the wire", () => {
           item.update.toolCallId === id &&
           item.update.status === "completed",
       )?.update
-    expect(
-      turnUpdates(acp.updates).find((item) => item.update.sessionUpdate === "tool_call")?.update,
-    ).toMatchObject({ toolCallId: "call_edit", name: "edit" })
     expect(completed("call_edit")).toMatchObject({
       content: [
         { type: "content", content: { type: "text", text: "edited" } },
         { type: "diff", path: file("edited.ts"), oldText: "one\r\ntwo\r\n", newText: edited },
-        { type: "diff", path: file("added.ts"), oldText: null, newText: added },
-        { type: "diff", path: file("gone.ts"), oldText: "gone\n", newText: "" },
       ],
     })
     expect(completed("call_patch")).toMatchObject({
       content: [
         { type: "content", content: { type: "text", text: "patched" } },
         { type: "diff", path: file("indented.ts"), oldText: "  const x = 1\n  const y = 2\n", newText: indented },
+        { type: "diff", path: file("formatted.ts"), oldText: "keep\nold\n", newText: formatted },
+        { type: "diff", path: file("added.ts"), oldText: null, newText: added },
+        { type: "diff", path: file("gone.ts"), oldText: "gone\n", newText: "" },
       ],
     })
-    const written = completed("call_write")
-    const snippet = completed("call_snippet")
-    expect(written?.sessionUpdate === "tool_call_update" ? written.content : undefined).toEqual([
-      { type: "content", content: { type: "text", text: "written" } },
-    ])
-    expect(snippet?.sessionUpdate === "tool_call_update" ? snippet.content : undefined).toEqual([
-      { type: "content", content: { type: "text", text: "edited" } },
-    ])
+    expect(completed("call_snippet")).toMatchObject({
+      content: [{ type: "content", content: { type: "text", text: "edited" } }],
+    })
   })
 
   test("routes slash commands and compact through their session endpoints", async () => {
@@ -534,8 +531,26 @@ function receivedBeforeResponse(acp: Wire) {
   return acp.updates.slice(0, count).map((item) => item.update)
 }
 
-function fileDiff(file: string, before: string, after: string, status: "added" | "deleted" | "modified" = "modified") {
-  return { file, patch: createTwoFilesPatch(file, file, before, after), additions: 1, deletions: 1, status }
+function trimmed(file: string, before: string, after: string) {
+  const recorded = fileDiff(file, before, after)
+  const lines = recorded.patch.split("\n")
+  const body = lines.filter((line) => /^[ +-]/.test(line) && !line.startsWith("---") && !line.startsWith("+++"))
+  const indent = body.reduce((result, line) => {
+    const value = line.slice(1)
+    if (value.trim().length === 0) return result
+    return Math.min(result, value.match(/^(\s*)/)?.[1].length ?? result)
+  }, Infinity)
+  if (indent === Infinity || indent === 0) return recorded
+  return {
+    ...recorded,
+    patch: lines
+      .map((line) =>
+        /^[ +-]/.test(line) && !line.startsWith("---") && !line.startsWith("+++")
+          ? line[0] + line.slice(1 + indent)
+          : line,
+      )
+      .join("\n"),
+  }
 }
 
 function turnUpdates(updates: readonly SessionNotification[]) {

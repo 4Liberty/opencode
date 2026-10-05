@@ -129,10 +129,9 @@ export function updates(message: SessionMessage.Info, cwd: string, capabilities:
 }
 
 function completedSource(message: SessionMessage.Info, update: SessionUpdate) {
-  if (message.type !== "assistant" || update.sessionUpdate !== "tool_call_update" || update.status !== "completed")
-    return undefined
+  if (message.type !== "assistant" || update.sessionUpdate !== "tool_call_update") return undefined
   const part = message.content.find((item) => item.type === "tool" && item.id === update.toolCallId)
-  if (!part || part.type !== "tool" || part.state.status !== "completed") return undefined
+  if (part?.type !== "tool" || part.state.status !== "completed") return undefined
   return { toolName: part.name, input: part.state.input, metadata: part.state.metadata }
 }
 

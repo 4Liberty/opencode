@@ -256,11 +256,7 @@ function sessionEvent(
   child: ACPChild.Session | undefined,
 ): Folded {
   const sessionID = child?.id ?? ctx.sessionID
-  const send = (update: SessionUpdate, diff?: DiffSource) =>
-    route(ctx, child, update).map((output) => {
-      if (!diff || (output._tag !== "SessionUpdate" && output._tag !== "ChildUpdate")) return output
-      return { ...output, diff }
-    })
+  const send = (update: SessionUpdate) => route(ctx, child, update)
   switch (event.type) {
     case "session.step.started":
       if (!state.retries.has(sessionID)) return { state, outputs: [] }
@@ -287,10 +283,7 @@ function sessionEvent(
         state.compactions,
         ACPCompaction.usesStandardUpdates(ctx, child !== undefined),
       )
-      return {
-        state: { ...state, compactions: applied.tracked },
-        outputs: applied.updates.flatMap((update) => send(update)),
-      }
+      return { state: { ...state, compactions: applied.tracked }, outputs: applied.updates.flatMap(send) }
     }
     case "session.compaction.delta": {
       const update = ACPCompaction.chunk(
@@ -378,20 +371,20 @@ function sessionEvent(
       const tool = state.tools.get(key) ?? newTool(event.data.sessionID, event.data.id)
       return {
         state: { ...state, tools: without(state.tools, key) },
-        outputs: send(
-          {
-            sessionUpdate: "tool_call_update",
-            ...completedToolUpdate({
-              toolCallId: event.data.id,
-              toolName: tool.name,
-              input: tool.input,
-              metadata: event.data.metadata,
-              content: event.data.content,
-              cwd: ctx.cwd,
-            }),
-          },
-          { toolName: tool.name, input: tool.input, metadata: event.data.metadata },
-        ),
+        outputs: send({
+          sessionUpdate: "tool_call_update",
+          ...completedToolUpdate({
+            toolCallId: event.data.id,
+            toolName: tool.name,
+            input: tool.input,
+            metadata: event.data.metadata,
+            content: event.data.content,
+            cwd: ctx.cwd,
+          }),
+        }).map((output) => ({
+          ...output,
+          diff: { toolName: tool.name, input: tool.input, metadata: event.data.metadata },
+        })),
       }
     }
     case "session.tool.failed": {

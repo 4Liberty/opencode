@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionMessage } from "@opencode/schema/session-message"
-import { createTwoFilesPatch } from "diff"
 import path from "node:path"
 import { tmpdir } from "../fixture/tmpdir"
-import { assistantMessage, makeSession, startWire } from "./wire-fixture"
+import { assistantMessage, fileDiff, makeSession, startWire } from "./wire-fixture"
 
 describe("acp session replay over the wire", () => {
   test("replays user, text, reasoning, and tool messages in order on session/load", async () => {
@@ -145,17 +144,7 @@ function replayFixtureMessages(edited: string): Array<typeof SessionMessage.Info
           state: {
             status: "completed",
             input: { path: edited, oldString: "two", newString: "three" },
-            metadata: {
-              files: [
-                {
-                  file: edited,
-                  patch: createTwoFilesPatch("edited.ts", "edited.ts", "one\r\ntwo\r\n", "one\r\nthree\r\n"),
-                  additions: 1,
-                  deletions: 1,
-                  status: "modified",
-                },
-              ],
-            },
+            metadata: { files: [fileDiff(edited, "one\r\ntwo\r\n", "one\r\nthree\r\n")] },
             content: [{ type: "text", text: "edited" }],
           },
         },

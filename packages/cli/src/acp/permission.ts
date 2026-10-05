@@ -4,7 +4,7 @@ import { FileDiff } from "@opencode/schema/file-diff"
 import type { Permission } from "@opencode/schema/permission"
 import type { Session } from "@opencode/schema/session"
 import { Patch } from "@opencode/util/patch"
-import { applyPatch, parsePatch, reversePatch } from "diff"
+import { applyPatch, parsePatch, reversePatch, structuredPatch, type StructuredPatch } from "diff"
 import { Effect, Option, Schema } from "effect"
 import { ACPChild } from "./child"
 import { ACPClient } from "./client"
@@ -47,7 +47,7 @@ const decodeFiles = Schema.decodeUnknownOption(Schema.Array(FileDiff.Info))
 export const ask = Effect.fnUntraced(function* (input: Input) {
   const toolName = input.tool?.name ?? input.event.data.action
   const toolInput = input.tool?.input ?? input.event.data.metadata ?? {}
-  const previews = yield* toolDiffs(toolName, toolInput, input.event.data.metadata, input.cwd, "before").pipe(
+  const previews = yield* permissionPreviews(toolName, toolInput, input.event.data.metadata, input.cwd).pipe(
     Effect.orElseSucceed((): Preview[] => []),
   )
   const title = permissionTitle(toolName, toolInput, previews)
@@ -61,6 +61,7 @@ export const ask = Effect.fnUntraced(function* (input: Input) {
     sessionId: input.clientSessionID,
     toolCall: {
       ...toolCall,
+      name: input.tool?.name,
       rawInput: input.tool ? toolCall.rawInput : undefined,
       locations: permissionLocations(toolName, toolInput, input.event.data, input.cwd),
       ...(previews.length > 0 ? { content: previews } : {}),
@@ -85,101 +86,79 @@ export const withCompletedDiffs = Effect.fnUntraced(function* (
   cwd: string,
 ) {
   if (!source || update.sessionUpdate !== "tool_call_update") return update
-  const diffs = yield* toolDiffs(source.toolName, source.input, source.metadata, cwd, "after").pipe(
-    Effect.orElseSucceed((): Preview[] => []),
-  )
-  return insertDiffs(update, diffs)
+  const hunks = canonicalName(source.toolName) === "patch" ? patchHunks(source.input) : []
+  const diffs = yield* Effect.forEach(
+    Option.getOrElse(decodeFiles(source.metadata?.files), () => []),
+    (file) =>
+      Effect.gen(function* () {
+        const path = absolutePath(file.file, cwd)
+        const newText = file.status === "deleted" ? "" : yield* Effect.tryPromise(() => Bun.file(path).text())
+        if (file.status === "added") return [diff(path, null, newText)]
+        const recorded = parsePatch(file.patch)[0]
+        if (!recorded) return []
+        const oldText = yield* Effect.try(() => applyPatch(newText, reversePatch(recorded)))
+        if (oldText !== false) return [diff(path, oldText, newText)]
+        // Core trims indentation from patch-tool diffs, so rebuild those from its hunks and keep them if the ranges agree.
+        const hunk = hunks.find(
+          (item) => item.type === "update" && absolutePath(item.movePath ?? item.path, cwd) === path,
+        )
+        if (hunk?.type !== "update" || hunk.chunks.some((chunk) => !chunk.oldLines.length || !chunk.newLines.length))
+          return []
+        const chunks = hunk.chunks.map((chunk) => ({ ...chunk, oldLines: chunk.newLines, newLines: chunk.oldLines }))
+        const rebuilt = (yield* Effect.try(() => Patch.derive(hunk.path, chunks, newText))).content
+        return ranges(structuredPatch(path, path, rebuilt, newText)) === ranges(recorded)
+          ? [diff(path, rebuilt, newText)]
+          : []
+      }).pipe(Effect.orElseSucceed((): Preview[] => [])),
+    { concurrency: "unbounded" },
+  ).pipe(Effect.map((items) => items.flat()))
+  return diffs.length === 0 ? update : { ...update, content: [...(update.content ?? []), ...diffs] }
 })
 
+function ranges(patch: StructuredPatch) {
+  return patch.hunks.map((hunk) => `${hunk.oldStart},${hunk.oldLines},${hunk.newStart},${hunk.newLines}`).join(" ")
+}
+
 // Core trims the patch tool's diffs for display, which breaks `applyPatch`, so its previews come from its own hunks.
-const toolDiffs = Effect.fnUntraced(function* (
+const permissionPreviews = Effect.fnUntraced(function* (
   toolName: string,
   input: ToolInput,
-  metadata: Readonly<Record<string, unknown>> | undefined,
+  metadata: ToolInput | undefined,
   cwd: string,
-  disk: "before" | "after",
 ) {
-  if (canonicalName(toolName) === "patch") return yield* patchPreviews(input, cwd, disk)
+  if (canonicalName(toolName) === "patch") return yield* patchPreviews(input, cwd)
   const files = Option.getOrElse(decodeFiles(metadata?.files), () => [])
-  const previews = yield* Effect.forEach(files, (file) => filePreview(file, cwd, disk), { concurrency: "unbounded" })
+  const previews = yield* Effect.forEach(
+    files,
+    (file) =>
+      Effect.gen(function* () {
+        const path = absolutePath(file.file, cwd)
+        const oldText = file.status === "added" ? null : yield* Effect.tryPromise(() => Bun.file(path).text())
+        const newText = yield* Effect.try(() => applyPatch(oldText ?? "", file.patch))
+        return newText === false ? [] : [diff(path, oldText, newText)]
+      }),
+    { concurrency: "unbounded" },
+  )
   return previews.flat()
 })
 
-function filePreview(file: FileDiff.Info, cwd: string, disk: "before" | "after") {
-  return Effect.gen(function* () {
-    const path = absolutePath(file.file, cwd)
-    if (disk === "before") {
-      const oldText = file.status === "added" ? null : yield* Effect.tryPromise(() => Bun.file(path).text())
-      const newText = yield* Effect.try(() => applyPatch(oldText ?? "", file.patch))
-      return newText === false ? [] : [diff(path, oldText, newText)]
-    }
-    if (file.status === "deleted") {
-      const oldText = yield* Effect.try(() => applyReversed(file.patch, ""))
-      return oldText === false ? [] : [diff(path, oldText, "")]
-    }
-    const current = yield* Effect.tryPromise(() => Bun.file(path).text())
-    if (file.status === "added") return [diff(path, null, current)]
-    const oldText = yield* Effect.try(() => applyReversed(file.patch, current))
-    return oldText === false ? [] : [diff(path, oldText, current)]
-  })
-}
-
-function patchPreviews(input: ToolInput, cwd: string, disk: "before" | "after") {
+function patchPreviews(input: ToolInput, cwd: string) {
   return Effect.forEach(
     patchHunks(input),
     (hunk) =>
       Effect.gen(function* () {
         const path = absolutePath(hunk.path, cwd)
         if (hunk.type === "add") {
-          if (disk === "after") {
-            const current = yield* Effect.tryPromise(() => Bun.file(path).text())
-            return [diff(path, null, current)]
-          }
           const newText = hunk.contents.endsWith("\n") || hunk.contents === "" ? hunk.contents : `${hunk.contents}\n`
-          return [diff(path, null, newText)]
-        }
-        if (hunk.type === "delete") {
-          if (disk === "after") return []
-          const oldText = yield* Effect.tryPromise(() => Bun.file(path).text())
-          return [diff(path, oldText, "")]
-        }
-        const located = hunk.movePath ? absolutePath(hunk.movePath, cwd) : path
-        if (disk === "after") {
-          const chunks = reversedChunks(hunk.chunks)
-          if (!chunks) return []
-          const current = yield* Effect.tryPromise(() => Bun.file(located).text())
-          const derived = yield* Effect.try(() => Patch.derive(hunk.path, chunks, current))
-          return [diff(located, derived.content, current)]
+          return diff(path, null, newText)
         }
         const oldText = yield* Effect.tryPromise(() => Bun.file(path).text())
+        if (hunk.type === "delete") return diff(path, oldText, "")
         const derived = yield* Effect.try(() => Patch.derive(hunk.path, hunk.chunks, oldText))
-        return [diff(located, oldText, derived.content)]
+        return diff(hunk.movePath ? absolutePath(hunk.movePath, cwd) : path, oldText, derived.content)
       }),
     { concurrency: "unbounded" },
-  ).pipe(Effect.map((items) => items.flat()))
-}
-
-function applyReversed(patch: string, text: string) {
-  const parsed = parsePatch(patch)[0]
-  if (!parsed) return false
-  return applyPatch(text, reversePatch(parsed))
-}
-
-function reversedChunks(chunks: ReadonlyArray<Patch.UpdateFileChunk>) {
-  const reversed = chunks.map((chunk) => ({ ...chunk, oldLines: chunk.newLines, newLines: chunk.oldLines }))
-  if (reversed.some((chunk) => chunk.oldLines.length === 0)) return undefined
-  return reversed
-}
-
-function insertDiffs(
-  update: Extract<SessionUpdate, { sessionUpdate: "tool_call_update" }>,
-  diffs: ReadonlyArray<Preview>,
-) {
-  if (diffs.length === 0) return update
-  const content = update.content ?? []
-  const imageAt = content.findIndex((part) => part.type === "content" && part.content.type === "image")
-  const at = imageAt === -1 ? content.length : imageAt
-  return { ...update, content: [...content.slice(0, at), ...diffs, ...content.slice(at)] }
+  )
 }
 
 function diff(path: string, oldText: string | null, newText: string) {
