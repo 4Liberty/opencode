@@ -76,10 +76,12 @@ const fixtures = [
 
 describe("ordinary Bash and Zsh syntax", () => {
   test.each(fixtures)("extracts actual command nodes: %s", (source, names) => {
-    const result = ShellScan.scan(source)
-    expect(result.kind).toBe("scanned")
-    if (result.kind !== "scanned") throw new Error(result.reason)
-    expect(result.commands.map((command) => command.words[0])).toEqual([...names])
+    for (const dialect of ["bash", "zsh"] as const) {
+      const result = ShellScan.scan(source, dialect)
+      expect(result.kind).toBe("scanned")
+      if (result.kind !== "scanned") throw new Error(result.reason)
+      expect(result.commands.map((command) => command.words[0])).toEqual([...names])
+    }
   })
 
   for (const shell of ["bash", "zsh"]) {
@@ -258,5 +260,48 @@ describe("Bash shared heredoc delimiter grammar", () => {
     expect(execution.stdout.toString()).toBe(
       source.includes("<<<") ? "hello\ndone" : source.includes("<<EO\\\nF") ? "\ndone" : "$(scan_probe)\ndone",
     )
+  })
+})
+
+describe("Bash dialects", () => {
+  const heads = (source: string, dialect?: ShellScan.Dialect) => {
+    const result = ShellScan.scan(source, dialect)
+    return result.kind === "scanned" ? result.commands.map((command) => command.words[0]) : result.kind
+  }
+
+  test("posix reports both readings of a double parenthesis", () => {
+    expect(heads("(( x = 1 )); y", "bash")).toEqual(["y"])
+    expect(heads("(( x = 1 )); y", "zsh")).toEqual(["y"])
+    expect(heads("(( x = 1 )); y", "posix")).toEqual(["x", "y"])
+    expect(heads("(( x = 1 )); y")).toEqual(["x", "y"])
+    expect(heads("(( (1) + (2) ))", "bash")).toEqual([])
+    expect(heads("(( (1) + (2) ))", "posix")).toBe("opaque")
+  })
+
+  test.each([
+    ["true &>/dev/null next", ["true"], "opaque"],
+    ["X=$[1 + 2] next", ["next"], "opaque"],
+  ] as const)("reads Bash and Zsh syntax precisely where Dash diverges: %s", (source, precise, posix) => {
+    expect(heads(source, "bash")).toEqual([...precise])
+    expect(heads(source, "zsh")).toEqual([...precise])
+    expect(heads(source, "posix")).toEqual(posix)
+  })
+
+  test("reads a reserved word after a redirect as a Zsh keyword", () => {
+    const source = "if true; then >/dev/null fi; next"
+    expect(heads(source, "zsh")).toEqual(["true", "next"])
+    expect(heads(source, "bash")).toBe("opaque")
+    expect(heads(source, "posix")).toBe("opaque")
+  })
+
+  test.each([
+    ["/bin/bash", ["y"]],
+    ["/usr/local/bin/zsh", ["y"]],
+    ["/bin/sh", ["x = 1", "y"]],
+    ["/bin/dash", ["x = 1", "y"]],
+    ["/opt/bin/mksh", ["x = 1", "y"]],
+  ] as const)("derives the dialect from the shell executable: %s", async (shell, resources) => {
+    const result = await Effect.runPromise(ShellParse.scanPortable("(( x = 1 )); y", shell, "/workspace"))
+    expect(result.commands.map((command) => command.resource)).toEqual([...resources])
   })
 })

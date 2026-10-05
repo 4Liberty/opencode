@@ -56,22 +56,35 @@ function observe(executable: string, source: string) {
     .filter(Boolean)
 }
 
+// Each dialect must report what its shells run; posix, the default, covers every shell.
+const dialects = {
+  bash: (executable: string) => path.basename(executable) === "bash",
+  zsh: (executable: string) => path.basename(executable) === "zsh",
+  posix: () => true,
+} satisfies Record<ShellScan.Dialect, (executable: string) => boolean>
+
 function expectProbesReported(source: string) {
-  const result = ShellScan.scan(source)
   const runs = shells.map((executable) => [executable, observe(executable, source)] as const)
   expect(
     runs.some(([, invocations]) => invocations.length > 0),
     `Fixture never executed scan_probe in any real shell: ${source}`,
   ).toBe(true)
-  if (result.kind === "opaque") return
-  const reported = result.commands.filter((command) => !command.declaration).map((command) => command.words.join(" "))
-  for (const [executable, invocations] of runs)
-    for (const invocation of invocations)
-      expect(reported, `${executable} executed ${invocation} in: ${source}`).toContain(invocation)
+  expect(ShellScan.scan(source)).toEqual(ShellScan.scan(source, "posix"))
+  for (const [dialect, runsIn] of Object.entries(dialects)) {
+    const result = ShellScan.scan(source, dialect as ShellScan.Dialect)
+    if (result.kind === "opaque") continue
+    const reported = result.commands.filter((command) => !command.declaration).map((command) => command.words.join(" "))
+    for (const [executable, invocations] of runs.filter(([executable]) => runsIn(executable)))
+      for (const invocation of invocations)
+        expect(reported, `${executable} executed ${invocation} with ${dialect} in: ${source}`).toContain(invocation)
+  }
 }
 
 // Each fixture runs scan_probe in at least one real shell, which the scanner must report or reject.
 const fixtures = [
+  "(( scan_probe ))",
+  "(( (scan_probe) & (scan_probe) ))",
+  "(( (scan_probe)\n(scan_probe) ))",
   "cat <<'}'; {\n:\n}\nscan_probe; cat <<'}'; }\n}",
   "cat <<'x)'; case x in\nx)\nx) scan_probe; cat <<'x)'\nx)\n;; esac",
   "cat <<'if'; f()\nif\nif scan_probe; cat <<'if'\nif\ntrue; then :; fi; f",
@@ -286,9 +299,6 @@ const fixtures = [
 // These also run inside every wrapper below.
 // Confirmed misses awaiting fixes.
 const knownGaps = [
-  "(( scan_probe ))",
-  "(( (scan_probe) & (scan_probe) ))",
-  "(( (scan_probe)\n(scan_probe) ))",
   "echo $(( : # ))'\n); scan_probe ) # '",
   'echo "${unset:+${x[\'"\']}}"]}} \'$(scan_probe)\' " # "',
   "echo \"${unset:+${x['}}\"']}}'; scan_probe # \"",

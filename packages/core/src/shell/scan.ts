@@ -98,6 +98,9 @@ type Opaque = { kind: "opaque"; reason: OpaqueReason }
 
 type BashResult = { kind: "scanned"; commands: Command[]; end: number } | Opaque
 
+// Shared across one scan: the work budget and the shell dialect.
+type BashContext = { remaining: number; dialect: Dialect }
+
 type BashHeredoc = { delimiter: string; quoted: boolean; tabs: boolean; command?: Command; start?: number }
 
 type BashState = {
@@ -126,7 +129,7 @@ type BashState = {
   commandEnd: number
   resourceEnd: number | undefined
   redirectWordCount: number | undefined
-  // Dash reads `&>` as `&` and `>`, so later words would start another command there.
+  // Posix shells such as Dash read `&>` as `&` and `>`, so later words would start another command there.
   ampersandRedirectWords: number | undefined
   commandWordIndex: number
   assignmentWord: boolean
@@ -142,9 +145,13 @@ type BashState = {
 // Cooked word text, and the literal text the word decodes to apart from its expansions.
 type BashText = { word: string; literal: string }
 
-export function scan(input: string): Result {
+// Bash and Zsh name those shells. Posix covers sh, dash, and any other shell, and stays sound for Bash, Zsh, and
+// Dash alike, so it is the default.
+export type Dialect = "bash" | "zsh" | "posix"
+
+export function scan(input: string, dialect: Dialect = "posix"): Result {
   if (input.length > MAX_INPUT_LENGTH) return { kind: "opaque", reason: "invalid-structure" }
-  const result = scanBash(input, 0, 0, { remaining: MAX_INPUT_LENGTH * MAX_SUBSTITUTION_DEPTH })
+  const result = scanBash(input, 0, 0, { remaining: MAX_INPUT_LENGTH * MAX_SUBSTITUTION_DEPTH, dialect })
   if (result.kind === "opaque") return result
   return { kind: "scanned", commands: result.commands }
 }
@@ -269,12 +276,12 @@ function scanBash(
   input: string,
   start: number,
   depth: number,
-  budget: { remaining: number },
+  context: BashContext,
   close?: ")" | "}" | "nofork",
   // A group shares its parent's heredocs; a substitution starts its own.
   heredocs?: BashHeredoc[],
 ): BashResult {
-  if (depth > MAX_SUBSTITUTION_DEPTH || budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
+  if (depth > MAX_SUBSTITUTION_DEPTH || context.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
   const state: BashState = {
     input,
     commands: [],
@@ -303,7 +310,7 @@ function scanBash(
     dangling: false,
   }
   for (let index = start; index < input.length; index++) {
-    if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
+    if (--context.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
     const char = input[index]
     // Line continuations are removed before tokens are read.
     if (char === "\\" && input[index + 1] === "\n") {
@@ -325,7 +332,7 @@ function scanBash(
         return closeBashList(state, index)
       if (char === "}")
         return { kind: "opaque", reason: state.structures.length ? "compound-command" : "invalid-structure" }
-      const step = scanBashCommandStart(state, index, depth, budget)
+      const step = scanBashCommandStart(state, index, depth, context)
       if (typeof step === "object") return step
       if (step !== undefined) {
         index = step
@@ -352,7 +359,7 @@ function scanBash(
       state.assignmentHeadUnsafe = true
     const inCasePattern = state.structures.at(-1)?.phase === "pattern"
     if (char === "=" && !state.wordStarted && input[index + 1] === "(") {
-      const end = scanBashNested(input, index + 2, depth, budget, state.nestedCommands, ")")
+      const end = scanBashNested(input, index + 2, depth, context, state.nestedCommands, ")")
       if (typeof end === "object") return end
       state.wordStarted = true
       state.word += input.slice(index, end + 1)
@@ -366,7 +373,7 @@ function scanBash(
           input,
           index,
           depth,
-          budget,
+          context,
           state.nestedCommands,
           "word",
           !state.assignmentWord && state.commandWordIndex >= 0 && !BASH_DECLARATIONS.has(state.rawWords[0]),
@@ -389,7 +396,7 @@ function scanBash(
       /^[A-Za-z_][A-Za-z0-9_]*$/.test(state.word)
     ) {
       const subscript: Command[] = []
-      const end = scanBashSpan(input, index + 1, depth, budget, subscript, BASH_SPANS.assignmentSubscript, false)
+      const end = scanBashSpan(input, index + 1, depth, context, subscript, BASH_SPANS.assignmentSubscript, false)
       if (typeof end === "object") return end
       if (input[end + 1] === "=" || input.startsWith("+=", end + 1)) {
         state.nestedCommands.push(...subscript)
@@ -407,7 +414,7 @@ function scanBash(
       (state.commandWordIndex < 0 || BASH_DECLARATIONS.has(state.rawWords[state.commandWordIndex]))
     if (char === "(" && (array || (inCasePattern && /[?*+@!]$/.test(state.word)))) {
       const mode = array ? "array" : "pattern"
-      const end = scanBashArrayOrPattern(input, index, depth + 1, budget, state.nestedCommands, mode)
+      const end = scanBashArrayOrPattern(input, index, depth + 1, context, state.nestedCommands, mode)
       if (typeof end === "object") return end
       if (bashCrossesHeredoc(state, index, end)) return { kind: "opaque", reason: "heredoc" }
       state.wordStarted = true
@@ -423,7 +430,7 @@ function scanBash(
       continue
     }
     if ("<>&|;\n".includes(char)) {
-      const step = scanBashOperatorOrSeparator(state, index, depth, budget)
+      const step = scanBashOperatorOrSeparator(state, index, depth, context)
       if (typeof step === "object") return step
       index = step
       continue
@@ -466,7 +473,7 @@ function scanBashOperatorOrSeparator(
   state: BashState,
   index: number,
   depth: number,
-  budget: { remaining: number },
+  context: BashContext,
 ): number | Opaque {
   const input = state.input
   const char = input[index]
@@ -489,7 +496,7 @@ function scanBashOperatorOrSeparator(
       state.wordStarted = false
     }
     if (!fdPrefix) finishBashWord(state)
-    if (redirect.startsWith("&")) state.ampersandRedirectWords ??= state.words.length
+    if (redirect.startsWith("&") && context.dialect === "posix") state.ampersandRedirectWords ??= state.words.length
     // Trailing redirects wrap a whole list/pipeline in the legacy grammar, not its last command.
     // Prefix redirects remain part of the command, and later words remain redirect destinations.
     if (state.redirectWordCount === undefined && state.commandWordIndex >= 0) {
@@ -527,14 +534,14 @@ function scanBashOperatorOrSeparator(
     if (structure.phase === "pattern" && (state.wordStarted || state.words.length > 0))
       return { kind: "opaque", reason: "compound-command" }
     finishBashWord(state)
-    return readBashHeredocs(state, index, depth, budget)
+    return readBashHeredocs(state, index, depth, context)
   }
   if (structure?.kind === "for" && (structure.phase === "header" || structure.phase === "do")) {
     if (separator !== ";" && separator !== "\n") return { kind: "opaque", reason: "compound-command" }
     if (structure.phase === "header" && !structure.sawIn && !state.wordStarted && state.words.length === 0)
       return { kind: "opaque", reason: "compound-command" }
   }
-  if (separator === "\n" && !pending(state)) return readBashHeredocs(state, index, depth, budget)
+  if (separator === "\n" && !pending(state)) return readBashHeredocs(state, index, depth, context)
   finishBashCommand(state, true)
   if (structure?.kind === "for" && structure.phase === "header") structure.phase = "do"
   state.dangling = separator !== "&" && separator !== ";" && separator !== "\n"
@@ -543,15 +550,19 @@ function scanBashOperatorOrSeparator(
   return index + separator.length - 1
 }
 
+function bashCommandKey(command: Command) {
+  return JSON.stringify([command.resource, command.words])
+}
+
 // Reads the pending heredoc bodies after the newline at index and returns the last index they cover.
-function readBashHeredocs(state: BashState, index: number, depth: number, budget: { remaining: number }) {
+function readBashHeredocs(state: BashState, index: number, depth: number, context: BashContext) {
   let end = index
   for (const heredoc of state.heredocs.splice(0)) {
     const body = bashHeredoc(state.input, end + 1, heredoc)
     if (!body) return { kind: "opaque", reason: "heredoc" } satisfies Opaque
     if (heredoc.command) heredoc.command.resource = state.input.slice(heredoc.start, body.end).trim()
     if (!heredoc.quoted) {
-      const expansion = scanBashSpan(body.source, 0, depth, budget, state.commands, BASH_SPANS.heredoc, true)
+      const expansion = scanBashSpan(body.source, 0, depth, context, state.commands, BASH_SPANS.heredoc, true)
       if (typeof expansion === "object") return expansion
     }
     end = body.end
@@ -568,7 +579,7 @@ function scanBashCommandStart(
   state: BashState,
   index: number,
   depth: number,
-  budget: { remaining: number },
+  context: BashContext,
 ): number | Opaque | undefined {
   const input = state.input
   const char = input[index]
@@ -591,7 +602,7 @@ function scanBashCommandStart(
     return index
   }
   if (structure?.kind === "for" && structure.phase === "header" && char === "(" && input[index + 1] !== "(") {
-    const end = scanBashArrayOrPattern(input, index, depth + 1, budget, state.nestedCommands, "array")
+    const end = scanBashArrayOrPattern(input, index, depth + 1, context, state.nestedCommands, "array")
     if (typeof end === "object") return end
     if (bashCrossesHeredoc(state, index, end)) return { kind: "opaque", reason: "heredoc" }
     finishBashCommand(state)
@@ -602,7 +613,7 @@ function scanBashCommandStart(
     if (!DO_AHEAD_RE.test(input)) state.structures.pop()
     return end
   }
-  const keywordStep = scanBashKeyword(state, index, depth)
+  const keywordStep = scanBashKeyword(state, index, depth, context)
   if (keywordStep !== undefined) return keywordStep
   if (structure?.kind === "for" && structure.phase === "do" && char !== "\n" && char !== "#" && char !== ";") {
     SPACE_CONTINUATION_AHEAD_RE.lastIndex = index + 1
@@ -620,9 +631,17 @@ function scanBashCommandStart(
   if ((atStart || forHeader) && input.startsWith("((", index)) {
     if (forHeader && state.words.length > 0) return { kind: "opaque", reason: "compound-command" }
     const span = forHeader ? BASH_SPANS.forArithmetic : BASH_SPANS.arithmetic
-    const end = scanBashArithmetic(input, index + 2, depth, budget, state.commands, span)
+    const end = scanBashArithmetic(input, index + 2, depth, context, state.commands, span)
     if (typeof end === "number") {
       if (bashCrossesHeredoc(state, index, end)) return { kind: "opaque", reason: "heredoc" }
+      if (!forHeader && context.dialect === "posix") {
+        // Dash reads `((` as two nested subshells, so posix reports both readings.
+        const subshells = scanBash(input, index + 1, depth + 1, context, ")")
+        if (subshells.kind === "opaque") return subshells
+        if (subshells.end !== end) return { kind: "opaque", reason: "compound-command" }
+        const seen = new Set(state.commands.map(bashCommandKey))
+        state.commands.push(...subshells.commands.filter((command) => !seen.has(bashCommandKey(command))))
+      }
       if (forHeader) {
         structure.phase = "do"
         structure.sawIn = true
@@ -641,7 +660,7 @@ function scanBashCommandStart(
     (char === "(" ||
       (char === "{" && ((SPACE_CONTINUATION_AHEAD_RE.lastIndex = index + 1), SPACE_CONTINUATION_AHEAD_RE.test(input))))
   ) {
-    const group = scanBash(input, index + 1, depth + 1, budget, char === "{" ? "}" : ")", state.heredocs)
+    const group = scanBash(input, index + 1, depth + 1, context, char === "{" ? "}" : ")", state.heredocs)
     if (group.kind === "opaque") return group
     if (!input.slice(index + 1, group.end).trim()) return { kind: "opaque", reason: "invalid-structure" }
     state.commands.push(...group.commands)
@@ -654,7 +673,7 @@ function scanBashCommandStart(
     input.startsWith("[[", index) &&
     ((SPACE_CONTINUATION_AHEAD_RE.lastIndex = index + 2), SPACE_CONTINUATION_AHEAD_RE.test(input))
   ) {
-    const end = scanBashConditional(input, index + 2, depth, budget, state.commands)
+    const end = scanBashConditional(input, index + 2, depth, context, state.commands)
     if (typeof end === "object") return end
     if (bashCrossesHeredoc(state, index, end)) return { kind: "opaque", reason: "heredoc" }
     bashStatement(state)
@@ -664,7 +683,12 @@ function scanBashCommandStart(
   return undefined
 }
 
-function scanBashKeyword(state: BashState, index: number, depth: number): number | Opaque | undefined {
+function scanBashKeyword(
+  state: BashState,
+  index: number,
+  depth: number,
+  context: BashContext,
+): number | Opaque | undefined {
   const input = state.input
   const char = input[index]
   if (!((char >= "A" && char <= "Z") || (char >= "a" && char <= "z") || char === "_")) return undefined
@@ -718,7 +742,8 @@ function scanBashKeyword(state: BashState, index: number, depth: number): number
     (!inHeader || (token === "do" && structure?.phase === "do"))
   ) {
     // Bash and Dash read a reserved word after a redirect as a command word, while Zsh reads a keyword.
-    if (state.hasRedirect || !endBashList(state) || !structure) return { kind: "opaque", reason: "compound-command" }
+    if ((state.hasRedirect && context.dialect !== "zsh") || !endBashList(state) || !structure)
+      return { kind: "opaque", reason: "compound-command" }
     if (token === "then") {
       if (structure.kind !== "if" || structure.phase !== "condition" || !structure.count)
         return { kind: "opaque", reason: "compound-command" }
@@ -827,7 +852,7 @@ function scanBashUnit(
   input: string,
   index: number,
   depth: number,
-  budget: { remaining: number },
+  context: BashContext,
   commands: Command[],
   mode: BashTextMode,
   allowBracket: boolean,
@@ -862,11 +887,11 @@ function scanBashUnit(
     return end
   }
   if (mode === "arithmetic" && char === "'")
-    return scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.arithmeticQuote, allowBracket, text)
+    return scanBashSpan(input, index + 1, depth, context, commands, BASH_SPANS.arithmeticQuote, allowBracket, text)
   if (mode === "word" && char === "$" && next === '"')
-    return scanBashSpan(input, index + 2, depth, budget, commands, BASH_SPANS.double, allowBracket, text)
+    return scanBashSpan(input, index + 2, depth, context, commands, BASH_SPANS.double, allowBracket, text)
   if (mode !== "quoted" && char === '"')
-    return scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.double, allowBracket, text)
+    return scanBashSpan(input, index + 1, depth, context, commands, BASH_SPANS.double, allowBracket, text)
   const opener =
     char === "$"
       ? bashOperator(input, index, ["$(", "${", "$["])
@@ -876,9 +901,9 @@ function scanBashUnit(
   if (typeof opener === "object") return opener
   const end =
     opener === "<(" || opener === ">("
-      ? scanBashNested(input, index + 2, depth, budget, commands, ")")
+      ? scanBashNested(input, index + 2, depth, context, commands, ")")
       : opener || char === "`"
-        ? scanBashDollarOrBacktick(input, index, depth, budget, commands, mode !== "word", allowBracket, text)
+        ? scanBashDollarOrBacktick(input, index, depth, context, commands, mode !== "word", allowBracket, text)
         : undefined
   if (text && typeof end === "number") {
     text.word += input.slice(index, end + 1)
@@ -927,7 +952,7 @@ function scanBashSpan(
   input: string,
   start: number,
   depth: number,
-  budget: { remaining: number },
+  context: BashContext,
   commands: Command[],
   span: BashSpan,
   allowBracket: boolean,
@@ -935,7 +960,7 @@ function scanBashSpan(
 ): number | Opaque {
   let nesting = 0
   for (let index = start; index < input.length; index++) {
-    if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
+    if (--context.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
     const char = input[index]
     if (char === span.close && !nesting) return index
     if (span.reject.includes(char)) return { kind: "opaque", reason: "invalid-structure" }
@@ -945,7 +970,7 @@ function scanBashSpan(
     const unit =
       char === span.open || char === span.close
         ? undefined
-        : scanBashUnit(input, index, depth, budget, commands, span.mode, allowBracket, text)
+        : scanBashUnit(input, index, depth, context, commands, span.mode, allowBracket, text)
     if (typeof unit === "object") return unit
     if (unit !== undefined) index = unit
     else if (text) bashAppend(text, char)
@@ -958,11 +983,11 @@ function scanBashNested(
   input: string,
   start: number,
   depth: number,
-  budget: { remaining: number },
+  context: BashContext,
   commands: Command[],
   close: ")" | "nofork",
 ): number | Opaque {
-  const nested = scanBash(input, start, depth + 1, budget, close)
+  const nested = scanBash(input, start, depth + 1, context, close)
   if (nested.kind === "opaque") return nested
   commands.push(...nested.commands)
   return nested.end
@@ -984,34 +1009,35 @@ function scanBashDollarOrBacktick(
   input: string,
   start: number,
   depth: number,
-  budget: { remaining: number },
+  context: BashContext,
   commands: Command[],
   quoted: boolean,
   allowBracket: boolean,
   text?: BashText,
 ): number | Opaque {
   if (depth >= MAX_SUBSTITUTION_DEPTH) return { kind: "opaque", reason: "command-substitution" }
-  if (input[start] === "`") return scanBashBacktick(input, start, depth + 1, budget, commands, quoted)
+  if (input[start] === "`") return scanBashBacktick(input, start, depth + 1, context, commands, quoted)
   if (input.startsWith("$((", start)) {
-    const end = scanBashArithmetic(input, start + 3, depth + 1, budget, commands, BASH_SPANS.arithmetic)
+    const end = scanBashArithmetic(input, start + 3, depth + 1, context, commands, BASH_SPANS.arithmetic)
     if (end !== undefined) return end
   }
-  if (input.startsWith("$(", start)) return scanBashNested(input, start + 2, depth, budget, commands, ")")
+  if (input.startsWith("$(", start)) return scanBashNested(input, start + 2, depth, context, commands, ")")
   NOFORK_OPEN_RE.lastIndex = start
   const nofork = NOFORK_OPEN_RE.exec(input)
-  if (nofork) return scanBashNested(input, start + nofork[0].length, depth, budget, commands, "nofork")
+  if (nofork) return scanBashNested(input, start + nofork[0].length, depth, context, commands, "nofork")
   if (input.startsWith("${", start)) {
     // Literal text in parameter words reaches the enclosing word's value.
     const parameter = { word: "", literal: "" }
-    const end = scanBashParameter(input, start + 2, depth + 1, budget, commands, quoted, parameter)
+    const end = scanBashParameter(input, start + 2, depth + 1, context, commands, quoted, parameter)
     // ${!name} evaluates the subscript in its name.
     if (input[start + 2] === "!" && bashEvaluatesSubscript(parameter.literal))
       return { kind: "opaque", reason: "dynamic-execution" }
     if (text) text.literal += `\0${parameter.literal}`
     return end
   }
-  if (!allowBracket) return { kind: "opaque", reason: "command-substitution" }
-  return scanBashSpan(input, start + 2, depth + 1, budget, commands, BASH_SPANS.bracketArithmetic, true)
+  // Dash leaves `$[` literal, which splits words differently; Bash and Zsh always read arithmetic.
+  if (!allowBracket && context.dialect === "posix") return { kind: "opaque", reason: "command-substitution" }
+  return scanBashSpan(input, start + 2, depth + 1, context, commands, BASH_SPANS.bracketArithmetic, true)
 }
 
 // Scans the text of ((...)) after its opening parentheses. Returns undefined when the text closes with a single
@@ -1020,13 +1046,13 @@ function scanBashArithmetic(
   input: string,
   start: number,
   depth: number,
-  budget: { remaining: number },
+  context: BashContext,
   commands: Command[],
   span: BashSpan,
 ): number | Opaque | undefined {
   const arithmetic: Command[] = []
   const text = { word: "", literal: "" }
-  const end = scanBashSpan(input, start, depth, budget, arithmetic, span, true, text)
+  const end = scanBashSpan(input, start, depth, context, arithmetic, span, true, text)
   if (typeof end === "object") return { kind: "opaque", reason: "invalid-structure" }
   if (input[end + 1] !== ")") return undefined
   if (bashEvaluatesSubscript(text.literal)) return { kind: "opaque", reason: "dynamic-execution" }
@@ -1038,15 +1064,15 @@ function scanBashBacktick(
   input: string,
   start: number,
   depth: number,
-  budget: { remaining: number },
+  context: BashContext,
   commands: Command[],
   quoted: boolean,
 ): number | Opaque {
   let source = ""
   for (let index = start + 1; index < input.length; index++) {
-    if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
+    if (--context.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
     if (input[index] === "`") {
-      const inner = scanBash(source, 0, depth, budget)
+      const inner = scanBash(source, 0, depth, context)
       if (inner.kind === "opaque") return { kind: "opaque", reason: "command-substitution" }
       commands.push(...inner.commands)
       return index
@@ -1066,7 +1092,7 @@ function scanBashParameter(
   input: string,
   start: number,
   depth: number,
-  budget: { remaining: number },
+  context: BashContext,
   commands: Command[],
   quoted: boolean,
   text: BashText,
@@ -1077,7 +1103,7 @@ function scanBashParameter(
   PARAMETER_SUBSCRIPT_RE.lastIndex = start
   const subscript = PARAMETER_SUBSCRIPT_RE.test(input) ? PARAMETER_SUBSCRIPT_RE.lastIndex - 1 : -1
   for (let index = start; index < input.length; index++) {
-    if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
+    if (--context.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
     const char = input[index]
     if (char === "}") return index
     if (input.startsWith("@P}", index)) return { kind: "opaque", reason: "dynamic-execution" }
@@ -1085,12 +1111,12 @@ function scanBashParameter(
     if (!quoted && char === "(" && index > start) return { kind: "opaque", reason: "dynamic-execution" }
     const unit =
       index === subscript
-        ? scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.subscript, false)
+        ? scanBashSpan(input, index + 1, depth, context, commands, BASH_SPANS.subscript, false)
         : quoted && char === "'"
-          ? scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.parameterQuote, false, text)
+          ? scanBashSpan(input, index + 1, depth, context, commands, BASH_SPANS.parameterQuote, false, text)
           : quoted && char === '"'
-            ? scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.double, false, text)
-            : scanBashUnit(input, index, depth, budget, commands, quoted ? "quoted" : "word", false, text)
+            ? scanBashSpan(input, index + 1, depth, context, commands, BASH_SPANS.double, false, text)
+            : scanBashUnit(input, index, depth, context, commands, quoted ? "quoted" : "word", false, text)
     if (typeof unit === "object") return unit
     if (unit !== undefined) index = unit
     else bashAppend(text, char)
@@ -1102,14 +1128,14 @@ function scanBashConditional(
   input: string,
   start: number,
   depth: number,
-  budget: { remaining: number },
+  context: BashContext,
   commands: Command[],
 ): number | Opaque {
   const text = { word: "", literal: "" }
   let wordStarted = false
   let parenDepth = 0
   for (let index = start; index < input.length; index++) {
-    if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
+    if (--context.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
     const char = input[index]
     if (char === "\\" && input[index + 1] === "\n") {
       index++
@@ -1143,7 +1169,7 @@ function scanBashConditional(
       wordStarted = false
       continue
     }
-    const unit = scanBashUnit(input, index, depth, budget, commands, "word", true, text)
+    const unit = scanBashUnit(input, index, depth, context, commands, "word", true, text)
     if (typeof unit === "object") return unit
     if (unit !== undefined) index = unit
     wordStarted = unit !== undefined || !"&|<>".includes(char)
@@ -1156,7 +1182,7 @@ function scanBashArrayOrPattern(
   input: string,
   start: number,
   depth: number,
-  budget: { remaining: number },
+  context: BashContext,
   commands: Command[],
   mode: "array" | "pattern",
 ): number | Opaque {
@@ -1165,7 +1191,7 @@ function scanBashArrayOrPattern(
   const text = mode === "array" ? { word: "", literal: "" } : undefined
   let wordStarted = false
   for (let index = start + 1; index < input.length; index++) {
-    if (--budget.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
+    if (--context.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
     const char = input[index]
     if (char === "\\" && input[index + 1] === "\n") {
       index++
@@ -1192,12 +1218,12 @@ function scanBashArrayOrPattern(
     wordStarted = true
     const unit =
       mode === "array" && char === "=" && input[index + 1] === "("
-        ? scanBashNested(input, index + 2, depth, budget, commands, ")")
+        ? scanBashNested(input, index + 2, depth, context, commands, ")")
         : char === "("
-          ? scanBashArrayOrPattern(input, index, depth + 1, budget, commands, mode)
+          ? scanBashArrayOrPattern(input, index, depth + 1, context, commands, mode)
           : char === "["
-            ? scanBashSpan(input, index + 1, depth, budget, commands, BASH_SPANS.subscript, false)
-            : scanBashUnit(input, index, depth, budget, commands, "word", false, text)
+            ? scanBashSpan(input, index + 1, depth, context, commands, BASH_SPANS.subscript, false)
+            : scanBashUnit(input, index, depth, context, commands, "word", false, text)
     if (typeof unit === "object") return unit
     if (unit !== undefined) index = unit
     if (!text) continue
