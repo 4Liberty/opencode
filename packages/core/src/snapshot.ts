@@ -106,7 +106,6 @@ const layer = Layer.effect(
     const repository = repositoryFiber.pipe(Effect.uninterruptible, Effect.flatMap(Fiber.join))
 
     const scope = Effect.fnUntraced(function* (worktree: AbsolutePath) {
-      // A directory named like `..scope` is inside the project; only a `..` segment escapes it.
       if (!FSUtil.contains(worktree, location.directory))
         return yield* new Error({ operation: "capture", message: "Location is outside the project" })
       return RelativePath.make(path.relative(worktree, location.directory).replaceAll("\\", "/") || ".")
@@ -114,19 +113,14 @@ const layer = Layer.effect(
 
     const enabled = () => location.vcs?.type === "git" && state.get().enabled
 
-    // Background and rate-limited: a capture never waits for compaction, and the check itself is a few directory reads.
-    let maintenance = { checked: Number.NEGATIVE_INFINITY, running: false }
-    const maintain = Effect.fnUntraced(function* (repository: Git.Repository) {
+    // `objects.pack` takes a cross-process lock, so a run that outlasts the interval never overlaps the next.
+    let lastPackCheck = Number.NEGATIVE_INFINITY
+    const packWhenDue = Effect.fnUntraced(function* (repository: Git.Repository) {
       const now = yield* Clock.currentTimeMillis
-      if (maintenance.running || now - maintenance.checked < 10 * 60 * 1000) return
-      maintenance = { checked: now, running: true }
-      yield* git.objects.compact(repository).pipe(
-        Effect.catch((cause) => Effect.logWarning("failed to compact snapshot objects", { cause })),
-        Effect.ensuring(
-          Effect.sync(() => {
-            maintenance = { ...maintenance, running: false }
-          }),
-        ),
+      if (now - lastPackCheck < 10 * 60 * 1000) return
+      lastPackCheck = now
+      yield* git.objects.pack(repository).pipe(
+        Effect.catch((cause) => Effect.logWarning("failed to pack snapshot objects", { cause })),
         Effect.forkIn(lifetime),
       )
     })
@@ -139,10 +133,9 @@ const layer = Layer.effect(
           repository: repo.snapshotRepository,
           scopes: [yield* scope(repo.worktree)],
           ignores: repo.source,
-          seed: repo.source,
           maximumUntrackedFileBytes: 2 * 1024 * 1024,
         })
-        yield* maintain(repo.snapshotRepository)
+        yield* packWhenDue(repo.snapshotRepository)
         return ID.make(tree)
       }).pipe(
         Effect.catch((cause) => Effect.logWarning("failed to capture snapshot", { cause }).pipe(Effect.as(undefined))),

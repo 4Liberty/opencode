@@ -70,16 +70,16 @@ export const make = Effect.gen(function* () {
   const toolOutput = yield* ToolOutput.Service
 
   const attempt = Effect.fn("SessionStep.attempt")(function* (input: Input) {
-    // The preimage only has to precede local tool execution, which cannot begin before Step.Started,
-    // so the capture overlaps the provider's time to first event instead of delaying the request.
-    const startCapture = yield* snapshots.capture().pipe(Effect.forkScoped)
+    // The start snapshot only has to exist before local tools run, which cannot happen before Step.Started,
+    // so it is captured while the provider request is in flight instead of delaying it.
+    const pendingStartSnapshot = yield* snapshots.capture().pipe(Effect.forkScoped)
     const publisher = createLLMEventPublisher(bus, {
       sessionID: input.sessionID,
       assistantMessageID: input.assistantMessageID,
       agent: input.agent,
       model: input.model.ref,
       providerMetadataKey: input.model.model.route.providerMetadataKey ?? input.model.model.provider,
-      snapshot: Fiber.join(startCapture),
+      pendingSnapshot: Fiber.join(pendingStartSnapshot),
       started: yield* Clock.currentTimeMillis,
     })
     const toolRuns: Array<{
@@ -107,6 +107,8 @@ export const make = Effect.gen(function* () {
       Stream.runForEach((event) =>
         Effect.gen(function* () {
           if (overflowFailure || publisher.hasProviderError()) return
+          // Wait here, where cancellation still works, rather than inside the uninterruptible publish.
+          if (!publisher.hasStarted()) yield* Fiber.join(pendingStartSnapshot)
           if (
             LLMEvent.is.providerError(event) &&
             isContextOverflowFailure(event) &&
@@ -140,6 +142,9 @@ export const make = Effect.gen(function* () {
         const stream = yield* restore(providerStream).pipe(Effect.exit)
         const streamFailure = Option.getOrUndefined(Exit.findErrorOption(stream))
         const streamInterrupted = Exit.hasInterrupts(stream)
+        // Cancelled before the start snapshot existed: record nothing, as when the capture preceded the request.
+        if (streamInterrupted && !publisher.hasStarted() && !pendingStartSnapshot.pollUnsafe())
+          return yield* Effect.failCause(stream.cause)
         if (!overflowFailure && publisher.hasStarted()) yield* publisher.streamed()
         if (streamInterrupted) yield* interruptTools
         const joined = yield* restore(Fiber.awaitAll(toolRuns.map((run) => run.fiber))).pipe(Effect.exit)
@@ -226,7 +231,7 @@ export const make = Effect.gen(function* () {
 
         const record = publisher.record()
         if (record.finish || record.failure) {
-          const startSnapshot = yield* Fiber.join(startCapture)
+          const startSnapshot = yield* Fiber.join(pendingStartSnapshot)
           const snapshot = yield* snapshots.capture()
           const files =
             startSnapshot && snapshot

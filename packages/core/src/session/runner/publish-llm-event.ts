@@ -20,8 +20,8 @@ type Input = {
   readonly agent: Agent.ID
   readonly model: Model.Ref
   readonly providerMetadataKey: string
-  /** Awaited before `Step.Started`, so the capture can overlap the provider request. */
-  readonly snapshot?: Effect.Effect<Snapshot.ID | undefined>
+  /** The start snapshot, awaited before `Step.Started` so its capture can overlap the provider request. */
+  readonly pendingSnapshot?: Effect.Effect<Snapshot.ID | undefined>
   readonly started: number
   readonly assistantMessageID: SessionMessage.ID
 }
@@ -100,8 +100,8 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
 
   const startAssistant = Effect.fnUntraced(function* () {
     if (stepStarted) return assistantMessageID
-    // Await before claiming the start: an interruption while waiting must leave the step unstarted.
-    const snapshot = input.snapshot ? yield* input.snapshot : undefined
+    const snapshot = input.pendingSnapshot ? yield* input.pendingSnapshot : undefined
+    // Check again after the await, so the check and the mark below never straddle a yield.
     if (stepStarted) return assistantMessageID
     stepStarted = true
     yield* bus.publish(SessionEvent.Step.Started, {

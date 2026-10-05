@@ -264,9 +264,9 @@ async function bench(name: string, dir: string) {
   await Effect.runPromise(
     Effect.gen(function* () {
       const git = yield* Git.Service
-      // The baseline worktree predates compaction.
+      // The baseline worktree predates object packing.
       if (!("objects" in git)) return
-      yield* git.objects.compact(
+      yield* git.objects.pack(
         new Git.Repository({
           worktree: AbsolutePath.make(dir),
           gitDirectory: AbsolutePath.make(store),
@@ -277,7 +277,7 @@ async function bench(name: string, dir: string) {
   )
   const after = Number((await $`du -sk ${store}`.text()).split("\t")[0])
   console.log(
-    `${name.padEnd(9)} compaction             ${before} KiB -> ${after} KiB in ${(performance.now() - started).toFixed(0)} ms`,
+    `${name.padEnd(9)} packing                ${before} KiB -> ${after} KiB in ${(performance.now() - started).toFixed(0)} ms`,
   )
   const size = await $`du -sk ${data}`.text()
   const loose = (await $`find ${data}/snapshot -path '*/objects/??/*' -type f`.text()).split("\n").filter(Boolean)

@@ -266,6 +266,41 @@ describe("Snapshot", () => {
     ),
   )
 
+  testEffect(Layer.empty).live("restores the other files when removing one path fails", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          const project = path.join(tmp.path, "project")
+          yield* Effect.promise(async () => {
+            await fs.mkdir(project)
+            await fs.writeFile(path.join(project, "c.txt"), "old\n")
+            await initGit(project, true)
+          })
+          yield* Effect.gen(function* () {
+            const snapshot = yield* Snapshot.Service
+            const first = yield* snapshot.capture()
+            if (!first) throw new globalThis.Error("capture failed")
+            // Removing `a/b` fails on POSIX because `a` is now a file.
+            yield* Effect.promise(async () => {
+              await fs.writeFile(path.join(project, "c.txt"), "changed\n")
+              await fs.writeFile(path.join(project, "a"), "file\n")
+            })
+            yield* snapshot
+              .restore({
+                files: new Map([
+                  [RelativePath.make("a/b"), first],
+                  [RelativePath.make("c.txt"), first],
+                ]),
+              })
+              .pipe(Effect.exit)
+            expect(yield* read(path.join(project, "c.txt"))).toBe("old\n")
+          }).pipe(Effect.provide(snapshotLayer(tmp.path, project)))
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
   testEffect(Layer.empty).live("applies availability transforms", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

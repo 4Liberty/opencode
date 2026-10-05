@@ -562,7 +562,11 @@ async function run(name: string, scenario: Scenario) {
   const data = path.join(base, "data")
   await fs.mkdir(dir, { recursive: true })
   const git = (args: string[], cwd = dir) =>
-    $`git -c core.fsmonitor=false -c core.splitIndex=false -c init.defaultBranch=main ${args}`.cwd(cwd).env(env).quiet().text()
+    $`git -c core.fsmonitor=false -c core.splitIndex=false -c init.defaultBranch=main ${args}`
+      .cwd(cwd)
+      .env(env)
+      .quiet()
+      .text()
   await git(["init", "-q"])
   const log: unknown[] = []
   const trees = new Map<string, Snapshot.ID | undefined>()
