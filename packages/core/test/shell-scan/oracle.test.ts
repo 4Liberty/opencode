@@ -272,6 +272,34 @@ const fixtures = [
 ] as const
 
 // These also run inside every wrapper below.
+// Confirmed misses awaiting fixes.
+const knownGaps = [
+  "cat <<'}'; {\n:\n}\nscan_probe; cat <<'}'; }\n}",
+  "cat <<'x)'; case x in\nx)\nx) scan_probe; cat <<'x)'\nx)\n;; esac",
+  "cat <<'if'; f()\nif\nif scan_probe; cat <<'if'\nif\ntrue; then :; fi; f",
+  "(( scan_probe ))",
+  "(( (scan_probe) & (scan_probe) ))",
+  "(( (scan_probe)\n(scan_probe) ))",
+  "echo $(( : # ))'\n); scan_probe ) # '",
+  'echo "${unset:+${x[\'"\']}}"]}} \'$(scan_probe)\' " # "',
+  "echo \"${unset:+${x['}}\"']}}'; scan_probe # \"",
+  "printf -v x 'a[$(scan_probe)]'; echo $((x))",
+  "a=(1); getopts a: x -a 'a[$(scan_probe)]'; echo $((OPTARG))",
+  "command -- declare 'a[$(scan_probe)]=1'",
+  "a=(1); unset 'a[b[$\\\n(scan_probe)0]]'",
+  'declare \'a["\\"]"$(scan_probe)0]=1\'',
+  "declare -a 'a=(+ [$(scan_probe)]=1)'",
+  "a=(1); echo ${a[b[\\$(scan_probe)]]}",
+  'a["b[\\$(scan_probe)]"]=1',
+  'b=1; a["b[\\$(scan_probe)1]"]=1',
+  "a=(1); echo $[ ${x:-a[\\$(scan_probe)1]} ]",
+  "a=(1); s=abc; echo ${s:'a[$(scan_probe)0]'}",
+  "a=(1); s=abc; echo ${s:${x:-'a[$(scan_probe)1]'}}",
+  "x='*(e:scan_probe:)'; echo $^~x",
+  "x='$(scan_probe)'; echo \"${\\\n(e)x}\"",
+  "x='$(scan_probe)'; echo ${(j:):e)x}",
+] as const
+
 const nestedFixtures = [
   "[[ a]]# ]] && scan_probe",
   "{ export X={}# ; scan_probe; }",
@@ -303,6 +331,10 @@ const wrappers: Array<[name: string, wrap: (inner: string) => string]> = [
 describe.skipIf(process.platform === "win32")("real-shell soundness oracle", () => {
   test("discovers at least bash on PATH", () => {
     expect(shells.some((item) => item.endsWith("/bash"))).toBe(true)
+  })
+
+  test.failing.each([...knownGaps])("known gap: %j", (source) => {
+    expectProbesReported(source)
   })
 
   test.each([...fixtures, ...nestedFixtures])("reports or rejects real-shell execution: %j", (source) => {
