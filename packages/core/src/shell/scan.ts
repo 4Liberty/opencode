@@ -842,8 +842,9 @@ const BASH_SPANS = {
   // Dash splits an assignment subscript at blanks and operators, so Bash and Zsh assignments diverge.
   assignmentSubscript: { open: "[", close: "]", reject: " \t\n\r\v\f;&|<>()", mode: "arithmetic" },
   // Single quotes are literal here in some shells and quoting in others, so reject what either reading
-  // would parse structurally and scan the contents for expansions.
-  arithmeticQuote: { close: "'", reject: "()[];", mode: "quoted" },
+  // would parse structurally and scan the contents for expansions. Inside a double-quoted parameter, Zsh and
+  // Dash read them literally even within subscripts and arithmetic, where `"` and `}` would end the parameter.
+  arithmeticQuote: { close: "'", reject: '()[];"}', mode: "quoted" },
   parameterQuote: { close: "'", reject: '"}[]', mode: "quoted" },
 } satisfies Record<string, BashSpan>
 
