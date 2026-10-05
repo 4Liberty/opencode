@@ -82,6 +82,24 @@ function expectProbesReported(source: string) {
 
 // Each fixture runs scan_probe in at least one real shell, which the scanner must report or reject.
 const fixtures = [
+  "printf -v x 'a[$(scan_probe)]'; echo $((x))",
+  "a=(1); getopts a: x -a 'a[$(scan_probe)]'; echo $((OPTARG))",
+  "command -- declare 'a[$(scan_probe)]=1'",
+  "a=(1); unset 'a[b[$\\\n(scan_probe)0]]'",
+  'declare \'a["\\"]"$(scan_probe)0]=1\'',
+  "declare -a 'a=(+ [$(scan_probe)]=1)'",
+  "a=(1); echo ${a[b[\\$(scan_probe)]]}",
+  'a["b[\\$(scan_probe)]"]=1',
+  'b=1; a["b[\\$(scan_probe)1]"]=1',
+  "a=(1); echo $[ ${x:-a[\\$(scan_probe)1]} ]",
+  "a=(1); s=abc; echo ${s:'a[$(scan_probe)0]'}",
+  "a=(1); s=abc; echo ${s:${x:-'a[$(scan_probe)1]'}}",
+  "read x <<< 'a[$(scan_probe f)]'; echo $((x))",
+  "mapfile -t a <<< 'b[$(scan_probe g)]'; echo $((a[0]))",
+  "x=1; echo $(( x[\\$(scan_probe i)] ))",
+  "a=(1); echo ${a[@]:'a[$(scan_probe k)]'}",
+  "builtin -- declare 'a[$(scan_probe)]=1'",
+  "command -p declare 'a[$(scan_probe)]=1'",
   'echo "${unset:+${x[\'"\']}}"]}} \'$(scan_probe)\' " # "',
   "echo \"${unset:+${x['}}\"']}}'; scan_probe # \"",
   "echo \"${x:-$'\\''}\"; scan_probe # '\"",
@@ -309,18 +327,6 @@ const fixtures = [
 // These also run inside every wrapper below.
 // Confirmed misses awaiting fixes.
 const knownGaps = [
-  "printf -v x 'a[$(scan_probe)]'; echo $((x))",
-  "a=(1); getopts a: x -a 'a[$(scan_probe)]'; echo $((OPTARG))",
-  "command -- declare 'a[$(scan_probe)]=1'",
-  "a=(1); unset 'a[b[$\\\n(scan_probe)0]]'",
-  'declare \'a["\\"]"$(scan_probe)0]=1\'',
-  "declare -a 'a=(+ [$(scan_probe)]=1)'",
-  "a=(1); echo ${a[b[\\$(scan_probe)]]}",
-  'a["b[\\$(scan_probe)]"]=1',
-  'b=1; a["b[\\$(scan_probe)1]"]=1',
-  "a=(1); echo $[ ${x:-a[\\$(scan_probe)1]} ]",
-  "a=(1); s=abc; echo ${s:'a[$(scan_probe)0]'}",
-  "a=(1); s=abc; echo ${s:${x:-'a[$(scan_probe)1]'}}",
   "x='*(e:scan_probe:)'; echo $^~x",
   "x='$(scan_probe)'; echo \"${\\\n(e)x}\"",
   "x='$(scan_probe)'; echo ${(j:):e)x}",
