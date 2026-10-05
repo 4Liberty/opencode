@@ -28,9 +28,9 @@ OpenCode uses the provider credentials it already has. Sign in from a terminal b
 opencode auth login
 ```
 
-OpenCode offers one auth method, `opencode-login`. The `authenticate` request accepts only that method and doesn't
-collect credentials. If a prompt fails because a provider needs authentication, OpenCode returns ACP's `auth_required`
-error.
+OpenCode offers one auth method, `opencode-login`. By default it's an agent auth method. The `authenticate` request
+accepts only that method and doesn't collect credentials. If a prompt fails because a provider needs authentication,
+OpenCode returns ACP's `auth_required` error.
 
 If the client sets `clientCapabilities.auth.terminal` to `true`, the auth method is a terminal auth method:
 
@@ -44,8 +44,9 @@ If the client sets `clientCapabilities.auth.terminal` to `true`, the auth method
 }
 ```
 
-The client adds `--login` to the command that starts OpenCode, for example `opencode acp --login`, and runs it in a
-terminal. OpenCode then runs the `opencode auth login` flow and exits instead of starting the ACP server.
+The client must not send this method to `authenticate`. Instead, it adds `--login` to the command that starts OpenCode,
+for example `opencode acp --login`, and runs it in a terminal. OpenCode runs the `opencode auth login` flow and exits.
+Exit status 0 means the login succeeded. The client then reconnects and sends `initialize` again.
 
 If the client sets `clientCapabilities._meta["terminal-auth"]` to `true`, the auth method includes the login command:
 
