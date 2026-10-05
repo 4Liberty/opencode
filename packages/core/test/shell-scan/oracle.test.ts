@@ -252,6 +252,14 @@ const fixtures = [
   "declare \"${ echo a; }\"'[$(scan_probe)]=1'",
   "n=a; declare \"$n\"'[$(scan_probe)]=1'",
   "declare \"$(echo a)\"'[$(scan_probe)]=1'",
+  "builtin declare 'a[$(scan_probe)]=1'",
+  "printf -v'a[$(scan_probe)]' x",
+  "set -- 'a[$(scan_probe)]'; echo $(($1))",
+  "for x in 'a[$(scan_probe)]'; do echo $((x)); done",
+  "a=(1 'a[$(scan_probe)]'); echo $((a[1]))",
+  "x='a[$(scan_probe)]' eval 'echo $((x))'",
+  "a=(1); echo $(( a[\\$(scan_probe)] ))",
+  "a=(1); (( a[\\$(scan_probe)] ))",
 
   // Explicit evaluation operators.
   "x='$(scan_probe)'; echo ${x@P}",

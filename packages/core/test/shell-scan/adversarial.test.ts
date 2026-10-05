@@ -42,6 +42,14 @@ describe("ShellScan adversarial corpus", () => {
     expect(result.commands.map((command) => command.words[0])).toEqual([...names])
   })
 
+  // Only shell sinks evaluate subscripts; ordinary arguments and heredoc bodies are data.
+  test.each(["bun -e 'f(`a[${x}]`)'", "rg 'a[$(x)]'", "cat <<'EOF'\na[$(x)]\nEOF", "echo 'a[$(x)]'"])(
+    "scans subscript-shaped text outside shell sinks: %s",
+    (input) => {
+      expect(ShellScan.scan(input).kind).toBe("scanned")
+    },
+  )
+
   test.each(['printf "unterminated', "printf ok &&", "printf ok >", "echo > >out"])(
     "keeps structurally uncertain Bash input opaque: %s",
     (input) => {
