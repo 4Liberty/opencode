@@ -29,6 +29,14 @@ Configuration supplied for the plugin is available as `ctx.options`.
 
 Registrations are owned by the plugin scope. Closing the scope removes them automatically; a registration may also be removed early through `dispose`.
 
+## Packaging And Runtime `effect`
+
+OpenCode redirects imports of `effect`, `effect/*` subpaths, and `@opencode/plugin` (including transitive imports from packages in the plugin's `node_modules`) to the host's runtime instances so fibers, loggers, and `Schema` parsers share one runtime copy.
+
+- Declare `effect` in `peerDependencies` (and `devDependencies` for local development) rather than bundling it.
+- Do not bundle `effect` into the published plugin artifact; if using a bundler, mark `effect` and `effect/*` external. OpenCode rejects Effect plugins whose returned `Effect` comes from a bundled copy.
+- Plugins always execute against the host OpenCode release's `effect` instance, so use `effect` APIs and module paths compatible with the OpenCode release you target.
+
 ## Transform Hooks
 
 Transform hooks contribute to stateful domains. Their editor callbacks are

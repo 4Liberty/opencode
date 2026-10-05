@@ -7,6 +7,7 @@ import "../src/plugin/runtime-plugin-support.bun"
 import { createPluginSources } from "../src/plugin/source"
 import { createSourceWatcher } from "../src/plugin/watch"
 import { createSignal } from "solid-js"
+import { Effect, Option, Schema } from "effect"
 import { Plugin } from "@opencode/plugin/tui"
 import { tmpdir } from "./fixture/fixture"
 
@@ -136,6 +137,42 @@ test("shared runtime and ordinary package identities survive plugin generations"
     expect("value" in loaded && loaded.value).toBe(pkg.default)
     expect(loaded).toMatchObject({ label })
   }
+})
+
+test("TUI plugins and their dependencies resolve effect and effect/* to the host copy", async () => {
+  await using sources = await fixture()
+  const entry = new URL("tui.ts", sources.url)
+  await Bun.write(
+    new URL("node_modules/effect/package.json", sources.url),
+    '{"name":"effect","type":"module","exports":{".":"./index.js","./Option":"./Option.js"}}',
+  )
+  await Bun.write(
+    new URL("node_modules/effect/index.js", sources.url),
+    "export const Effect = { foreign: true }; export const Schema = { foreign: true }",
+  )
+  await Bun.write(new URL("node_modules/effect/Option.js", sources.url), "export const some = () => null")
+  await Bun.write(
+    new URL("node_modules/effect-helper/package.json", sources.url),
+    '{"name":"effect-helper","type":"module","exports":{".":"./index.js"}}',
+  )
+  await Bun.write(
+    new URL("node_modules/effect-helper/index.js", sources.url),
+    'import { Effect as HelperEffect, Schema as HelperSchema } from "effect"; import { some as helperSome } from "effect/Option"; export { HelperEffect, HelperSchema, helperSome }',
+  )
+  await Bun.write(
+    entry,
+    `import { Effect as PluginEffect, Schema as PluginSchema } from "effect"
+    import { some as pluginSome } from "effect/Option"
+    import { HelperEffect, HelperSchema, helperSome } from "effect-helper"
+    export { PluginEffect, PluginSchema, pluginSome, HelperEffect, HelperSchema, helperSome }`,
+  )
+  const loaded = (await sources.read(entry.href)).module as Record<string, unknown>
+  expect(loaded.PluginEffect).toBe(Effect)
+  expect(loaded.PluginSchema).toBe(Schema)
+  expect(loaded.pluginSome).toBe(Option.some)
+  expect(loaded.HelperEffect).toBe(Effect)
+  expect(loaded.HelperSchema).toBe(Schema)
+  expect(loaded.helperSome).toBe(Option.some)
 })
 
 test("helper import.meta stays anchored to its source, including assets and resolution", async () => {

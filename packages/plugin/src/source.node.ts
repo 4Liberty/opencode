@@ -4,10 +4,12 @@ import { fileURLToPath } from "node:url"
 import { localSource } from "./source.js"
 import { missingPackageTarget } from "./source.package.js"
 import { Host } from "./host.js"
+import { ensurePluginRuntime } from "./runtime.node.js"
 
 let generation = Date.now()
 
 export async function prepareSource(entrypoint: string, track: (file: string, directory?: boolean) => void) {
+  await ensurePluginRuntime()
   const version = String(++generation)
   const fresh = (specifier: string) => {
     const url = new URL(specifier)

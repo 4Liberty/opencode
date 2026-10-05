@@ -128,6 +128,17 @@ const load = Effect.fn("PluginModule.load")(function* (
           target: operation.target,
           ...(installed?.version ? { version: installed.version } : {}),
         },
-    effect: (host) => plugin.effect({ ...host, options: operation.options }),
+    effect: (host) =>
+      Effect.suspend(() => {
+        const effect = plugin.effect({ ...host, options: operation.options })
+        if (!Effect.isEffect(effect) || effect.pipe !== Effect.void.pipe) {
+          return Effect.die(
+            new Error(
+              `Plugin "${plugin.id}" returned an Effect from a bundled copy of effect. Declare "effect" as a peerDependency and do not bundle it.`,
+            ),
+          )
+        }
+        return effect
+      }),
   } satisfies Generation
 })

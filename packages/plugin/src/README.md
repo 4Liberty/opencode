@@ -140,6 +140,8 @@ await ctx.tool.transform((tools) => {
 })
 ```
 
+When using `effect` schemas in a plugin, declare `effect` as a `peerDependency` and do not bundle it; OpenCode resolves `effect` and `effect/*` imports to the host's runtime instance.
+
 ## Reloading A Domain
 
 When data captured by a transform changes, reload the affected domain:

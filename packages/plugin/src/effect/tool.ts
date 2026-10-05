@@ -1,3 +1,6 @@
+export { CallID, Error, Tool } from "@opencode/schema/tool"
+export type { Metadata, Options, Result } from "@opencode/schema/tool"
+
 import { Tool } from "@opencode/schema/tool"
 import type { Agent } from "@opencode/schema/agent"
 import type { Session } from "@opencode/schema/session"

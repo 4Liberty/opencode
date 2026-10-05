@@ -2,6 +2,7 @@ export * as Host from "./host.js"
 
 import path from "node:path"
 import { importModule, resolveModule } from "@opencode/util/runtime-import"
+import { ensurePluginRuntime } from "#plugin-runtime"
 
 export interface Target {
   readonly directory: string
@@ -43,6 +44,7 @@ export function resolve(target: Target): Entrypoints {
   return { server: entry(["server", ""]), tui: entry(["tui"]), rpc: entry(["rpc"]) }
 }
 
-export function load(entrypoint: string): Promise<unknown> {
+export async function load(entrypoint: string): Promise<unknown> {
+  await ensurePluginRuntime(entrypoint)
   return importModule(entrypoint)
 }

@@ -61,9 +61,17 @@ const layer = Layer.effect(
           release: holdUnsafe(),
         })
       })
-      const exit = yield* Effect.suspend(() =>
-        plugin.effect({ ...host, storage: PluginHost.storage(kv, plugin.id) }),
-      ).pipe(
+      const exit = yield* Effect.suspend(() => {
+        const effect = plugin.effect({ ...host, storage: PluginHost.storage(kv, plugin.id) })
+        if (!Effect.isEffect(effect) || effect.pipe !== Effect.void.pipe) {
+          return Effect.die(
+            new Error(
+              `Plugin "${plugin.id}" returned an Effect from a bundled copy of effect. Declare "effect" as a peerDependency and do not bundle it.`,
+            ),
+          )
+        }
+        return effect
+      }).pipe(
         grouped,
         inherit,
         Effect.updateContext((context: Context.Context<never>) =>

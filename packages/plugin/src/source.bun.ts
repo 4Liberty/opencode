@@ -3,12 +3,14 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { Host } from "./host.js"
+import { ensurePluginRuntime } from "./runtime.bun.js"
 import { localSource } from "./source.js"
 import { missingPackageTarget } from "./source.package.js"
 
 let generation = Date.now()
 
 export async function prepareSource(entrypoint: string, track: (file: string, directory?: boolean) => void) {
+  ensurePluginRuntime(entrypoint)
   const root = fileURLToPath(entrypoint)
   const files = new Set<string>()
   const visit = (file: string, search = "") => {

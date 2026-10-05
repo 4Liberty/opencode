@@ -3,6 +3,7 @@
 import { $ } from "bun"
 import { mkdir, rm } from "fs/promises"
 import path from "path"
+import { discoverEffectSpecifiers } from "@opencode/plugin/runtime-modules.bun"
 import { Script } from "@opencode/script"
 import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
 import type { BunPlugin } from "bun"
@@ -78,6 +79,28 @@ const appAssetsPlugin: BunPlugin = {
     }))
   },
 }
+const pluginRuntimeSpecifiers = [
+  "@opencode/plugin",
+  "@opencode/plugin/effect",
+  "@opencode/plugin/effect/plugin",
+  "@opencode/plugin/effect/tool",
+  "@opencode/plugin/promise/plugin",
+  "@opencode/plugin/promise/tool",
+  "@opencode/plugin/rpc",
+  ...discoverEffectSpecifiers().map(([specifier]) => specifier),
+]
+const pluginRuntimeModulesSource = `const modules = {\n${pluginRuntimeSpecifiers
+  .map((specifier) => `  ${JSON.stringify(specifier)}: () => require(${JSON.stringify(specifier)}),`)
+  .join("\n")}\n}\nexport function pluginRuntimeModules() {\n  return modules\n}\n`
+const pluginRuntimeModulesPlugin: BunPlugin = {
+  name: "opencode-plugin-runtime-modules",
+  setup(build) {
+    build.onLoad({ filter: /plugin[/\\]src[/\\]runtime-modules\.bun\.ts$/ }, () => ({
+      contents: pluginRuntimeModulesSource,
+      loader: "js",
+    }))
+  },
+}
 
 for (const item of targets) {
   const opencodePty = await resolveOpencodePty({
@@ -124,7 +147,14 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
   const result = await Bun.build({
     entrypoints: ["./src/index.ts"],
     tsconfig: "./tsconfig.json",
-    plugins: [appAssetsPlugin, solidPlugin, parcelWatcherPlugin, opencodePtyPlugin, simulationGraphPlugin],
+    plugins: [
+      appAssetsPlugin,
+      solidPlugin,
+      parcelWatcherPlugin,
+      opencodePtyPlugin,
+      pluginRuntimeModulesPlugin,
+      simulationGraphPlugin,
+    ],
     external: ["node-gyp"],
     format: "esm",
     minify: true,

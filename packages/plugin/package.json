@@ -17,6 +17,12 @@
     "./*": "./src/*.ts"
   },
   "imports": {
+    "#plugin-runtime": {
+      "workerd": "./src/runtime.workerd.ts",
+      "bun": "./src/runtime.bun.ts",
+      "node": "./src/runtime.node.ts",
+      "default": "./src/runtime.node.ts"
+    },
     "#plugin-source": {
       "bun": "./src/source.bun.ts",
       "node": "./src/source.node.ts",
