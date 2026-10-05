@@ -32,6 +32,21 @@ OpenCode offers one auth method, `opencode-login`. The `authenticate` request ac
 collect credentials. If a prompt fails because a provider needs authentication, OpenCode returns ACP's `auth_required`
 error.
 
+If the client sets `clientCapabilities.auth.terminal` to `true`, the auth method is a terminal auth method:
+
+```json
+{
+  "id": "opencode-login",
+  "name": "Login with opencode",
+  "description": "Run `opencode auth login` in the terminal",
+  "type": "terminal",
+  "args": ["--login"]
+}
+```
+
+The client adds `--login` to the command that starts OpenCode, for example `opencode acp --login`, and runs it in a
+terminal. OpenCode then runs the `opencode auth login` flow and exits instead of starting the ACP server.
+
 If the client sets `clientCapabilities._meta["terminal-auth"]` to `true`, the auth method includes the login command:
 
 ```json
@@ -42,9 +57,6 @@ If the client sets `clientCapabilities._meta["terminal-auth"]` to `true`, the au
   "_meta": { "terminal-auth": { "command": "opencode", "args": ["auth", "login"], "label": "OpenCode Login" } }
 }
 ```
-
-OpenCode doesn't support ACP's standard terminal auth yet. That is the `clientCapabilities.auth.terminal` capability
-with a `type: "terminal"` auth method.
 
 ## Troubleshooting
 
@@ -97,6 +109,7 @@ OpenCode reads these client capabilities:
 
 | Capability                             | Effect                                                         |
 | -------------------------------------- | -------------------------------------------------------------- |
+| `auth.terminal` set to `true`          | The auth method is a [terminal auth method](#authentication).  |
 | `elicitation.form`                     | OpenCode asks [questions](#questions) as forms.                |
 | `session.compaction`                   | OpenCode reports [compaction](#compaction) with ACP's updates. |
 | `_meta["terminal-auth"]` set to `true` | The auth method includes the [login command](#authentication). |

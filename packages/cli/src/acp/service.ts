@@ -109,6 +109,7 @@ export function make(input: {
         description: "Run `opencode auth login` in the terminal",
         name: "Login with opencode",
         id: AuthMethodID,
+        ...(params.clientCapabilities?.auth?.terminal ? { type: "terminal" as const, args: ["--login"] } : {}),
       }
       if (params.clientCapabilities?._meta?.["terminal-auth"] === true) {
         authMethod._meta = {

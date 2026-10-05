@@ -10,6 +10,10 @@ describe("acp session lifecycle over the wire", () => {
 
     const plain = await acp.initialize()
     const terminal = await acp.initialize({ terminalAuth: true, childSessionUpdates: true })
+    const standard = await acp.request("initialize", {
+      protocolVersion: 1,
+      clientCapabilities: { auth: { terminal: true } },
+    })
 
     expect(plain).toMatchObject({
       protocolVersion: 1,
@@ -28,6 +32,15 @@ describe("acp session lifecycle over the wire", () => {
     expect(terminal.authMethods?.[0]?._meta).toEqual({
       "terminal-auth": { command: "opencode", args: ["auth", "login"], label: "OpenCode Login" },
     })
+    expect(standard.authMethods).toEqual([
+      {
+        id: "opencode-login",
+        name: "Login with opencode",
+        description: "Run `opencode auth login` in the terminal",
+        type: "terminal",
+        args: ["--login"],
+      },
+    ])
     expect(await acp.request("authenticate", { methodId: "opencode-login" })).toEqual({})
     expect(await rpcError(acp.request("authenticate", { methodId: "missing" }))).toMatchObject({
       code: -32602,
