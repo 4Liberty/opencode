@@ -834,8 +834,9 @@ type BashSpan = { open?: string; close?: string; reject: string; mode: Exclude<B
 const BASH_SPANS = {
   double: { close: '"', reject: "", mode: "quoted" },
   heredoc: { reject: "", mode: "quoted" },
-  arithmetic: { open: "(", close: ")", reject: ";", mode: "arithmetic" },
-  forArithmetic: { open: "(", close: ")", reject: "", mode: "arithmetic" },
+  // Bash rereads `((...))` it cannot parse as arithmetic, such as text with a comment, as nested subshells.
+  arithmetic: { open: "(", close: ")", reject: ";#", mode: "arithmetic" },
+  forArithmetic: { open: "(", close: ")", reject: "#", mode: "arithmetic" },
   bracketArithmetic: { close: "]", reject: ";|&<>()[\n'\"\\#", mode: "arithmetic" },
   subscript: { open: "[", close: "]", reject: "", mode: "arithmetic" },
   // Dash splits an assignment subscript at blanks and operators, so Bash and Zsh assignments diverge.
@@ -963,7 +964,9 @@ function scanBashSpan(
     if (--context.remaining < 0) return { kind: "opaque", reason: "invalid-structure" }
     const char = input[index]
     if (char === span.close && !nesting) return index
-    if (span.reject.includes(char)) return { kind: "opaque", reason: "invalid-structure" }
+    // A `#` after a digit is a base prefix, and after `$` the parameter $#.
+    if (span.reject.includes(char) && !(char === "#" && /[\d$]/.test(input[index - 1] ?? "")))
+      return { kind: "opaque", reason: "invalid-structure" }
     if (char === span.open && ++nesting + depth > MAX_SUBSTITUTION_DEPTH)
       return { kind: "opaque", reason: "invalid-structure" }
     if (char === span.close) nesting--

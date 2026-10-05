@@ -82,6 +82,10 @@ function expectProbesReported(source: string) {
 
 // Each fixture runs scan_probe in at least one real shell, which the scanner must report or reject.
 const fixtures = [
+  "echo $(( : # ))'\n); scan_probe ) # '",
+  "echo $(( $(echo 1) # ))'\n); scan_probe ) # '",
+  "(( : # ))'\n); scan_probe ) # '",
+  "echo $(( 16#ff + 2#1 + $# + ${#x} )); scan_probe ok",
   "(( scan_probe ))",
   "(( (scan_probe) & (scan_probe) ))",
   "(( (scan_probe)\n(scan_probe) ))",
@@ -299,7 +303,6 @@ const fixtures = [
 // These also run inside every wrapper below.
 // Confirmed misses awaiting fixes.
 const knownGaps = [
-  "echo $(( : # ))'\n); scan_probe ) # '",
   'echo "${unset:+${x[\'"\']}}"]}} \'$(scan_probe)\' " # "',
   "echo \"${unset:+${x['}}\"']}}'; scan_probe # \"",
   "printf -v x 'a[$(scan_probe)]'; echo $((x))",
