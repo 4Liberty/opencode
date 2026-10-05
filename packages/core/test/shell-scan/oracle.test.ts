@@ -82,6 +82,18 @@ function expectProbesReported(source: string) {
 
 // Each fixture runs scan_probe in at least one real shell, which the scanner must report or reject.
 const fixtures = [
+  "x='*(e:scan_probe:)'; echo $^~x",
+  "x='$(scan_probe)'; echo \"${\\\n(e)x}\"",
+  "x='$(scan_probe)'; echo ${(j:):e)x}",
+  "x='*(e:scan_probe:)'; echo ${(f)~x}",
+  "x='*(e:scan_probe:)'; echo ${=~x}",
+  "x='*(e:scan_probe:)'; echo $=~x",
+  "x='$(scan_probe)'; echo ${(%e)x}",
+  "x='$(scan_probe)'; echo ${(s.:.e)x}",
+  "x='$(scan_probe)'; echo ${(s(:)e)x}",
+  "x='$(scan_probe)'; echo ${(ej: :)x}",
+  "x='*(e:scan_probe:)'; echo ${(s: :)~x}",
+  "x='*(e:scan_probe:)'; echo ${^~x}",
   "printf -v x 'a[$(scan_probe)]'; echo $((x))",
   "a=(1); getopts a: x -a 'a[$(scan_probe)]'; echo $((OPTARG))",
   "command -- declare 'a[$(scan_probe)]=1'",
@@ -326,11 +338,7 @@ const fixtures = [
 
 // These also run inside every wrapper below.
 // Confirmed misses awaiting fixes.
-const knownGaps = [
-  "x='*(e:scan_probe:)'; echo $^~x",
-  "x='$(scan_probe)'; echo \"${\\\n(e)x}\"",
-  "x='$(scan_probe)'; echo ${(j:):e)x}",
-] as const
+const knownGaps = [] as const
 
 const nestedFixtures = [
   "[[ a]]# ]] && scan_probe",

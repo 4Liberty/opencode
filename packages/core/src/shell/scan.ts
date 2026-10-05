@@ -81,7 +81,9 @@ const FUNCTION_HEAD_RE =
 const FUNCTION_BODY_RE = /[{(]|\[\[(?=(?:\\\n)*[ \t\n])|(?:if|while|until|for|select|case)(?=(?:\\\n)*(?:[ \t\n(]|$))/y
 const DO_AHEAD_RE = /(?:[ \t\n;]|\\\n|#[^\n]*(?:\n|$))*(?:do(?=(?:\\\n)*(?:[ \t\n;{(]|$))|\{(?=(?:\\\n)*[ \t\n]))/y
 const NOFORK_OPEN_RE = /\$\{(?:\\\n)*(?:[ \t\n]|\|)/y
-const ZSH_EVALUATION_RE = /\([^)]*e[^)]*\)|(?:\([^)]*\))?[\^=]*~/y
+// Zsh flags that neither evaluate nor glob a value; s and j take an argument between repeated delimiters.
+const ZSH_SAFE_FLAGS_RE = /\$\{\((?:[@AaCcDFfikLnOoQqtUuVvWwXZz0]|[js]([^({[<\\])(?:(?!\1).)*\1)*\)/y
+const ZSH_GLOB_MODIFIER_RE = /[\^=~#+]*~/y
 const PARAMETER_NAME_RE = /[!#]?(?:[A-Za-z_]\w*|\d+|[@*#?$!-])/y
 const PARAMETER_SUBSCRIPT_RE = /[!#]?[A-Za-z_][A-Za-z0-9_]*\[/y
 const BASH_ANSI_ESCAPES: Record<string, string> = {
@@ -897,8 +899,7 @@ function scanBashUnit(
     if (text && next !== "\n") bashAppend(text, input.slice(index + 1, index + 2))
     return index + 1
   }
-  // Zsh globs the value of $~name, which can run glob qualifier code.
-  if (char === "$" && next === "~") return { kind: "opaque", reason: "dynamic-execution" }
+  if (char === "$" && zshEvaluates(input, index)) return { kind: "opaque", reason: "dynamic-execution" }
   if (char === "$" && next === "$") {
     if (text) text.word += "$$"
     return index + 1
@@ -936,6 +937,20 @@ function scanBashUnit(
         : undefined
   if (text && typeof end === "number") text.word += input.slice(index, end + 1)
   return end
+}
+
+// Zsh flag groups such as ${(e)name} evaluate a value, and a modifier run with ~, such as $^~name or
+// ${(f)~name}, globs it, which can run glob qualifier code.
+function zshEvaluates(input: string, index: number) {
+  let at = index + 1
+  if (input[at] === "{" && input[at + 1] === "(") {
+    ZSH_SAFE_FLAGS_RE.lastIndex = index
+    if (!ZSH_SAFE_FLAGS_RE.test(input)) return true
+    at = ZSH_SAFE_FLAGS_RE.lastIndex
+  }
+  if (input[at] === "{") at++
+  ZSH_GLOB_MODIFIER_RE.lastIndex = at
+  return ZSH_GLOB_MODIFIER_RE.test(input)
 }
 
 function bashAppend(text: BashText, value: string) {
@@ -1056,6 +1071,8 @@ function scanBashDollarOrBacktick(
     const end = scanBashArithmetic(input, start + 3, depth + 1, context, commands, BASH_SPANS.arithmetic)
     if (end !== undefined) return end
   }
+  // Zsh still reads flags after a continuation that follows `${`.
+  if (input.startsWith("${\\\n", start)) return { kind: "opaque", reason: "dynamic-execution" }
   if (input.startsWith("$(", start)) return scanBashNested(input, start + 2, depth, context, commands, ")", text)
   NOFORK_OPEN_RE.lastIndex = start
   const nofork = NOFORK_OPEN_RE.exec(input)
@@ -1149,9 +1166,6 @@ function scanBashParameter(
   quoted: boolean,
   text: BashText,
 ): number | Opaque {
-  // Bash ${name@P} and Zsh ${(e)name} and ${~name} evaluate the parameter's value as shell text.
-  ZSH_EVALUATION_RE.lastIndex = start
-  if (ZSH_EVALUATION_RE.test(input)) return { kind: "opaque", reason: "dynamic-execution" }
   PARAMETER_SUBSCRIPT_RE.lastIndex = start
   const subscript = PARAMETER_SUBSCRIPT_RE.test(input) ? PARAMETER_SUBSCRIPT_RE.lastIndex - 1 : -1
   // The operands of ${name:offset:length} are arithmetic. A colon right after the name or subscript starts them.
@@ -1170,6 +1184,7 @@ function scanBashParameter(
       return index
     }
     if (index === colon && char === ":" && !"-=?+".includes(input[index + 1] ?? "")) offset = text.literal.length
+    // Bash ${name@P} evaluates the value as prompt text.
     if (input.startsWith("@P}", index)) return { kind: "opaque", reason: "dynamic-execution" }
     // Zsh globs an unquoted parameter's words, where a parenthesized group can be a glob qualifier.
     if (!quoted && char === "(" && index > start) return { kind: "opaque", reason: "dynamic-execution" }
