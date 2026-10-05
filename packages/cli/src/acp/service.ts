@@ -164,7 +164,7 @@ export function make(input: {
     listSessions: Effect.fnUntraced(function* (params) {
       const page = yield* input.client.session
         .list({
-          ...(params.cwd ? { directory: AbsolutePath.make(params.cwd) } : {}),
+          ...(params.cwd ? { directory: yield* ACPDirectories.parseCwd(params.cwd) } : {}),
           order: "desc",
           limit: 100,
           ...(params.cursor ? { cursor: Schema.decodeSync(SessionsCursor)(params.cursor) } : {}),

@@ -165,7 +165,7 @@ describe("acp session lifecycle over the wire", () => {
       config: { type: "remote", url: "https://example.com/mcp", headers: { Authorization: "Bearer x" }, oauth: false },
     })
   })
-  test("rejects MCP-over-ACP and SSE servers before creating or loading a session", async () => {
+  test("rejects relative cwds, MCP-over-ACP, and SSE servers before creating or loading a session", async () => {
     await using acp = await startWire()
     acp.server.sessions.set("ses_saved", makeSession("ses_saved"))
     await acp.initialize()
@@ -177,12 +177,22 @@ describe("acp session lifecycle over the wire", () => {
       message: "Invalid params: Only stdio and HTTP MCP servers are supported",
       data: { field: "mcpServers" },
     }
+    const relative = {
+      code: -32602,
+      message: "Invalid params: cwd must be an absolute path: workspace",
+      data: { field: "cwd" },
+    }
 
     expect(await rpcError(acp.newSession("/workspace", mcpServers))).toEqual(invalid)
     expect(await rpcError(acp.newSession("/workspace", sse))).toEqual(invalid)
     expect(
       await rpcError(acp.request("session/load", { cwd: "/workspace", sessionId: "ses_saved", mcpServers })),
     ).toEqual(invalid)
+    expect(await rpcError(acp.newSession("workspace"))).toEqual(relative)
+    expect(
+      await rpcError(acp.request("session/load", { cwd: "workspace", sessionId: "ses_saved", mcpServers: [] })),
+    ).toEqual(relative)
+    expect(await rpcError(acp.request("session/list", { cwd: "workspace" }))).toEqual(relative)
     expect(new Set(acp.server.sessions.keys())).toEqual(existing)
     expect(acp.server.requests.filter((request) => request.path.includes("ses_saved"))).toEqual([])
     expect(acp.logs).toEqual([])

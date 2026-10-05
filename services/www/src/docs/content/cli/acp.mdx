@@ -106,6 +106,7 @@ OpenCode reads these client capabilities:
 The client sets the working directory when it creates a session. OpenCode uses that directory's configuration,
 including its models, agents, commands, skills, instructions, plugins, and MCP servers.
 
+- `cwd` must be an absolute path. OpenCode rejects a relative `cwd` with an invalid params error.
 - `session/load` replays the saved messages. `session/resume` and `session/fork` don't replay them.
 - To load or resume a session, the client must pass the session's own directory as `cwd`. OpenCode rejects a different
   `cwd` with an invalid params error.
