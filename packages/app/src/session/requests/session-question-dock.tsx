@@ -242,6 +242,8 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
   const replyMutation = useMutation(() => ({
     mutationFn: (answer: FormAnswer) =>
       serverSDK.api.session.form.reply({ sessionID: props.request.sessionID, formID: props.request.id, answer }),
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 5000),
     onMutate: () => {
       props.onSubmit()
     },
@@ -254,6 +256,8 @@ export const SessionQuestionDock: Component<{ request: FormInfo; onSubmit: () =>
 
   const rejectMutation = useMutation(() => ({
     mutationFn: () => serverSDK.api.session.form.cancel({ sessionID: props.request.sessionID, formID: props.request.id }),
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 5000),
     onMutate: () => {
       props.onSubmit()
     },

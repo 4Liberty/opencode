@@ -217,4 +217,42 @@ describe("createRequestQueue", () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(input.logs).toHaveLength(2)
   })
+
+  test("priority requests jump ahead of non-priority queued requests", async () => {
+    const input = setup({ limit: 1 })
+    const normal = input.queue.fetch("http://server/api/normal_1")
+    await input.settle()
+    const normal2 = input.queue.fetch("http://server/api/normal_2")
+    const normal3 = input.queue.fetch("http://server/api/normal_3")
+    const priority = input.queue.fetch("http://server/api/session/ses_1/form/frm_1/reply", { method: "POST" })
+    await input.settle()
+    // normal_1 is in flight; priority should jump ahead of normal_2 and normal_3
+    input.pending[0]!.resolve()
+    await input.settle()
+    expect(new URL(input.pending[1]!.url).pathname).toEqual("/api/session/ses_1/form/frm_1/reply")
+    input.pending[1]!.resolve()
+    await input.settle()
+    expect(new URL(input.pending[2]!.url).pathname).toEqual("/api/normal_2")
+    input.pending[2]!.resolve()
+    await input.settle()
+    expect(new URL(input.pending[3]!.url).pathname).toEqual("/api/normal_3")
+    input.pending[3]!.resolve()
+    await Promise.all([normal, normal2, normal3, priority])
+    expect(input.queue.inflight()).toBe(0)
+  })
+
+  test("priority requests receive the priority timeout deadline", async () => {
+    const input = setup({ limit: 2, headersTimeoutMs: 10, priorityHeadersTimeoutMs: 200 })
+    const normal = input.queue.fetch("http://server/api/normal")
+    const priority = input.queue.fetch("http://server/api/session/ses_1/prompt", { method: "POST" })
+    await input.settle()
+    const normalError = await normal.catch((cause: unknown) => cause)
+    expect(normalError).toBeInstanceOf(DOMException)
+    expect((normalError as DOMException).name).toBe("TimeoutError")
+    // Priority request is still active past normal timeout
+    expect(input.pending[1]!.signal.aborted).toBe(false)
+    input.pending[1]!.resolve()
+    await expect(priority).resolves.toBeInstanceOf(Response)
+  })
 })
+

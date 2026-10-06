@@ -39,8 +39,9 @@ const databaseLayer = (lock: Effect.Effect<Semaphore.Semaphore>) =>
       if (supportsTuningPragmas) {
         yield* db.run("PRAGMA journal_mode = WAL")
         yield* db.run("PRAGMA synchronous = NORMAL")
-        yield* db.run("PRAGMA busy_timeout = 5000")
+        yield* db.run("PRAGMA busy_timeout = 30000")
         yield* db.run("PRAGMA cache_size = -64000")
+        yield* db.run("PRAGMA mmap_size = 2147483648")
         yield* db.run("PRAGMA wal_checkpoint(PASSIVE)")
       }
       // Durable Object SQLite always enforces foreign keys and rejects the pragma.
