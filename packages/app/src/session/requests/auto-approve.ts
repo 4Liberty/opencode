@@ -16,7 +16,12 @@ const retryDelayMs = 1000
 // settings store, so it applies to every session, tab, and server at once.
 export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data }) {
   const enabled = useSettings().permissions.autoApprove
-  const state = { disposed: false, generation: 0, responded: new Set<string>() }
+  const state = {
+    disposed: false,
+    generation: 0,
+    responded: new Set<string>(),
+    inflight: new Map<string, { generation: number }>(),
+  }
   const current = (generation: number) =>
     !state.disposed &&
     generation === state.generation &&
@@ -95,15 +100,27 @@ export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data
   function approve(permission: PermissionRequest, attempt = 0, generation = state.generation) {
     // A failed reply must not replay a request from an old connection. The
     // fresh sweep revalidates pending requests after a reconnect.
-    if (!current(generation) || state.responded.has(permission.id)) return
-    remember(permission.id)
+    if (
+      !current(generation) ||
+      state.responded.has(permission.id) ||
+      state.inflight.get(permission.id)?.generation === generation
+    )
+      return
+    const attemptState = { generation }
+    state.inflight.set(permission.id, attemptState)
     input.sdk.api.permission
       .reply({ sessionID: permission.sessionID, requestID: permission.id, decision: "once" })
+      .then(() => {
+        if (state.inflight.get(permission.id) !== attemptState) return
+        state.inflight.delete(permission.id)
+        remember(permission.id)
+      })
       .catch(() => {
         // A reply failure leaves the request pending but invisible (the UI
         // hides prompts while auto-approve is on), so retry a bounded number
         // of times. Later sweeps retry it after that.
-        state.responded.delete(permission.id)
+        if (state.inflight.get(permission.id) !== attemptState) return
+        state.inflight.delete(permission.id)
 
         if (!current(generation) || attempt >= retryLimit) return
         setTimeout(() => approve(permission, attempt + 1, generation), retryDelayMs * (attempt + 1))

@@ -13,6 +13,59 @@ beforeAll(async () => {
   createPermissionAutoApprover = (await import("../src/session/requests/auto-approve")).createPermissionAutoApprover
 })
 
+test("a deferred old reply cannot suppress or clear the current generation's attempt", async () => {
+  const [status, setStatus] = createSignal("connected")
+  const requests: ((value: { data: PermissionRequest[] }) => void)[] = []
+  const replies: { resolve: () => void; reject: (error: Error) => void }[] = []
+  const permission = { id: "request", sessionID: "session" } as PermissionRequest
+  const sdk = {
+    connection: { status },
+    event: { on: () => () => {} },
+    api: {
+      location: { list: async () => [{ directory: "/fixture/loaded" }] },
+      session: { active: async () => ({}) },
+      permission: {
+        request: {
+          list: () => new Promise<{ data: PermissionRequest[] }>((resolve) => requests.push(resolve)),
+        },
+        reply: () => new Promise<void>((resolve, reject) => replies.push({ resolve, reject })),
+      },
+    },
+  } as unknown as ServerSDK
+  const data = { session: { list: () => [] } } as unknown as Data
+  const dispose = createRoot((dispose) => {
+    createPermissionAutoApprover({ sdk, data })
+    return dispose
+  })
+  const flush = async () => {
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+  }
+  try {
+    await flush()
+    requests[0]({ data: [permission] })
+    await flush()
+    expect(replies).toHaveLength(1)
+    setStatus("reconnecting")
+    setStatus("connected")
+    await flush()
+    requests[1]({ data: [permission] })
+    await flush()
+    expect(replies).toHaveLength(2)
+    replies[0].reject(new Error("old connection failed late"))
+    await flush()
+    replies[1].resolve()
+    await flush()
+    setStatus("reconnecting")
+    setStatus("connected")
+    await flush()
+    requests[2]({ data: [permission] })
+    await flush()
+    expect(replies).toHaveLength(2)
+  } finally {
+    dispose()
+  }
+})
+
 test("disconnect invalidates old permission lists and failed reply retries", async () => {
   const [status, setStatus] = createSignal("connected")
   const requests: ((value: { data: PermissionRequest[] }) => void)[] = []
