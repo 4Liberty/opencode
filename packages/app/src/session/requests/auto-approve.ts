@@ -31,8 +31,8 @@ export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data
   // disconnected, and requests may already be pending before the setting turns
   // on, so sweep on every connect while the setting is on.
   createEffect(() => {
-    if (!enabled() || input.sdk.connection.status() !== "connected") return
     const generation = ++state.generation
+    if (!enabled() || input.sdk.connection.status() !== "connected") return
     void sweepWithRetry(generation, 0)
   })
 
