@@ -9,6 +9,9 @@ function fixture() {
     location: { directory: "C:\\fixture\\current\\", workspaceID: "workspace" } as LocationRef,
     loaded: [] as LocationRef[],
     running: false,
+    runningChild: false,
+    queueOnSync: false,
+    pending: [] as { type: string }[],
     fail: false,
     hydrated: [] as string[],
   }
@@ -27,12 +30,17 @@ function fixture() {
     session: {
       sync: async () => {},
       get: () => ({ location: state.location }),
-      family: () => [],
-      status: () => (state.running ? "running" : "idle"),
+      family: () => (state.runningChild ? ["child"] : []),
+      status: (id: string) => (state.running || (state.runningChild && id === "child") ? "running" : "idle"),
       list: () => {
         throw new Error("historical sessions must not be enumerated")
       },
-      pending: { sync: async () => {}, list: () => [] },
+      pending: {
+        sync: async () => {
+          if (state.queueOnSync) state.pending = [{ type: "prompt" }]
+        },
+        list: () => state.pending,
+      },
       permission: {
         sync: async () => {
           state.hydrated.push("permission")
@@ -70,6 +78,16 @@ test("exact loaded locations and running sessions hydrate attention", async () =
   running.state.fail = true
   await syncInactiveSession(running)
   expect(running.state.hydrated).toEqual(["permission", "form"])
+  const descendant = fixture()
+  descendant.state.runningChild = true
+  descendant.state.fail = true
+  await syncInactiveSession(descendant)
+  expect(descendant.state.hydrated).toEqual(["permission", "form"])
+  const queued = fixture()
+  queued.state.queueOnSync = true
+  queued.state.fail = true
+  await syncInactiveSession(queued)
+  expect(queued.state.hydrated).toEqual(["permission", "form"])
 })
 
 test("failed inventories never fall back to historical locations", async () => {
