@@ -17,6 +17,11 @@ const retryDelayMs = 1000
 export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data }) {
   const enabled = useSettings().permissions.autoApprove
   const state = { disposed: false, generation: 0, responded: new Set<string>() }
+  const current = (generation: number) =>
+    !state.disposed &&
+    generation === state.generation &&
+    enabled() &&
+    input.sdk.connection.status() === "connected"
 
   const unsubscribe = input.sdk.event.on("permission.asked", (event) => {
     if (enabled()) approve(event.data)
@@ -57,7 +62,7 @@ export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data
     if (complete || attempt >= retryLimit) return
     setTimeout(
       () => {
-        if (state.disposed || !enabled() || generation !== state.generation) return
+        if (!current(generation)) return
         void sweepWithRetry(generation, attempt + 1)
       },
       retryDelayMs * (attempt + 1),
@@ -67,20 +72,16 @@ export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data
   async function sweep(generation: number) {
     const inventory = await permissionLocations({
       ...input,
-      current: () =>
-        !state.disposed &&
-        generation === state.generation &&
-        enabled() &&
-        input.sdk.connection.status() === "connected",
+      current: () => current(generation),
     })
-    if (state.disposed || generation !== state.generation || !enabled()) return true
+    if (!current(generation)) return true
 
     const listed = await Promise.all(
       inventory.locations.map((location) =>
         input.sdk.api.permission.request
           .list({ location })
           .then((pending) => {
-            if (!state.disposed && generation === state.generation) pending.data.forEach((request) => approve(request))
+            if (current(generation)) pending.data.forEach((request) => approve(request))
 
             return true
           })
@@ -91,10 +92,10 @@ export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data
     return inventory.complete && listed.every(Boolean)
   }
 
-  function approve(permission: PermissionRequest, attempt = 0) {
-    // enabled() guards the retry timer path: the user may disable the setting
-    // between a failed reply and its scheduled retry.
-    if (state.disposed || !enabled() || state.responded.has(permission.id)) return
+  function approve(permission: PermissionRequest, attempt = 0, generation = state.generation) {
+    // A failed reply must not replay a request from an old connection. The
+    // fresh sweep revalidates pending requests after a reconnect.
+    if (!current(generation) || state.responded.has(permission.id)) return
     remember(permission.id)
     input.sdk.api.permission
       .reply({ sessionID: permission.sessionID, requestID: permission.id, decision: "once" })
@@ -104,8 +105,8 @@ export function createPermissionAutoApprover(input: { sdk: ServerSDK; data: Data
         // of times. Later sweeps retry it after that.
         state.responded.delete(permission.id)
 
-        if (state.disposed || attempt >= retryLimit) return
-        setTimeout(() => approve(permission, attempt + 1), retryDelayMs * (attempt + 1))
+        if (!current(generation) || attempt >= retryLimit) return
+        setTimeout(() => approve(permission, attempt + 1, generation), retryDelayMs * (attempt + 1))
       })
   }
 

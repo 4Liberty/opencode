@@ -13,10 +13,14 @@ beforeAll(async () => {
   createPermissionAutoApprover = (await import("../src/session/requests/auto-approve")).createPermissionAutoApprover
 })
 
-test("disconnect invalidates permission lists still pending from the old connection", async () => {
+test("disconnect invalidates old permission lists and failed reply retries", async () => {
   const [status, setStatus] = createSignal("connected")
   const requests: ((value: { data: PermissionRequest[] }) => void)[] = []
   const replied: string[] = []
+  let failReply = false
+  const timers: (() => void)[] = []
+  const originalTimeout = globalThis.setTimeout
+  globalThis.setTimeout = ((callback: () => void) => timers.push(callback)) as unknown as typeof setTimeout
   const permission = { id: "request", sessionID: "session" } as PermissionRequest
   const sdk = {
     connection: { status },
@@ -30,6 +34,7 @@ test("disconnect invalidates permission lists still pending from the old connect
         },
         reply: async ({ requestID }: { requestID: string }) => {
           replied.push(requestID)
+          if (failReply) throw new Error("transient reply failure")
         },
       },
     },
@@ -55,7 +60,21 @@ test("disconnect invalidates permission lists still pending from the old connect
     requests[1]({ data: [permission] })
     await flush()
     expect(replied).toEqual([permission.id])
+    failReply = true
+    setStatus("reconnecting")
+    setStatus("connected")
+    await flush()
+    requests[2]({ data: [{ ...permission, id: "retry" }] })
+    await flush()
+    expect(timers).toHaveLength(1)
+    setStatus("reconnecting")
+    setStatus("connected")
+    await flush()
+    timers.shift()!()
+    await flush()
+    expect(replied).toEqual([permission.id, "retry"])
   } finally {
     dispose()
+    globalThis.setTimeout = originalTimeout
   }
 })
