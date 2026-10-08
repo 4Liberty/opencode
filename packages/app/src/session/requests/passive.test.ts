@@ -54,9 +54,15 @@ test("historical tabs do not hydrate attention", async () => {
   expect(input.state.hydrated).toEqual([])
 })
 
-test("directory-scoped loaded locations and running sessions hydrate attention", async () => {
+test("exact loaded locations and running sessions hydrate attention", async () => {
   const loaded = fixture()
   loaded.state.loaded = [{ directory: "c:/fixture/current" }]
+  await syncInactiveSession(loaded)
+  expect(loaded.state.hydrated).toEqual([])
+  loaded.state.loaded = [{ directory: "c:/fixture/current", workspaceID: "other" }]
+  await syncInactiveSession(loaded)
+  expect(loaded.state.hydrated).toEqual([])
+  loaded.state.loaded = [{ directory: "c:/fixture/current", workspaceID: "workspace" }]
   await syncInactiveSession(loaded)
   expect(loaded.state.hydrated).toEqual(["permission", "form"])
   const running = fixture()

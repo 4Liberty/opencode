@@ -26,9 +26,8 @@ function directory(value: string) {
 }
 
 function sameLocation(a: LocationRef, b: LocationRef) {
-  // LocationMiddleware.requestRef keys services by directory. The public
-  // inventory intentionally omits workspaceID; it is not a client workspace key.
-  return directory(a.directory) === directory(b.directory)
+  // Session endpoints resolve the full stored location, including workspaceID.
+  return directory(a.directory) === directory(b.directory) && a.workspaceID === b.workspaceID
 }
 
 export async function permissionLocations(input: { sdk: ServerSDK; data: Data; current: () => boolean }) {
