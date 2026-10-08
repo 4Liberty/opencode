@@ -144,17 +144,12 @@ function SessionTabEntry(props: {
     if (!ctx || !value || props.active || ctx.sdk.connection.status() !== "connected") return
 
     let disposed = false
-    let delay = 1000
     const current = () => !disposed && ctx.sdk.connection.status() === "connected"
     const sync = () => {
       if (!current()) return
-      void syncInactiveSession({ sdk: ctx.sdk, data: ctx.data, id: value.id, current }).catch(() => {
-        if (!current()) return
-        timer = window.setTimeout(sync, delay)
-        delay = Math.min(delay * 2, 10_000)
-      })
+      void syncInactiveSession({ sdk: ctx.sdk, data: ctx.data, id: value.id, current }).catch(() => undefined)
     }
-    let timer = window.setTimeout(sync, 300 + props.index * 50)
+    const timer = window.setTimeout(sync, 300 + props.index * 50)
     onCleanup(() => {
       disposed = true
       window.clearTimeout(timer)

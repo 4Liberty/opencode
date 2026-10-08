@@ -10,7 +10,7 @@ const loading = new WeakMap<ServerSDK, Promise<LocationRef[]>>()
 export function loadedLocations(sdk: ServerSDK) {
   const pending = loading.get(sdk)
   if (pending) return pending
-  const next = sdk.api.debug.location.list().finally(() => {
+  const next = sdk.api.location.list().finally(() => {
     if (loading.get(sdk) === next) loading.delete(sdk)
   })
   loading.set(sdk, next)
@@ -26,7 +26,9 @@ function directory(value: string) {
 }
 
 function sameLocation(a: LocationRef, b: LocationRef) {
-  return directory(a.directory) === directory(b.directory) && a.workspaceID === b.workspaceID
+  // LocationMiddleware.requestRef keys services by directory. The public
+  // inventory intentionally omits workspaceID; it is not a client workspace key.
+  return directory(a.directory) === directory(b.directory)
 }
 
 export async function permissionLocations(input: { sdk: ServerSDK; data: Data; current: () => boolean }) {
@@ -69,14 +71,15 @@ export async function syncInactiveSession(input: { sdk: ServerSDK; data: Data; i
   // acquire location services, which can start MCP servers and file watchers.
   await Promise.all([input.data.session.sync(input.id, { children: true }), input.data.session.pending.sync(input.id)])
   if (!input.current()) return
-  const locations = await loadedLocations(input.sdk)
-  if (!input.current()) return
   const session = input.data.session.get(input.id)
   if (!session) return
   const running = [input.id, ...input.data.session.family(input.id)].some(
     (id) => input.data.session.status(id) === "running",
   )
   const pending = input.data.session.pending.list(input.id).some((item) => item.type !== "synthetic")
-  if (!running && !pending && !locations.some((location) => sameLocation(location, session.location))) return
+  if (!running && !pending) {
+    const locations = await loadedLocations(input.sdk)
+    if (!input.current() || !locations.some((location) => sameLocation(location, session.location))) return
+  }
   await Promise.all([input.data.session.permission.sync(input.id), input.data.session.form.sync(input.id)])
 }

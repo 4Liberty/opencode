@@ -12,9 +12,9 @@ export type PairingCode = { code: string; expires_in: number }
 
 export type PairingSession = { token: string }
 
-export type LocationPublicInfo = { directory: string; project: { id: string; directory: string; canonical: string } }
-
 export type LocationPublicRef = { directory: string }
+
+export type LocationPublicInfo = { directory: string; project: { id: string; directory: string; canonical: string } }
 
 export type ModelRef = { id: string; providerID: string; variant?: string }
 
@@ -2782,6 +2782,8 @@ export type ServerPairOutput = PairingCode
 export type ServerConnectInput = { readonly code: { readonly code: string }["code"] }
 
 export type ServerConnectOutput = PairingSession
+
+export type LocationListOutput = Array<LocationPublicRef>
 
 export type LocationGetInput = {
   readonly location?: { readonly location?: { readonly directory?: string | undefined } | undefined }["location"]

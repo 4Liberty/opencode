@@ -61,6 +61,9 @@ export interface ServerApi<E = never> {
   readonly connect: ServerConnectOperation<E>
 }
 
+export type LocationListOutput = ReadonlyArray<Location.PublicRef>
+export type LocationListOperation<E = never> = () => Effect.Effect<LocationListOutput, E>
+
 export type LocationGetInput = { readonly location?: { readonly directory?: string | undefined } | undefined }
 export type LocationGetOutput = Location.PublicInfo
 export type LocationGetOperation<E = never> = (input?: LocationGetInput) => Effect.Effect<LocationGetOutput, E>
@@ -69,6 +72,7 @@ export type LocationReloadOutput = void
 export type LocationReloadOperation<E = never> = () => Effect.Effect<LocationReloadOutput, E>
 
 export interface LocationApi<E = never> {
+  readonly list: LocationListOperation<E>
   readonly get: LocationGetOperation<E>
   readonly reload: LocationReloadOperation<E>
 }

@@ -22,7 +22,7 @@ test("disconnect invalidates permission lists still pending from the old connect
     connection: { status },
     event: { on: () => () => {} },
     api: {
-      debug: { location: { list: async () => [{ directory: "/fixture/loaded" }] } },
+      location: { list: async () => [{ directory: "/fixture/loaded" }] },
       session: { active: async () => ({}) },
       permission: {
         request: {
