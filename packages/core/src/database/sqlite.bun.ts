@@ -93,7 +93,7 @@ const nativeLayer = (config: Config) =>
       if (config.disableWAL !== true) native.run("PRAGMA journal_mode = WAL;")
       if (config.readonly !== true) {
         native.run("PRAGMA synchronous = NORMAL;")
-        native.run("PRAGMA busy_timeout = 10000;")
+        native.run("PRAGMA busy_timeout = 30000;")
       }
       return native
     }),

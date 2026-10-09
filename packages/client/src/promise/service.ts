@@ -57,7 +57,7 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
           info: registration.info,
           count: timeouts !== undefined && same(timeouts.info, registration.info) ? timeouts.count + 1 : 1,
         }
-        if (timeouts.count >= 3) {
+        if (timeouts.count >= 10) {
           announce("missing")
           console.warn("Background service is unresponsive; recovery cannot preserve persistent terminals")
           await PtyHandoff.clear(options.file ?? fallback())

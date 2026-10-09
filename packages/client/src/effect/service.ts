@@ -77,7 +77,7 @@ export const ensure = Effect.fn("service.ensure")(function* (options: EnsureOpti
         info,
         count: timeouts !== undefined && same(timeouts.info, info) ? timeouts.count + 1 : 1,
       }
-      if (timeouts.count >= 3) {
+      if (timeouts.count >= 10) {
         yield* announce("missing")
         yield* Effect.logWarning("Background service is unresponsive; recovery cannot preserve persistent terminals")
         yield* Effect.tryPromise(() => PtyHandoff.clear(options.file ?? fallback()))
