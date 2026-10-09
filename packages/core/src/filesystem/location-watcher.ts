@@ -19,6 +19,12 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Lo
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
+    if (
+      process.env.OPENCODE_DISABLE_FILEWATCHER === "1" ||
+      process.env.OPENCODE_DISABLE_FILEWATCHER === "true"
+    ) {
+      return Service.of({})
+    }
     const location = yield* Location.Service
     const watcher = yield* Watcher.Service
     const bus = yield* Bus.Service

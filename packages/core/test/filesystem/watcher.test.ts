@@ -221,6 +221,28 @@ describe("Watcher lifecycle", () => {
       expect(counts.unsubscribes).toBe(1)
     })
   })
+
+  it.effect("disables watcher subscriptions when OPENCODE_DISABLE_FILEWATCHER is set", () => {
+    const { native, counts } = countingNative()
+    const orig = process.env.OPENCODE_DISABLE_FILEWATCHER
+    process.env.OPENCODE_DISABLE_FILEWATCHER = "1"
+    return Effect.gen(function* () {
+      const watcher = yield* Watcher.Service
+      const updates = yield* watcher.subscribe({ path: "/active", type: "directory" })
+      const collected = yield* Stream.runCollect(updates)
+      expect(Array.from(collected).length).toBe(0)
+      expect(counts.subscribes).toBe(0)
+    })
+      .pipe(withNative(native))
+      .pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (orig !== undefined) process.env.OPENCODE_DISABLE_FILEWATCHER = orig
+            else delete process.env.OPENCODE_DISABLE_FILEWATCHER
+          }),
+        ),
+      )
+  })
 })
 
 function provide(

@@ -85,7 +85,11 @@ export const layer = (options?: Options) =>
   Layer.effect(
     Service,
     Effect.gen(function* () {
-      if (options?.enabled === false) {
+      if (
+        options?.enabled === false ||
+        process.env.OPENCODE_DISABLE_FILEWATCHER === "1" ||
+        process.env.OPENCODE_DISABLE_FILEWATCHER === "true"
+      ) {
         return Service.of({ subscribe: () => Effect.succeed(Stream.empty) })
       }
       const native = yield* Native
@@ -205,6 +209,12 @@ export const nativeLayer = Layer.succeed(
   Native,
   Native.of({
     subscribe: (input) => {
+      if (
+        process.env.OPENCODE_DISABLE_FILEWATCHER === "1" ||
+        process.env.OPENCODE_DISABLE_FILEWATCHER === "true"
+      ) {
+        return Effect.succeed({ unsubscribe: () => Promise.resolve(), backend: "disabled" })
+      }
       if (input.type === "file" || input.type === "entries") {
         return Effect.sync(() => {
           const directory = input.type === "file" ? path.dirname(input.target) : input.target
